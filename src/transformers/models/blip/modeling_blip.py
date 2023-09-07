@@ -741,7 +741,7 @@ class BlipModel(BlipPreTrainedModel):
         self.text_embed_dim = text_config.hidden_size
         self.vision_embed_dim = vision_config.hidden_size
 
-        self.text_model = BlipTextModel(text_config)
+        self.text_encoder = BlipTextModel(text_config)
         self.vision_model = BlipVisionModel(vision_config)
 
         self.visual_projection = nn.Linear(self.vision_embed_dim, self.projection_dim, bias=False)
@@ -777,7 +777,7 @@ class BlipModel(BlipPreTrainedModel):
         ```"""
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        text_outputs = self.text_model(
+        text_outputs = self.text_encoder(
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -877,7 +877,7 @@ class BlipModel(BlipPreTrainedModel):
             return_dict=return_dict,
         )
 
-        text_outputs = self.text_model(
+        text_outputs = self.text_encoder(
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -1242,7 +1242,7 @@ class BlipForQuestionAnswering(BlipPreTrainedModel):
                 outputs = (decoder_loss, image_embeds, vision_outputs[0]) + vision_outputs[2:]
                 return tuple(output for output in outputs if output is not None)
 
-            print('loss:', decoder_loss)
+            # print('loss:', decoder_loss)
 
             return BlipTextVisionModelOutput(
                 loss=decoder_loss,
@@ -1599,7 +1599,7 @@ class BlipForVD(BlipPreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         labels: Optional[torch.LongTensor] = None,
-        answer_option_num: Optional[torch.Tensor] = 4,
+        answer_option_num: Optional[torch.Tensor] = 100,
         return_dict: Optional[bool] = None,
         return_loss: Optional[bool] = None,
         answer_option_input_ids: Optional[torch.LongTensor] = None,
@@ -1671,7 +1671,7 @@ class BlipForVD(BlipPreTrainedModel):
                 outputs = (decoder_loss, image_embeds, vision_outputs[0]) + vision_outputs[2:]
                 return tuple(output for output in outputs if output is not None)
 
-            print('loss:', decoder_loss)
+            # print('loss:', decoder_loss)
 
             return BlipTextVisionModelOutput(
                 loss=decoder_loss,
@@ -1863,7 +1863,7 @@ class BlipForVG(BlipPreTrainedModel):
 
             loss_bbox, loss_giou = self.get_bbox_loss(output_coord, target_bbox)
             loss = loss_bbox + loss_giou
-            print('loss:', loss)
+            # print('loss:', loss)
  
             return loss,output_coord
         

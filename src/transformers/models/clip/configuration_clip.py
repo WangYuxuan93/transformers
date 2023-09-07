@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 from ...configuration_utils import PretrainedConfig
 from ...onnx import OnnxConfig
 from ...utils import logging
+from transformers import BertConfig
 
 
 logger = logging.get_logger(__name__)
@@ -456,3 +457,166 @@ class CLIPOnnxConfig(OnnxConfig):
     @property
     def default_onnx_opset(self) -> int:
         return 14
+
+class CLIPV2Config(PretrainedConfig):
+    r"""
+    [`CLIPConfig`] is the configuration class to store the configuration of a [`CLIPModel`]. It is used to instantiate
+    a CLIP model according to the specified arguments, defining the text model and vision model configs. Instantiating
+    a configuration with the defaults will yield a similar configuration to that of the CLIP
+    [openai/clip-vit-base-patch32](https://huggingface.co/openai/clip-vit-base-patch32) architecture.
+
+    Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PretrainedConfig`] for more information.
+
+    Args:
+        text_config (`dict`, *optional*):
+            Dictionary of configuration options used to initialize [`CLIPTextConfig`].
+        vision_config (`dict`, *optional*):
+            Dictionary of configuration options used to initialize [`CLIPVisionConfig`].
+        projection_dim (`int`, *optional*, defaults to 512):
+            Dimentionality of text and vision projection layers.
+        logit_scale_init_value (`float`, *optional*, defaults to 2.6592):
+            The inital value of the *logit_scale* paramter. Default is used as per the original CLIP implementation.
+        kwargs (*optional*):
+            Dictionary of keyword arguments.
+
+    Example:
+
+    ```python
+    >>> from transformers import CLIPConfig, CLIPModel
+
+    >>> # Initializing a CLIPConfig with openai/clip-vit-base-patch32 style configuration
+    >>> configuration = CLIPConfig()
+
+    >>> # Initializing a CLIPModel (with random weights) from the openai/clip-vit-base-patch32 style configuration
+    >>> model = CLIPModel(configuration)
+
+    >>> # Accessing the model configuration
+    >>> configuration = model.config
+
+    >>> # We can also initialize a CLIPConfig from a CLIPTextConfig and a CLIPVisionConfig
+    >>> from transformers import CLIPTextConfig, CLIPVisionConfig
+
+    >>> # Initializing a CLIPText and CLIPVision configuration
+    >>> config_text = CLIPTextConfig()
+    >>> config_vision = CLIPVisionConfig()
+
+    >>> config = CLIPConfig.from_text_vision_configs(config_text, config_vision)
+    ```"""
+
+    model_type = "clip"
+    is_composition = True
+
+    def __init__(
+        self, text_config=None, vision_config=None, projection_dim=512, logit_scale_init_value=2.6592, **kwargs
+    ):
+        # If `_config_dict` exist, we use them for the backward compatibility.
+        # We pop out these 2 attributes before calling `super().__init__` to avoid them being saved (which causes a lot
+        # of confusion!).
+        text_config_dict = kwargs.pop("text_config_dict", None)
+        vision_config_dict = kwargs.pop("vision_config_dict", None)
+
+        super().__init__(**kwargs)
+
+        # Instead of simply assigning `[text|vision]_config_dict` to `[text|vision]_config`, we use the values in
+        # `[text|vision]_config_dict` to update the values in `[text|vision]_config`. The values should be same in most
+        # cases, but we don't want to break anything regarding `_config_dict` that existed before commit `8827e1b2`.
+        if text_config_dict is not None:
+            if text_config is None:
+                text_config = {}
+
+            # This is the complete result when using `text_config_dict`.
+            _text_config_dict = CLIPTextConfig(**text_config_dict).to_dict()
+
+            # Give a warning if the values exist in both `_text_config_dict` and `text_config` but being different.
+            for key, value in _text_config_dict.items():
+                if key in text_config and value != text_config[key] and key not in ["transformers_version"]:
+                    # If specified in `text_config_dict`
+                    if key in text_config_dict:
+                        message = (
+                            f"`{key}` is found in both `text_config_dict` and `text_config` but with different values. "
+                            f'The value `text_config_dict["{key}"]` will be used instead.'
+                        )
+                    # If inferred from default argument values (just to be super careful)
+                    else:
+                        message = (
+                            f"`text_config_dict` is provided which will be used to initialize `CLIPTextConfig`. The "
+                            f'value `text_config["{key}"]` will be overriden.'
+                        )
+                    logger.warning(message)
+
+            # Update all values in `text_config` with the ones in `_text_config_dict`.
+            text_config.update(_text_config_dict)
+
+        if vision_config_dict is not None:
+            if vision_config is None:
+                vision_config = {}
+
+            # This is the complete result when using `vision_config_dict`.
+            _vision_config_dict = CLIPVisionConfig(**vision_config_dict).to_dict()
+            # convert keys to string instead of integer
+            if "id2label" in _vision_config_dict:
+                _vision_config_dict["id2label"] = {
+                    str(key): value for key, value in _vision_config_dict["id2label"].items()
+                }
+
+            # Give a warning if the values exist in both `_vision_config_dict` and `vision_config` but being different.
+            for key, value in _vision_config_dict.items():
+                if key in vision_config and value != vision_config[key] and key not in ["transformers_version"]:
+                    # If specified in `vision_config_dict`
+                    if key in vision_config_dict:
+                        message = (
+                            f"`{key}` is found in both `vision_config_dict` and `vision_config` but with different "
+                            f'values. The value `vision_config_dict["{key}"]` will be used instead.'
+                        )
+                    # If inferred from default argument values (just to be super careful)
+                    else:
+                        message = (
+                            f"`vision_config_dict` is provided which will be used to initialize `CLIPVisionConfig`. "
+                            f'The value `vision_config["{key}"]` will be overriden.'
+                        )
+                    logger.warning(message)
+
+            # Update all values in `vision_config` with the ones in `_vision_config_dict`.
+            vision_config.update(_vision_config_dict)
+
+        if text_config is None:
+            text_config = {}
+            logger.info("`text_config` is `None`. Initializing the `CLIPTextConfig` with default values.")
+
+        if vision_config is None:
+            vision_config = {}
+            logger.info("`vision_config` is `None`. initializing the `CLIPVisionConfig` with default values.")
+
+        #self.text_config = CLIPTextConfig(**text_config)
+        self.text_config = BertConfig(**text_config)
+        self.vision_config = CLIPVisionConfig(**vision_config)
+
+        self.projection_dim = projection_dim
+        self.logit_scale_init_value = logit_scale_init_value
+        self.initializer_factor = 1.0
+
+    @classmethod
+    def from_text_vision_configs(cls, text_config: CLIPTextConfig, vision_config: CLIPVisionConfig, **kwargs):
+        r"""
+        Instantiate a [`CLIPConfig`] (or a derived class) from clip text model configuration and clip vision model
+        configuration.
+
+        Returns:
+            [`CLIPConfig`]: An instance of a configuration object
+        """
+
+        return cls(text_config=text_config.to_dict(), vision_config=vision_config.to_dict(), **kwargs)
+
+    def to_dict(self):
+        """
+        Serializes this instance to a Python dictionary. Override the default [`~PretrainedConfig.to_dict`].
+
+        Returns:
+            `Dict[str, any]`: Dictionary of all the attributes that make up this configuration instance,
+        """
+        output = copy.deepcopy(self.__dict__)
+        output["text_config"] = self.text_config.to_dict()
+        output["vision_config"] = self.vision_config.to_dict()
+        output["model_type"] = self.__class__.model_type
+        return output

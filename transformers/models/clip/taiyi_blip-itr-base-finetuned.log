@@ -1,364 +1,0 @@
-05/07/2023 22:48:23 - WARNING - __main__ - Process rank: 0, device: cuda:0, n_gpu: 1distributed training: True, 16-bits training: False
-05/07/2023 22:48:23 - INFO - __main__ - Training/evaluation parameters TrainingArguments(
-_n_gpu=1,
-adafactor=False,
-adam_beta1=0.9,
-adam_beta2=0.999,
-adam_epsilon=1e-08,
-auto_find_batch_size=False,
-bf16=False,
-bf16_full_eval=False,
-data_seed=None,
-dataloader_drop_last=False,
-dataloader_num_workers=0,
-dataloader_pin_memory=True,
-ddp_backend=None,
-ddp_broadcast_buffers=None,
-ddp_bucket_cap_mb=None,
-ddp_find_unused_parameters=None,
-ddp_timeout=1800,
-debug=[],
-deepspeed=None,
-disable_tqdm=False,
-do_eval=True,
-do_predict=True,
-do_train=True,
-eval_accumulation_steps=None,
-eval_delay=0,
-eval_steps=71.0,
-evaluation_strategy=no,
-fp16=False,
-fp16_backend=auto,
-fp16_full_eval=False,
-fp16_opt_level=O1,
-fsdp=[],
-fsdp_config={'fsdp_min_num_params': 0, 'xla': False, 'xla_fsdp_grad_ckpt': False},
-fsdp_min_num_params=0,
-fsdp_transformer_layer_cls_to_wrap=None,
-full_determinism=False,
-gradient_accumulation_steps=32,
-gradient_checkpointing=False,
-greater_is_better=None,
-group_by_length=False,
-half_precision_backend=auto,
-hub_model_id=None,
-hub_private_repo=False,
-hub_strategy=every_save,
-hub_token=<HUB_TOKEN>,
-ignore_data_skip=False,
-include_inputs_for_metrics=False,
-jit_mode_eval=False,
-label_names=None,
-label_smoothing_factor=0.0,
-learning_rate=1e-05,
-length_column_name=length,
-load_best_model_at_end=False,
-local_rank=0,
-log_level=passive,
-log_level_replica=warning,
-log_on_each_node=True,
-logging_dir=/work/experiments/transformers/saves/taiyi_blip-itr-base-finetuned/runs/May07_22-48-23_terminal-rn-raqixsnb-0-dkjqskcp-6f56566d4d-ctwpb,
-logging_first_step=False,
-logging_nan_inf_filter=True,
-logging_steps=71,
-logging_strategy=steps,
-lr_scheduler_type=cosine,
-max_grad_norm=1.0,
-max_steps=-1,
-metric_for_best_model=None,
-mp_parameters=,
-no_cuda=False,
-num_train_epochs=6.0,
-optim=adamw_hf,
-optim_args=None,
-output_dir=/work/experiments/transformers/saves/taiyi_blip-itr-base-finetuned,
-overwrite_output_dir=False,
-past_index=-1,
-per_device_eval_batch_size=8,
-per_device_train_batch_size=8,
-prediction_loss_only=False,
-push_to_hub=True,
-push_to_hub_model_id=None,
-push_to_hub_organization=None,
-push_to_hub_token=<PUSH_TO_HUB_TOKEN>,
-ray_scope=last,
-remove_unused_columns=False,
-report_to=[],
-resume_from_checkpoint=None,
-run_name=/work/experiments/transformers/saves/taiyi_blip-itr-base-finetuned,
-save_on_each_node=False,
-save_safetensors=False,
-save_steps=71,
-save_strategy=steps,
-save_total_limit=None,
-seed=42,
-sharded_ddp=[],
-skip_memory_metrics=True,
-tf32=None,
-torch_compile=False,
-torch_compile_backend=None,
-torch_compile_mode=None,
-torchdynamo=None,
-tpu_metrics_debug=False,
-tpu_num_cores=None,
-use_ipex=False,
-use_legacy_prediction_loop=False,
-use_mps_device=False,
-warmup_ratio=0.0,
-warmup_steps=0,
-weight_decay=0.05,
-xpu_backend=None,
-)
-05/07/2023 22:48:23 - INFO - __main__ - Checkpoint detected, resuming training at /work/experiments/transformers/saves/taiyi_blip-itr-base-finetuned/checkpoint-284. To avoid this behavior, change the `--output_dir` or add `--overwrite_output_dir` to train from scratch.
-05/07/2023 22:48:34 - WARNING - datasets.builder - Found cached dataset json (/tmp/json/default-f8c682c852f4c0da/0.0.0/8bb11242116d547c741b2e8a1f18598ffdd40a1d4f2a2872c7a28b697434bc96)
-  0%|          | 0/3 [00:00<?, ?it/s]100%|██████████| 3/3 [00:00<00:00, 652.07it/s]
-[INFO|tokenization_utils_base.py:1842] 2023-05-07 22:48:34,062 >> loading file vocab.txt
-[INFO|tokenization_utils_base.py:1842] 2023-05-07 22:48:34,062 >> loading file tokenizer.json
-[INFO|tokenization_utils_base.py:1842] 2023-05-07 22:48:34,062 >> loading file added_tokens.json
-[INFO|tokenization_utils_base.py:1842] 2023-05-07 22:48:34,062 >> loading file special_tokens_map.json
-[INFO|tokenization_utils_base.py:1842] 2023-05-07 22:48:34,062 >> loading file tokenizer_config.json
-[INFO|image_processing_utils.py:337] 2023-05-07 22:48:34,073 >> loading configuration file /work/models/Taiyi-BLIP-full-Chinese/preprocessor_config.json
-[INFO|image_processing_utils.py:389] 2023-05-07 22:48:34,078 >> Image processor BlipImageProcessor {
-  "do_convert_rgb": true,
-  "do_normalize": true,
-  "do_pad": true,
-  "do_rescale": true,
-  "do_resize": true,
-  "image_mean": [
-    0.48145466,
-    0.4578275,
-    0.40821073
-  ],
-  "image_processor_type": "BlipImageProcessor",
-  "image_std": [
-    0.26862954,
-    0.26130258,
-    0.27577711
-  ],
-  "processor_class": "BlipProcessor",
-  "resample": 3,
-  "rescale_factor": 0.00392156862745098,
-  "size": {
-    "height": 384,
-    "width": 384
-  },
-  "size_divisor": 32
-}
-
-[INFO|configuration_utils.py:710] 2023-05-07 22:48:34,078 >> loading configuration file /work/models/Taiyi-BLIP-full-Chinese/config.json
-[INFO|configuration_utils.py:768] 2023-05-07 22:48:34,079 >> Model config BlipConfig {
-  "_commit_hash": null,
-  "_name_or_path": "/work/models/Taiyi-BLIP-750M-Chinese",
-  "architectures": [
-    "BlipForQuestionAnswering"
-  ],
-  "image_text_hidden_size": 256,
-  "initializer_factor": 1.0,
-  "initializer_range": 0.02,
-  "logit_scale_init_value": 0.07,
-  "model_type": "blip",
-  "projection_dim": 512,
-  "text_config": {
-    "_name_or_path": "",
-    "add_cross_attention": false,
-    "architectures": null,
-    "attention_probs_dropout_prob": 0.0,
-    "bad_words_ids": null,
-    "begin_suppress_tokens": null,
-    "bos_token_id": 21128,
-    "chunk_size_feed_forward": 0,
-    "cross_attention_hidden_size": null,
-    "decoder_start_token_id": null,
-    "diversity_penalty": 0.0,
-    "do_sample": false,
-    "early_stopping": false,
-    "encoder_hidden_size": 1024,
-    "encoder_no_repeat_ngram_size": 0,
-    "eos_token_id": 102,
-    "exponential_decay_length_penalty": null,
-    "finetuning_task": null,
-    "forced_bos_token_id": null,
-    "forced_eos_token_id": null,
-    "hidden_act": "gelu",
-    "hidden_dropout_prob": 0.0,
-    "hidden_size": 1024,
-    "id2label": {
-      "0": "LABEL_0",
-      "1": "LABEL_1"
-    },
-    "initializer_factor": 1.0,
-    "initializer_range": 0.02,
-    "intermediate_size": 4096,
-    "is_decoder": true,
-    "is_encoder_decoder": false,
-    "label2id": {
-      "LABEL_0": 0,
-      "LABEL_1": 1
-    },
-    "layer_norm_eps": 1e-12,
-    "length_penalty": 1.0,
-    "max_length": 20,
-    "max_position_embeddings": 512,
-    "min_length": 0,
-    "model_type": "blip_text_model",
-    "no_repeat_ngram_size": 0,
-    "num_attention_heads": 16,
-    "num_beam_groups": 1,
-    "num_beams": 1,
-    "num_hidden_layers": 24,
-    "num_return_sequences": 1,
-    "output_attentions": false,
-    "output_hidden_states": false,
-    "output_scores": false,
-    "pad_token_id": 0,
-    "prefix": null,
-    "problem_type": null,
-    "projection_dim": 768,
-    "pruned_heads": {},
-    "remove_invalid_values": false,
-    "repetition_penalty": 1.0,
-    "return_dict": true,
-    "return_dict_in_generate": false,
-    "sep_token_id": 102,
-    "suppress_tokens": null,
-    "task_specific_params": null,
-    "temperature": 1.0,
-    "tf_legacy_loss": false,
-    "tie_encoder_decoder": false,
-    "tie_word_embeddings": true,
-    "tokenizer_class": null,
-    "top_k": 50,
-    "top_p": 1.0,
-    "torch_dtype": null,
-    "torchscript": false,
-    "transformers_version": "4.31.0.dev0",
-    "typical_p": 1.0,
-    "use_bfloat16": false,
-    "use_cache": true,
-    "vocab_size": 21130
-  },
-  "torch_dtype": "float32",
-  "transformers_version": null,
-  "vision_config": {
-    "_name_or_path": "",
-    "add_cross_attention": false,
-    "architectures": null,
-    "attention_dropout": 0.0,
-    "bad_words_ids": null,
-    "begin_suppress_tokens": null,
-    "bos_token_id": null,
-    "chunk_size_feed_forward": 0,
-    "cross_attention_hidden_size": null,
-    "decoder_start_token_id": null,
-    "diversity_penalty": 0.0,
-    "do_sample": false,
-    "dropout": 0.0,
-    "early_stopping": false,
-    "encoder_no_repeat_ngram_size": 0,
-    "eos_token_id": null,
-    "exponential_decay_length_penalty": null,
-    "finetuning_task": null,
-    "forced_bos_token_id": null,
-    "forced_eos_token_id": null,
-    "hidden_act": "gelu",
-    "hidden_size": 1024,
-    "id2label": {
-      "0": "LABEL_0",
-      "1": "LABEL_1"
-    },
-    "image_size": 384,
-    "initializer_factor": 1.0,
-    "initializer_range": 0.02,
-    "intermediate_size": 4096,
-    "is_decoder": false,
-    "is_encoder_decoder": false,
-    "label2id": {
-      "LABEL_0": 0,
-      "LABEL_1": 1
-    },
-    "layer_norm_eps": 1e-05,
-    "length_penalty": 1.0,
-    "max_length": 20,
-    "min_length": 0,
-    "model_type": "blip_vision_model",
-    "no_repeat_ngram_size": 0,
-    "num_attention_heads": 16,
-    "num_beam_groups": 1,
-    "num_beams": 1,
-    "num_channels": 3,
-    "num_hidden_layers": 24,
-    "num_return_sequences": 1,
-    "output_attentions": false,
-    "output_hidden_states": false,
-    "output_scores": false,
-    "pad_token_id": null,
-    "patch_size": 16,
-    "prefix": null,
-    "problem_type": null,
-    "projection_dim": 512,
-    "pruned_heads": {},
-    "remove_invalid_values": false,
-    "repetition_penalty": 1.0,
-    "return_dict": true,
-    "return_dict_in_generate": false,
-    "sep_token_id": null,
-    "suppress_tokens": null,
-    "task_specific_params": null,
-    "temperature": 1.0,
-    "tf_legacy_loss": false,
-    "tie_encoder_decoder": false,
-    "tie_word_embeddings": true,
-    "tokenizer_class": null,
-    "top_k": 50,
-    "top_p": 1.0,
-    "torch_dtype": null,
-    "torchscript": false,
-    "transformers_version": "4.31.0.dev0",
-    "typical_p": 1.0,
-    "use_bfloat16": false
-  }
-}
-
-[INFO|modeling_utils.py:2601] 2023-05-07 22:48:34,080 >> loading weights file /work/models/Taiyi-BLIP-full-Chinese/pytorch_model.bin
-[INFO|modeling_utils.py:3317] 2023-05-07 22:48:50,940 >> Some weights of the model checkpoint at /work/models/Taiyi-BLIP-full-Chinese were not used when initializing BlipModel: ['text_decoder.bert.encoder.layer.17.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.8.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.8.attention.self.key.weight', 'text_decoder.bert.encoder.layer.2.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.22.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.20.attention.self.value.bias', 'text_decoder.bert.encoder.layer.14.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.8.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.7.attention.self.value.bias', 'text_decoder.bert.encoder.layer.6.output.dense.weight', 'text_decoder.bert.encoder.layer.0.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.19.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.8.attention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.14.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.9.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.19.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.17.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.0.output.dense.bias', 'text_decoder.bert.encoder.layer.6.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.13.output.dense.bias', 'text_decoder.bert.encoder.layer.10.attention.output.LayerNorm.bias', 'text_decoder.cls.predictions.decoder.weight', 'text_decoder.bert.encoder.layer.1.attention.self.key.bias', 'text_decoder.bert.encoder.layer.5.output.dense.bias', 'text_decoder.bert.encoder.layer.23.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.18.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.10.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.23.attention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.2.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.10.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.2.attention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.8.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.0.intermediate.dense.weight', 'text_decoder.bert.encoder.layer.0.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.21.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.8.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.12.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.17.attention.self.value.bias', 'text_decoder.bert.encoder.layer.22.output.dense.bias', 'text_decoder.bert.encoder.layer.23.attention.self.key.bias', 'text_decoder.bert.encoder.layer.8.attention.self.key.bias', 'text_decoder.bert.encoder.layer.12.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.19.attention.self.query.bias', 'text_decoder.bert.encoder.layer.18.attention.self.query.bias', 'text_decoder.bert.encoder.layer.16.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.9.output.dense.bias', 'text_decoder.bert.encoder.layer.7.attention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.20.attention.self.key.bias', 'text_decoder.bert.encoder.layer.23.attention.self.query.bias', 'text_decoder.bert.encoder.layer.6.attention.self.value.bias', 'text_decoder.bert.encoder.layer.17.attention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.0.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.21.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.1.attention.self.query.bias', 'text_decoder.bert.encoder.layer.11.output.dense.bias', 'text_decoder.bert.encoder.layer.7.attention.self.value.weight', 'text_decoder.bert.encoder.layer.5.attention.self.value.weight', 'text_decoder.bert.encoder.layer.16.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.19.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.12.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.18.attention.self.key.bias', 'text_decoder.bert.encoder.layer.13.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.10.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.23.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.2.intermediate.dense.weight', 'text_decoder.bert.encoder.layer.17.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.9.attention.self.query.weight', 'text_decoder.bert.encoder.layer.22.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.19.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.19.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.20.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.2.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.22.intermediate.dense.weight', 'text_decoder.bert.encoder.layer.4.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.0.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.9.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.17.intermediate.dense.weight', 'text_decoder.cls.predictions.transform.LayerNorm.weight', 'text_decoder.bert.encoder.layer.13.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.17.attention.self.key.bias', 'text_decoder.bert.encoder.layer.15.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.3.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.20.intermediate.dense.weight', 'text_decoder.bert.encoder.layer.11.attention.self.query.bias', 'text_decoder.bert.encoder.layer.21.attention.self.query.bias', 'text_decoder.bert.encoder.layer.11.attention.self.value.weight', 'text_decoder.bert.encoder.layer.12.output.dense.bias', 'text_decoder.bert.encoder.layer.19.attention.self.key.weight', 'text_decoder.bert.encoder.layer.5.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.6.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.10.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.1.attention.self.value.weight', 'text_decoder.bert.encoder.layer.14.attention.self.query.weight', 'text_decoder.bert.encoder.layer.23.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.20.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.11.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.14.attention.self.value.weight', 'text_decoder.bert.encoder.layer.6.attention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.19.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.3.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.11.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.13.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.11.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.7.attention.self.key.bias', 'text_decoder.bert.embeddings.position_embeddings.weight', 'text_decoder.bert.encoder.layer.0.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.3.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.8.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.11.output.dense.weight', 'text_decoder.bert.encoder.layer.8.attention.self.query.weight', 'text_decoder.bert.encoder.layer.10.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.9.attention.self.key.bias', 'text_decoder.bert.encoder.layer.15.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.21.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.3.attention.self.query.weight', 'text_decoder.bert.encoder.layer.1.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.13.attention.self.query.bias', 'text_decoder.bert.encoder.layer.0.attention.self.query.weight', 'text_decoder.bert.encoder.layer.8.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.9.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.7.attention.self.query.weight', 'text_decoder.bert.encoder.layer.7.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.7.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.21.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.10.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.0.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.1.attention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.5.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.5.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.15.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.20.output.dense.weight', 'text_decoder.bert.encoder.layer.2.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.7.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.10.attention.self.query.weight', 'text_decoder.bert.encoder.layer.3.attention.self.value.weight', 'text_decoder.bert.encoder.layer.2.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.17.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.15.crossattention.self.query.weight', 'text_decoder.bert.embeddings.LayerNorm.weight', 'text_decoder.bert.encoder.layer.15.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.6.attention.self.value.weight', 'text_decoder.bert.encoder.layer.21.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.22.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.14.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.23.attention.self.value.bias', 'text_decoder.bert.encoder.layer.14.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.23.output.dense.bias', 'text_decoder.bert.encoder.layer.5.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.14.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.9.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.17.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.8.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.12.attention.self.value.bias', 'text_decoder.bert.encoder.layer.21.attention.self.value.weight', 'text_decoder.bert.encoder.layer.23.attention.self.value.weight', 'text_decoder.bert.encoder.layer.20.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.12.intermediate.dense.weight', 'text_decoder.bert.encoder.layer.4.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.18.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.20.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.4.output.dense.bias', 'text_decoder.bert.encoder.layer.1.attention.self.query.weight', 'text_decoder.bert.encoder.layer.14.attention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.23.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.2.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.16.intermediate.dense.weight', 'text_decoder.bert.encoder.layer.10.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.12.attention.self.key.bias', 'text_decoder.bert.encoder.layer.1.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.3.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.9.attention.self.value.bias', 'text_decoder.bert.encoder.layer.9.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.13.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.5.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.2.output.dense.bias', 'text_decoder.bert.encoder.layer.14.attention.self.query.bias', 'text_decoder.bert.encoder.layer.16.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.4.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.18.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.15.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.4.attention.self.key.weight', 'text_decoder.bert.encoder.layer.22.attention.self.key.bias', 'text_decoder.bert.encoder.layer.11.attention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.20.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.0.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.23.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.3.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.11.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.3.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.17.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.22.attention.self.query.weight', 'text_decoder.bert.encoder.layer.2.attention.self.value.bias', 'text_decoder.bert.encoder.layer.7.attention.self.key.weight', 'text_decoder.bert.encoder.layer.7.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.5.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.21.output.dense.weight', 'text_decoder.bert.encoder.layer.6.attention.self.key.weight', 'text_decoder.bert.encoder.layer.9.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.17.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.16.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.23.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.18.attention.self.value.bias', 'text_decoder.bert.encoder.layer.11.intermediate.dense.weight', 'text_decoder.bert.encoder.layer.3.attention.self.query.bias', 'text_decoder.bert.encoder.layer.21.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.4.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.19.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.12.output.dense.weight', 'text_decoder.bert.encoder.layer.16.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.3.intermediate.dense.weight', 'text_decoder.bert.encoder.layer.6.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.5.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.13.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.13.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.11.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.15.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.7.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.10.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.18.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.10.intermediate.dense.weight', 'text_decoder.bert.encoder.layer.11.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.8.output.dense.weight', 'text_decoder.bert.encoder.layer.10.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.22.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.16.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.18.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.5.attention.self.value.bias', 'text_decoder.bert.encoder.layer.21.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.19.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.22.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.22.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.16.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.19.attention.self.value.weight', 'text_decoder.bert.encoder.layer.6.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.6.attention.self.key.bias', 'text_decoder.bert.encoder.layer.6.output.dense.bias', 'text_decoder.bert.encoder.layer.18.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.14.intermediate.dense.weight', 'text_decoder.bert.encoder.layer.4.attention.self.query.bias', 'text_decoder.bert.encoder.layer.21.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.10.attention.self.query.bias', 'text_decoder.bert.encoder.layer.10.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.16.attention.self.query.bias', 'text_decoder.bert.encoder.layer.22.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.6.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.17.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.13.intermediate.dense.weight', 'text_decoder.bert.encoder.layer.5.attention.self.query.weight', 'text_decoder.bert.encoder.layer.4.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.13.attention.self.key.bias', 'text_decoder.bert.encoder.layer.22.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.2.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.21.intermediate.dense.weight', 'text_decoder.cls.predictions.transform.dense.bias', 'text_decoder.bert.encoder.layer.6.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.9.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.23.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.5.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.13.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.21.output.dense.bias', 'text_decoder.bert.encoder.layer.15.output.dense.bias', 'text_decoder.bert.encoder.layer.18.output.dense.bias', 'text_decoder.bert.encoder.layer.1.output.dense.weight', 'text_decoder.bert.encoder.layer.12.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.8.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.4.attention.self.key.bias', 'text_decoder.bert.encoder.layer.15.attention.self.key.weight', 'text_decoder.bert.encoder.layer.23.attention.self.query.weight', 'text_decoder.bert.encoder.layer.1.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.1.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.23.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.5.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.7.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.11.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.9.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.3.output.dense.weight', 'text_decoder.bert.encoder.layer.16.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.15.attention.self.value.weight', 'text_decoder.bert.encoder.layer.10.attention.self.value.bias', 'text_decoder.bert.encoder.layer.20.attention.self.value.weight', 'text_decoder.bert.encoder.layer.19.attention.self.query.weight', 'text_decoder.bert.encoder.layer.19.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.7.output.dense.bias', 'text_decoder.cls.predictions.bias', 'text_decoder.bert.encoder.layer.7.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.23.output.dense.weight', 'text_decoder.bert.encoder.layer.13.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.11.attention.self.key.weight', 'text_decoder.bert.encoder.layer.5.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.21.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.1.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.1.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.22.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.8.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.21.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.14.output.dense.weight', 'text_decoder.bert.encoder.layer.1.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.14.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.21.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.14.crossattention.output.dense.weight', 'text_decoder.bert.embeddings.LayerNorm.bias', 'text_decoder.bert.encoder.layer.1.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.22.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.5.attention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.0.attention.self.key.bias', 'text_decoder.bert.encoder.layer.11.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.16.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.6.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.15.attention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.17.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.16.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.20.attention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.17.output.dense.bias', 'text_decoder.bert.encoder.layer.19.attention.self.key.bias', 'text_decoder.bert.encoder.layer.16.attention.self.key.bias', 'text_decoder.bert.encoder.layer.8.attention.self.value.bias', 'text_decoder.bert.encoder.layer.12.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.7.output.dense.weight', 'text_decoder.bert.encoder.layer.12.attention.self.key.weight', 'text_decoder.bert.encoder.layer.18.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.22.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.20.attention.self.key.weight', 'text_decoder.cls.predictions.decoder.bias', 'text_decoder.bert.encoder.layer.12.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.12.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.1.intermediate.dense.weight', 'text_decoder.bert.encoder.layer.2.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.2.attention.self.value.weight', 'text_decoder.bert.encoder.layer.16.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.21.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.0.attention.self.value.weight', 'text_decoder.bert.encoder.layer.3.attention.self.key.bias', 'text_decoder.bert.encoder.layer.16.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.2.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.12.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.18.attention.self.query.weight', 'text_decoder.bert.encoder.layer.7.attention.self.query.bias', 'text_decoder.bert.encoder.layer.0.attention.self.value.bias', 'text_decoder.bert.encoder.layer.18.intermediate.dense.weight', 'text_decoder.bert.encoder.layer.6.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.13.attention.self.query.weight', 'text_decoder.bert.encoder.layer.22.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.1.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.16.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.5.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.13.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.19.intermediate.dense.weight', 'text_decoder.bert.encoder.layer.20.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.21.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.19.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.10.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.0.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.14.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.12.attention.self.value.weight', 'text_decoder.bert.encoder.layer.5.attention.self.key.bias', 'text_decoder.bert.encoder.layer.4.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.2.attention.self.key.bias', 'text_decoder.bert.encoder.layer.8.intermediate.dense.weight', 'text_decoder.bert.encoder.layer.8.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.2.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.14.attention.self.value.bias', 'text_decoder.bert.encoder.layer.15.output.LayerNorm.weight', 'text_decoder.cls.predictions.transform.LayerNorm.bias', 'text_decoder.bert.encoder.layer.7.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.17.output.dense.weight', 'text_decoder.bert.encoder.layer.12.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.14.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.13.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.2.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.2.output.dense.weight', 'text_decoder.bert.encoder.layer.3.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.18.attention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.15.attention.self.query.weight', 'text_decoder.bert.encoder.layer.22.output.dense.weight', 'text_decoder.bert.encoder.layer.17.attention.self.key.weight', 'text_decoder.bert.encoder.layer.1.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.2.attention.self.query.bias', 'text_decoder.bert.encoder.layer.13.output.dense.weight', 'text_decoder.bert.encoder.layer.18.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.14.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.12.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.11.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.6.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.13.attention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.23.intermediate.dense.weight', 'text_decoder.bert.encoder.layer.23.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.23.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.0.output.dense.weight', 'text_decoder.cls.predictions.transform.dense.weight', 'text_decoder.bert.encoder.layer.21.attention.self.query.weight', 'text_decoder.bert.encoder.layer.17.attention.self.value.weight', 'text_decoder.bert.encoder.layer.0.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.7.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.11.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.18.output.dense.weight', 'text_decoder.bert.encoder.layer.5.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.11.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.15.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.10.output.dense.bias', 'text_decoder.bert.encoder.layer.19.output.dense.weight', 'text_decoder.bert.encoder.layer.15.attention.self.key.bias', 'text_decoder.bert.encoder.layer.17.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.3.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.7.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.9.attention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.12.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.19.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.17.attention.self.query.bias', 'text_decoder.bert.encoder.layer.14.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.14.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.20.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.6.attention.self.query.bias', 'text_decoder.bert.encoder.layer.16.attention.self.key.weight', 'text_decoder.bert.encoder.layer.16.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.10.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.13.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.21.attention.self.key.weight', 'text_decoder.bert.encoder.layer.0.attention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.7.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.9.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.19.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.20.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.11.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.13.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.15.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.2.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.3.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.20.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.3.attention.self.key.weight', 'text_decoder.bert.encoder.layer.22.attention.self.key.weight', 'text_decoder.bert.encoder.layer.23.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.9.output.dense.weight', 'text_decoder.bert.encoder.layer.16.attention.self.query.weight', 'text_decoder.bert.encoder.layer.3.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.12.attention.self.query.weight', 'text_decoder.bert.encoder.layer.15.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.18.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.14.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.20.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.11.attention.self.query.weight', 'text_decoder.bert.encoder.layer.11.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.23.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.0.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.3.attention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.13.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.1.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.2.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.22.attention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.17.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.17.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.14.attention.self.key.bias', 'text_decoder.bert.encoder.layer.10.attention.self.key.weight', 'text_decoder.bert.encoder.layer.12.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.0.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.5.attention.self.query.bias', 'text_decoder.bert.encoder.layer.10.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.6.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.14.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.8.attention.self.query.bias', 'text_decoder.bert.encoder.layer.22.attention.self.query.bias', 'text_decoder.bert.encoder.layer.23.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.14.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.22.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.8.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.15.attention.self.value.bias', 'text_decoder.bert.encoder.layer.13.attention.self.value.weight', 'text_decoder.bert.encoder.layer.3.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.3.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.4.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.23.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.9.intermediate.dense.weight', 'text_decoder.bert.encoder.layer.20.output.dense.bias', 'text_decoder.bert.encoder.layer.18.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.3.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.1.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.1.attention.self.key.weight', 'text_decoder.bert.encoder.layer.15.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.0.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.20.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.22.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.15.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.9.attention.self.value.weight', 'text_decoder.bert.encoder.layer.20.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.0.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.19.attention.self.value.bias', 'text_decoder.bert.encoder.layer.18.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.18.attention.self.value.weight', 'text_decoder.bert.encoder.layer.4.intermediate.dense.weight', 'text_decoder.bert.encoder.layer.10.attention.self.value.weight', 'text_decoder.bert.encoder.layer.16.attention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.16.attention.self.value.bias', 'text_decoder.bert.encoder.layer.5.intermediate.dense.weight', 'text_decoder.bert.encoder.layer.1.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.17.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.4.attention.self.query.weight', 'text_decoder.bert.encoder.layer.21.attention.self.key.bias', 'text_decoder.bert.encoder.layer.16.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.20.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.11.attention.self.value.bias', 'text_decoder.bert.encoder.layer.0.attention.self.query.bias', 'text_decoder.bert.encoder.layer.7.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.18.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.19.attention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.2.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.19.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.21.attention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.11.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.5.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.9.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.21.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.7.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.17.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.5.attention.self.key.weight', 'text_decoder.bert.encoder.layer.9.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.23.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.23.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.14.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.4.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.3.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.22.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.12.attention.self.query.bias', 'text_decoder.bert.encoder.layer.16.output.dense.weight', 'text_decoder.bert.encoder.layer.1.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.12.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.7.intermediate.dense.weight', 'text_decoder.bert.encoder.layer.4.attention.output.LayerNorm.bias', 'text_decoder.bert.embeddings.word_embeddings.weight', 'text_decoder.bert.encoder.layer.21.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.13.attention.self.key.weight', 'text_decoder.bert.encoder.layer.3.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.20.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.3.output.dense.bias', 'text_decoder.bert.encoder.layer.6.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.8.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.4.attention.self.value.bias', 'text_decoder.bert.encoder.layer.6.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.20.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.19.output.dense.bias', 'text_decoder.bert.encoder.layer.13.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.23.attention.self.key.weight', 'text_decoder.bert.encoder.layer.20.attention.self.query.bias', 'text_decoder.bert.encoder.layer.15.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.8.attention.self.value.weight', 'text_decoder.bert.encoder.layer.14.output.dense.bias', 'text_decoder.bert.encoder.layer.15.intermediate.dense.weight', 'text_decoder.bert.encoder.layer.1.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.6.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.1.output.dense.bias', 'text_decoder.bert.encoder.layer.15.attention.self.query.bias', 'text_decoder.bert.encoder.layer.5.output.dense.weight', 'text_decoder.bert.encoder.layer.18.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.16.output.dense.bias', 'text_decoder.bert.encoder.layer.14.attention.self.key.weight', 'text_decoder.bert.encoder.layer.12.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.16.attention.self.value.weight', 'text_decoder.bert.encoder.layer.4.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.9.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.9.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.3.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.4.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.15.output.dense.weight', 'text_decoder.bert.encoder.layer.17.attention.self.query.weight', 'text_decoder.bert.encoder.layer.2.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.13.attention.self.value.bias', 'text_decoder.bert.encoder.layer.15.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.18.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.17.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.4.output.dense.weight', 'text_decoder.bert.encoder.layer.22.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.9.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.4.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.8.crossattention.self.value.bias', 'text_decoder.bert.encoder.layer.13.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.4.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.18.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.9.attention.self.key.weight', 'text_decoder.bert.encoder.layer.0.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.22.attention.self.value.bias', 'text_decoder.bert.encoder.layer.18.attention.self.key.weight', 'text_decoder.bert.encoder.layer.1.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.8.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.2.attention.self.query.weight', 'text_decoder.bert.encoder.layer.6.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.3.attention.self.value.bias', 'text_decoder.bert.encoder.layer.10.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.1.attention.self.value.bias', 'text_decoder.bert.encoder.layer.4.attention.self.value.weight', 'text_decoder.bert.encoder.layer.20.attention.self.query.weight', 'text_decoder.bert.encoder.layer.4.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.16.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.9.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.21.attention.self.value.bias', 'text_decoder.bert.encoder.layer.7.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.6.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.10.attention.self.key.bias', 'text_decoder.bert.encoder.layer.10.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.8.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.6.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.0.crossattention.self.query.weight', 'text_decoder.bert.encoder.layer.5.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.18.crossattention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.12.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.10.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.12.attention.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.12.crossattention.output.dense.bias', 'text_decoder.bert.encoder.layer.9.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.19.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.8.crossattention.self.key.weight', 'text_decoder.bert.encoder.layer.0.attention.self.key.weight', 'text_decoder.bert.encoder.layer.11.crossattention.self.query.bias', 'text_decoder.bert.encoder.layer.5.intermediate.dense.bias', 'text_decoder.bert.encoder.layer.10.output.dense.weight', 'text_decoder.bert.encoder.layer.4.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.2.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.21.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.5.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.8.output.dense.bias', 'text_decoder.bert.encoder.layer.6.attention.self.query.weight', 'text_decoder.bert.encoder.layer.19.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.7.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.11.output.LayerNorm.bias', 'text_decoder.bert.encoder.layer.4.crossattention.self.value.weight', 'text_decoder.bert.encoder.layer.22.attention.self.value.weight', 'text_decoder.bert.encoder.layer.15.attention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.7.attention.output.dense.weight', 'text_decoder.bert.encoder.layer.2.attention.self.key.weight', 'text_decoder.bert.encoder.layer.11.attention.self.key.bias', 'text_decoder.bert.encoder.layer.0.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.9.attention.self.query.bias', 'text_decoder.bert.encoder.layer.6.intermediate.dense.weight', 'text_decoder.bert.encoder.layer.19.attention.output.dense.bias', 'text_decoder.bert.encoder.layer.4.crossattention.self.key.bias', 'text_decoder.bert.encoder.layer.20.crossattention.output.dense.weight', 'text_decoder.bert.encoder.layer.13.crossattention.output.LayerNorm.weight', 'text_decoder.bert.encoder.layer.17.attention.output.LayerNorm.weight']
-- This IS expected if you are initializing BlipModel from the checkpoint of a model trained on another task or with another architecture (e.g. initializing a BertForSequenceClassification model from a BertForPreTraining model).
-- This IS NOT expected if you are initializing BlipModel from the checkpoint of a model that you expect to be exactly identical (initializing a BertForSequenceClassification model from a BertForSequenceClassification model).
-[WARNING|modeling_utils.py:3329] 2023-05-07 22:48:50,940 >> Some weights of BlipModel were not initialized from the model checkpoint at /work/models/Taiyi-BLIP-full-Chinese and are newly initialized: ['visual_projection.weight', 'text_projection.weight', 'text_encoder.pooler.dense.weight', 'logit_scale', 'text_encoder.pooler.dense.bias']
-You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
-05/07/2023 22:48:51 - WARNING - datasets.arrow_dataset - Loading cached processed dataset at /tmp/json/default-f8c682c852f4c0da/0.0.0/8bb11242116d547c741b2e8a1f18598ffdd40a1d4f2a2872c7a28b697434bc96/cache-935dde1de920ed3c.arrow
-05/07/2023 22:48:51 - WARNING - datasets.arrow_dataset - Loading cached processed dataset at /tmp/json/default-f8c682c852f4c0da/0.0.0/8bb11242116d547c741b2e8a1f18598ffdd40a1d4f2a2872c7a28b697434bc96/cache-12e33fbff3865d03.arrow
-05/07/2023 22:48:51 - WARNING - datasets.fingerprint - Parameter 'transform'=<function main.<locals>.transform_images at 0x7f799c339280> of the transform datasets.arrow_dataset.Dataset.set_format couldn't be hashed properly, a random hash was used instead. Make sure your transforms and parameters are serializable with pickle or dill for the dataset fingerprinting and caching to work. If you reuse this transform, the caching mechanism will consider it to be different from the previous calls and recompute everything. This warning is only showed once. Subsequent hashing failures won't be showed.
-05/07/2023 22:48:51 - WARNING - datasets.arrow_dataset - Loading cached processed dataset at /tmp/json/default-f8c682c852f4c0da/0.0.0/8bb11242116d547c741b2e8a1f18598ffdd40a1d4f2a2872c7a28b697434bc96/cache-bd338687351b0fe8.arrow
-05/07/2023 22:48:51 - WARNING - datasets.arrow_dataset - Loading cached processed dataset at /tmp/json/default-f8c682c852f4c0da/0.0.0/8bb11242116d547c741b2e8a1f18598ffdd40a1d4f2a2872c7a28b697434bc96/cache-9596a8c066870e3b.arrow
-05/07/2023 22:48:51 - WARNING - datasets.arrow_dataset - Loading cached processed dataset at /tmp/json/default-f8c682c852f4c0da/0.0.0/8bb11242116d547c741b2e8a1f18598ffdd40a1d4f2a2872c7a28b697434bc96/cache-3bc00376b9f7a8ac.arrow
-Running tokenizer on test dataset:   0%|          | 0/8830 [00:00<?, ? examples/s]Running tokenizer on test dataset:  11%|█▏        | 1000/8830 [00:00<00:00, 9014.58 examples/s]Running tokenizer on test dataset:  34%|███▍      | 3000/8830 [00:00<00:00, 13382.12 examples/s]Running tokenizer on test dataset:  57%|█████▋    | 5000/8830 [00:00<00:00, 14618.03 examples/s]Running tokenizer on test dataset:  79%|███████▉  | 7000/8830 [00:00<00:00, 10894.69 examples/s]Running tokenizer on test dataset: 100%|██████████| 8830/8830 [00:00<00:00, 11944.97 examples/s]                                                                                                [INFO|trainer.py:2013] 2023-05-07 22:48:54,819 >> Loading model from /work/experiments/transformers/saves/taiyi_blip-itr-base-finetuned/checkpoint-284.
-[INFO|trainer.py:1679] 2023-05-07 22:49:13,899 >> ***** Running training *****
-[INFO|trainer.py:1680] 2023-05-07 22:49:13,899 >>   Num examples = 18,325
-[INFO|trainer.py:1681] 2023-05-07 22:49:13,899 >>   Num Epochs = 6
-[INFO|trainer.py:1682] 2023-05-07 22:49:13,899 >>   Instantaneous batch size per device = 8
-[INFO|trainer.py:1685] 2023-05-07 22:49:13,899 >>   Total train batch size (w. parallel, distributed & accumulation) = 256
-[INFO|trainer.py:1686] 2023-05-07 22:49:13,899 >>   Gradient Accumulation steps = 32
-[INFO|trainer.py:1687] 2023-05-07 22:49:13,899 >>   Total optimization steps = 426
-[INFO|trainer.py:1688] 2023-05-07 22:49:13,903 >>   Number of trainable parameters = 731,072,513
-[INFO|trainer.py:1708] 2023-05-07 22:49:13,905 >>   Continuing training from checkpoint, will skip to saved global_step
-[INFO|trainer.py:1709] 2023-05-07 22:49:13,905 >>   Continuing training from epoch 4
-[INFO|trainer.py:1710] 2023-05-07 22:49:13,905 >>   Continuing training from global step 284
-[INFO|trainer.py:1712] 2023-05-07 22:49:13,905 >>   Will skip the first 4 epochs then the first 0 batches in the first epoch.
-  0%|          | 0/426 [00:00<?, ?it/s] 67%|██████▋   | 285/426 [00:45<00:22,  6.31it/s] 67%|██████▋   | 286/426 [01:25<00:50,  2.78it/s] 67%|██████▋   | 287/426 [02:08<01:32,  1.51it/s] 68%|██████▊   | 288/426 [02:54<02:33,  1.11s/it] 68%|██████▊   | 289/426 [03:34<03:47,  1.66s/it] 68%|██████▊   | 290/426 [04:15<05:31,  2.44s/it] 68%|██████▊   | 291/426 [05:01<08:08,  3.62s/it] 69%|██████▊   | 292/426 [05:44<11:28,  5.13s/it] 69%|██████▉   | 293/426 [06:26<15:29,  6.99s/it] 69%|██████▉   | 294/426 [07:07<20:25,  9.28s/it] 69%|██████▉   | 295/426 [07:47<26:16, 12.03s/it] 69%|██████▉   | 296/426 [08:27<33:01, 15.24s/it] 70%|██████▉   | 297/426 [09:08<40:23, 18.79s/it] 70%|██████▉   | 298/426 [09:49<47:53, 22.45s/it] 70%|███████   | 299/426 [10:30<54:57, 25.97s/it] 70%|███████   | 300/426 [11:11<1:01:11, 29.14s/it] 71%|███████   | 301/426 [11:52<1:06:42, 32.02s/it] 71%|███████   | 302/426 [12:33<1:10:43, 34.22s/it] 71%|███████   | 303/426 [13:14<1:13:55, 36.06s/it] 71%|███████▏  | 304/426 [13:55<1:16:01, 37.39s/it] 72%|███████▏  | 305/426 [14:37<1:17:53, 38.62s/it] 72%|███████▏  | 306/426 [15:19<1:19:00, 39.51s/it] 72%|███████▏  | 307/426 [16:00<1:19:09, 39.91s/it] 72%|███████▏  | 308/426 [16:41<1:19:03, 40.20s/it] 73%|███████▎  | 309/426 [17:22<1:18:58, 40.50s/it] 73%|███████▎  | 310/426 [18:03<1:18:48, 40.77s/it] 73%|███████▎  | 311/426 [18:45<1:18:33, 40.98s/it] 73%|███████▎  | 312/426 [19:26<1:18:03, 41.08s/it] 73%|███████▎  | 313/426 [20:09<1:18:30, 41.69s/it] 74%|███████▎  | 314/426 [20:51<1:17:52, 41.72s/it] 74%|███████▍  | 315/426 [21:33<1:17:23, 41.83s/it] 74%|███████▍  | 316/426 [22:16<1:17:33, 42.30s/it] 74%|███████▍  | 317/426 [22:59<1:17:07, 42.46s/it] 75%|███████▍  | 318/426 [23:41<1:16:09, 42.31s/it] 75%|███████▍  | 319/426 [24:23<1:15:23, 42.27s/it] 75%|███████▌  | 320/426 [25:07<1:15:14, 42.59s/it] 75%|███████▌  | 321/426 [25:53<1:16:26, 43.68s/it] 76%|███████▌  | 322/426 [26:55<1:25:22, 49.25s/it] 76%|███████▌  | 323/426 [27:45<1:24:34, 49.27s/it] 76%|███████▌  | 324/426 [28:36<1:24:47, 49.88s/it] 76%|███████▋  | 325/426 [29:27<1:24:43, 50.33s/it] 77%|███████▋  | 326/426 [30:21<1:25:39, 51.40s/it] 77%|███████▋  | 327/426 [31:11<1:24:10, 51.01s/it] 77%|███████▋  | 328/426 [32:08<1:26:05, 52.70s/it] 77%|███████▋  | 329/426 [32:57<1:23:35, 51.70s/it] 77%|███████▋  | 330/426 [33:54<1:24:55, 53.07s/it] 78%|███████▊  | 331/426 [34:43<1:22:13, 51.93s/it] 78%|███████▊  | 332/426 [35:35<1:21:25, 51.97s/it] 78%|███████▊  | 333/426 [36:26<1:20:14, 51.76s/it] 78%|███████▊  | 334/426 [37:23<1:21:46, 53.33s/it] 79%|███████▊  | 335/426 [38:16<1:20:30, 53.09s/it] 79%|███████▉  | 336/426 [39:07<1:18:52, 52.58s/it] 79%|███████▉  | 337/426 [39:58<1:17:19, 52.13s/it] 79%|███████▉  | 338/426 [40:52<1:17:09, 52.61s/it] 80%|███████▉  | 339/426 [41:50<1:18:32, 54.16s/it] 80%|███████▉  | 340/426 [42:37<1:14:35, 52.04s/it] 80%|████████  | 341/426 [43:29<1:13:41, 52.02s/it] 80%|████████  | 342/426 [44:18<1:11:31, 51.09s/it] 81%|████████  | 343/426 [45:09<1:10:58, 51.31s/it] 81%|████████  | 344/426 [45:59<1:09:22, 50.77s/it] 81%|████████  | 345/426 [46:50<1:08:42, 50.89s/it] 81%|████████  | 346/426 [47:44<1:08:52, 51.66s/it] 81%|████████▏ | 347/426 [48:33<1:06:58, 50.87s/it] 82%|████████▏ | 348/426 [49:19<1:04:12, 49.39s/it] 82%|████████▏ | 349/426 [50:07<1:02:52, 49.00s/it] 82%|████████▏ | 350/426 [50:55<1:01:43, 48.72s/it] 82%|████████▏ | 351/426 [51:53<1:04:22, 51.50s/it] 83%|████████▎ | 352/426 [52:51<1:05:57, 53.47s/it] 83%|████████▎ | 353/426 [53:44<1:04:54, 53.35s/it] 83%|████████▎ | 354/426 [54:33<1:02:31, 52.11s/it] 83%|████████▎ | 355/426 [55:26<1:01:49, 52.25s/it]                                                    83%|████████▎ | 355/426 [55:26<1:01:49, 52.25s/it][INFO|trainer.py:2800] 2023-05-07 23:44:40,060 >> Saving model checkpoint to /work/experiments/transformers/saves/taiyi_blip-itr-base-finetuned/checkpoint-355
-[INFO|configuration_utils.py:458] 2023-05-07 23:44:40,064 >> Configuration saved in /work/experiments/transformers/saves/taiyi_blip-itr-base-finetuned/checkpoint-355/config.json
-[INFO|modeling_utils.py:1852] 2023-05-07 23:44:45,226 >> Model weights saved in /work/experiments/transformers/saves/taiyi_blip-itr-base-finetuned/checkpoint-355/pytorch_model.bin
- 84%|████████▎ | 356/426 [56:33<1:06:19, 56.85s/it] 84%|████████▍ | 357/426 [57:19<1:01:24, 53.40s/it] 84%|████████▍ | 358/426 [58:16<1:02:00, 54.71s/it] 84%|████████▍ | 359/426 [59:04<58:51, 52.71s/it]   85%|████████▍ | 360/426 [59:57<58:00, 52.73s/it] 85%|████████▍ | 361/426 [1:00:48<56:26, 52.10s/it] 85%|████████▍ | 362/426 [1:01:39<55:16, 51.82s/it] 85%|████████▌ | 363/426 [1:02:28<53:36, 51.06s/it] 85%|████████▌ | 364/426 [1:03:19<52:41, 50.99s/it] 86%|████████▌ | 365/426 [1:04:11<52:00, 51.16s/it] 86%|████████▌ | 366/426 [1:04:59<50:18, 50.31s/it] 86%|████████▌ | 367/426 [1:05:58<52:10, 53.06s/it] 86%|████████▋ | 368/426 [1:06:54<51:53, 53.68s/it] 87%|████████▋ | 369/426 [1:07:48<51:10, 53.86s/it] 87%|████████▋ | 370/426 [1:08:36<48:37, 52.11s/it] 87%|████████▋ | 371/426 [1:09:32<48:52, 53.32s/it] 87%|████████▋ | 372/426 [1:10:28<48:36, 54.02s/it] 88%|████████▊ | 373/426 [1:11:19<46:53, 53.08s/it] 88%|████████▊ | 374/426 [1:12:15<46:54, 54.13s/it] 88%|████████▊ | 375/426 [1:13:04<44:33, 52.41s/it] 88%|████████▊ | 376/426 [1:14:02<45:12, 54.25s/it] 88%|████████▊ | 377/426 [1:14:58<44:43, 54.78s/it] 89%|████████▊ | 378/426 [1:15:50<43:04, 53.85s/it] 89%|████████▉ | 379/426 [1:16:40<41:16, 52.69s/it] 89%|████████▉ | 380/426 [1:17:36<41:11, 53.74s/it] 89%|████████▉ | 381/426 [1:18:25<39:11, 52.26s/it] 90%|████████▉ | 382/426 [1:19:21<39:11, 53.44s/it] 90%|████████▉ | 383/426 [1:20:14<38:08, 53.22s/it] 90%|█████████ | 384/426 [1:21:04<36:44, 52.49s/it] 90%|█████████ | 385/426 [1:21:59<36:14, 53.04s/it] 91%|█████████ | 386/426 [1:22:47<34:22, 51.57s/it] 91%|█████████ | 387/426 [1:23:39<33:38, 51.75s/it] 91%|█████████ | 388/426 [1:24:34<33:28, 52.85s/it] 91%|█████████▏| 389/426 [1:25:29<32:52, 53.30s/it] 92%|█████████▏| 390/426 [1:26:22<31:53, 53.17s/it] 92%|█████████▏| 391/426 [1:27:10<30:07, 51.64s/it] 92%|█████████▏| 392/426 [1:28:09<30:28, 53.78s/it] 92%|█████████▏| 393/426 [1:29:02<29:27, 53.57s/it] 92%|█████████▏| 394/426 [1:29:52<28:00, 52.51s/it] 93%|█████████▎| 395/426 [1:30:47<27:38, 53.50s/it] 93%|█████████▎| 396/426 [1:31:36<25:57, 51.90s/it] 93%|█████████▎| 397/426 [1:32:33<25:49, 53.44s/it] 93%|█████████▎| 398/426 [1:33:25<24:45, 53.06s/it] 94%|█████████▎| 399/426 [1:34:17<23:41, 52.66s/it] 94%|█████████▍| 400/426 [1:35:11<22:59, 53.07s/it] 94%|█████████▍| 401/426 [1:36:07<22:33, 54.15s/it] 94%|█████████▍| 402/426 [1:37:00<21:32, 53.84s/it] 95%|█████████▍| 403/426 [1:37:48<19:57, 52.09s/it] 95%|█████████▍| 404/426 [1:38:38<18:47, 51.25s/it] 95%|█████████▌| 405/426 [1:39:38<18:56, 54.11s/it] 95%|█████████▌| 406/426 [1:40:36<18:20, 55.00s/it] 96%|█████████▌| 407/426 [1:41:33<17:40, 55.82s/it] 96%|█████████▌| 408/426 [1:42:28<16:40, 55.60s/it] 96%|█████████▌| 409/426 [1:43:23<15:37, 55.17s/it] 96%|█████████▌| 410/426 [1:44:13<14:20, 53.80s/it] 96%|█████████▋| 411/426 [1:45:05<13:16, 53.09s/it] 97%|█████████▋| 412/426 [1:46:00<12:34, 53.87s/it] 97%|█████████▋| 413/426 [1:46:48<11:15, 51.99s/it] 97%|█████████▋| 414/426 [1:47:46<10:46, 53.88s/it] 97%|█████████▋| 415/426 [1:48:39<09:50, 53.64s/it] 98%|█████████▊| 416/426 [1:49:37<09:09, 54.93s/it] 98%|█████████▊| 417/426 [1:50:41<08:37, 57.47s/it] 98%|█████████▊| 418/426 [1:51:33<07:28, 56.00s/it] 98%|█████████▊| 419/426 [1:52:35<06:43, 57.63s/it] 99%|█████████▊| 420/426 [1:53:26<05:34, 55.71s/it] 99%|█████████▉| 421/426 [1:54:29<04:50, 58.01s/it] 99%|█████████▉| 422/426 [1:55:22<03:46, 56.53s/it] 99%|█████████▉| 423/426 [1:56:18<02:48, 56.19s/it]100%|█████████▉| 424/426 [1:57:06<01:47, 53.73s/it]100%|█████████▉| 425/426 [1:57:59<00:53, 53.58s/it]100%|██████████| 426/426 [1:58:51<00:00, 53.25s/it]                                                   100%|██████████| 426/426 [1:58:51<00:00, 53.25s/it][INFO|trainer.py:2800] 2023-05-08 00:48:05,784 >> Saving model checkpoint to /work/experiments/transformers/saves/taiyi_blip-itr-base-finetuned/checkpoint-426
-[INFO|configuration_utils.py:458] 2023-05-08 00:48:05,788 >> Configuration saved in /work/experiments/transformers/saves/taiyi_blip-itr-base-finetuned/checkpoint-426/config.json
-[INFO|modeling_utils.py:1852] 2023-05-08 00:48:11,410 >> Model weights saved in /work/experiments/transformers/saves/taiyi_blip-itr-base-finetuned/checkpoint-426/pytorch_model.bin
-[INFO|trainer.py:1927] 2023-05-08 00:48:20,867 >> 
-
-Training completed. Do not forget to share your model on huggingface.co/models =)
-
-
-                                                   100%|██████████| 426/426 [1:59:06<00:00, 53.25s/it]100%|██████████| 426/426 [1:59:06<00:00, 16.78s/it]
-[INFO|trainer.py:2800] 2023-05-08 00:48:20,872 >> Saving model checkpoint to /work/experiments/transformers/saves/taiyi_blip-itr-base-finetuned
-[INFO|configuration_utils.py:458] 2023-05-08 00:48:20,877 >> Configuration saved in /work/experiments/transformers/saves/taiyi_blip-itr-base-finetuned/config.json
-[INFO|modeling_utils.py:1852] 2023-05-08 00:48:27,156 >> Model weights saved in /work/experiments/transformers/saves/taiyi_blip-itr-base-finetuned/pytorch_model.bin
-[INFO|tokenization_utils_base.py:2215] 2023-05-08 00:48:27,164 >> tokenizer config file saved in /work/experiments/transformers/saves/taiyi_blip-itr-base-finetuned/tokenizer_config.json
-[INFO|tokenization_utils_base.py:2222] 2023-05-08 00:48:27,167 >> Special tokens file saved in /work/experiments/transformers/saves/taiyi_blip-itr-base-finetuned/special_tokens_map.json
-[INFO|image_processing_utils.py:234] 2023-05-08 00:48:27,218 >> Image processor saved in /work/experiments/transformers/saves/taiyi_blip-itr-base-finetuned/preprocessor_config.json

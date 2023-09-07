@@ -1678,7 +1678,7 @@ class ChineseCLIPForVQA(ChineseCLIPPreTrainedModel):
             loss = answer_output.loss
             logits = answer_output.logits
 
-            print('loss:',loss)
+            # print('loss:',loss)
             return loss,logits
         
         
@@ -1818,7 +1818,7 @@ class ChineseCLIPForVD(ChineseCLIPPreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         labels: Optional[torch.LongTensor] = None,
-        answer_option_num: Optional[torch.Tensor] = 4,
+        answer_option_num: Optional[torch.Tensor] = 100,
         return_dict: Optional[bool] = None,
         return_loss: Optional[bool] = None,
         answer_option_input_ids: Optional[torch.LongTensor] = None,
@@ -1881,7 +1881,7 @@ class ChineseCLIPForVD(ChineseCLIPPreTrainedModel):
             loss = answer_output.loss
             logits = answer_output.logits
 
-            print('loss:',loss)
+            # print('loss:',loss)
             return loss,logits
         
         
@@ -2066,7 +2066,7 @@ class ChineseCLIPForVG(ChineseCLIPPreTrainedModel):
 
             loss_bbox, loss_giou = self.get_bbox_loss(output_coord, target_bbox)
             loss = loss_bbox + loss_giou
-            print('loss:', loss)
+            # print('loss:', loss)
  
             return loss,output_coord
         
