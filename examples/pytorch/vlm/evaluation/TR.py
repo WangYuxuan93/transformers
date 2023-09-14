@@ -9,30 +9,26 @@ def R_n(pres,refs,n):
 
     total = len(pres)
     correct = 0
-    m = 0
+
     for pre_lines in pres:
 
         for ref_lines in refs:
 
-            if pre_lines['image'] == ref_lines['image']:
-                m += 1
-                gold_caps = ref_lines['caption']
-                pre_caps = pre_lines['caption']
+            if pre_lines['caption'] == ref_lines['caption']:
 
-                pre_index = 20
-                for cap in pre_caps:
-                    if cap in gold_caps:
-                        new_pre_index = pre_caps.index(cap)
-                        if new_pre_index < pre_index:
-                            pre_index = new_pre_index
+                gold_img = ref_lines['image']
+                pre_imgs = pre_lines['image']
 
-                if pre_index < n:
-                    correct += 1
+                if gold_img in pre_imgs:
+                    pre_index = pre_imgs.index(gold_img)
+
+                    if pre_index < n:
+                        correct += 1
 
     return float(correct) / float(total)
 
 if __name__ == '__main__':
-
+    
     parser = argparse.ArgumentParser(description='test')
 
     parser.add_argument('--ref_path',type=str, help='The path of reference file.')
@@ -41,7 +37,6 @@ if __name__ == '__main__':
 
     ref_path = args.ref_path
     pre_path = args.pre_path
-
     ref = []
     pre = []
 
@@ -60,6 +55,6 @@ if __name__ == '__main__':
     R_1 = R_n(pre,ref,1)
     R_2 = R_n(pre,ref,2)
     R_5 = R_n(pre,ref,5)
-    R_10 = R_n(pre, ref, 10)
+    R_10 = R_n(pre,ref,10)
 
-    print('R_1:',R_1,'  R_2:', R_2, '   R_5:',R_5,  'R_10:',R_10)
+    print('R_1:',R_1,'  R_2:', R_2, '   R_5:',R_5, 'R_10:',R_10)
