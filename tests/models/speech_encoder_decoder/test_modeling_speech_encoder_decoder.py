@@ -62,7 +62,7 @@ class EncoderDecoderMixin:
         decoder_attention_mask,
         input_values=None,
         input_features=None,
-        **kwargs
+        **kwargs,
     ):
         encoder_decoder_config = SpeechEncoderDecoderConfig.from_encoder_decoder_configs(config, decoder_config)
         self.assertTrue(encoder_decoder_config.decoder.is_decoder)
@@ -95,7 +95,7 @@ class EncoderDecoderMixin:
         decoder_attention_mask,
         input_values=None,
         input_features=None,
-        **kwargs
+        **kwargs,
     ):
         encoder_model, decoder_model = self.get_encoder_decoder_model(config, decoder_config)
         enc_dec_model = SpeechEncoderDecoderModel(encoder=encoder_model, decoder=decoder_model)
@@ -135,7 +135,7 @@ class EncoderDecoderMixin:
         decoder_attention_mask,
         input_values=None,
         input_features=None,
-        **kwargs
+        **kwargs,
     ):
         inputs = input_values if input_features is None else input_features
         encoder_model, decoder_model = self.get_encoder_decoder_model(config, decoder_config)
@@ -173,7 +173,7 @@ class EncoderDecoderMixin:
         return_dict,
         input_values=None,
         input_features=None,
-        **kwargs
+        **kwargs,
     ):
         encoder_model, decoder_model = self.get_encoder_decoder_model(config, decoder_config)
         kwargs = {"encoder_model": encoder_model, "decoder_model": decoder_model, "return_dict": return_dict}
@@ -202,7 +202,7 @@ class EncoderDecoderMixin:
         decoder_attention_mask,
         input_values=None,
         input_features=None,
-        **kwargs
+        **kwargs,
     ):
         encoder_model, decoder_model = self.get_encoder_decoder_model(config, decoder_config)
         enc_dec_model = SpeechEncoderDecoderModel(encoder=encoder_model, decoder=decoder_model)
@@ -245,7 +245,7 @@ class EncoderDecoderMixin:
         decoder_attention_mask,
         input_values=None,
         input_features=None,
-        **kwargs
+        **kwargs,
     ):
         encoder_model, decoder_model = self.get_encoder_decoder_model(config, decoder_config)
         enc_dec_model = SpeechEncoderDecoderModel(encoder=encoder_model, decoder=decoder_model)
@@ -292,7 +292,7 @@ class EncoderDecoderMixin:
         labels=None,
         input_values=None,
         input_features=None,
-        **kwargs
+        **kwargs,
     ):
         # make the decoder inputs a different shape from the encoder inputs to harden the test
         decoder_input_ids = decoder_input_ids[:, :-1]
@@ -395,6 +395,29 @@ class EncoderDecoderMixin:
     def test_encoder_decoder_model_generate(self):
         input_ids_dict = self.prepare_config_and_inputs()
         self.check_encoder_decoder_model_generate(**input_ids_dict)
+
+    def test_training_gradient_checkpointing(self):
+        inputs_dict = self.prepare_config_and_inputs()
+        encoder_model, decoder_model = self.get_encoder_decoder_model(
+            inputs_dict["config"], inputs_dict["decoder_config"]
+        )
+
+        model = SpeechEncoderDecoderModel(encoder=encoder_model, decoder=decoder_model)
+        model.to(torch_device)
+        model.train()
+        model.gradient_checkpointing_enable()
+        model.config.decoder_start_token_id = 0
+        model.config.pad_token_id = 0
+
+        model_inputs = {
+            "attention_mask": inputs_dict["attention_mask"],
+            "labels": inputs_dict["labels"],
+            "decoder_input_ids": inputs_dict["decoder_input_ids"],
+        }
+        inputs = inputs_dict["input_features"] if "input_features" in inputs_dict else inputs_dict["input_values"]
+
+        loss = model(inputs, **model_inputs).loss
+        loss.backward()
 
     @slow
     def test_real_model_save_load_from_pretrained(self):
@@ -590,6 +613,7 @@ class Wav2Vec2Speech2Text2(EncoderDecoderMixin, unittest.TestCase):
             "decoder_config": decoder_config,
             "decoder_input_ids": decoder_input_ids,
             "decoder_attention_mask": decoder_attention_mask,
+            "labels": decoder_input_ids,
         }
 
     # there are no published pretrained Speech2Text2ForCausalLM for now

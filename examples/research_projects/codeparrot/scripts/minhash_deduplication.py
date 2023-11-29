@@ -6,10 +6,9 @@ from functools import partial
 from typing import Dict, List, Optional, Set, Tuple, Type
 
 from datasets import Dataset
-from tqdm import tqdm
-
 from datasketch import MinHash, MinHashLSH
 from dpu_utils.utils.iterators import ThreadedIterator
+from tqdm import tqdm
 
 
 NON_ALPHA = re.compile("[^A-Za-z_0-9]")
@@ -30,7 +29,7 @@ def get_min_hash(tokens: List[str]) -> Optional[MinHash]:
 
 def get_tokens(code: str) -> Set[str]:
     """Tokenize a code snippet."""
-    return set([t for t in NON_ALPHA.split(code) if len(t.strip()) > 0])
+    return {t for t in NON_ALPHA.split(code) if len(t.strip()) > 0}
 
 
 class DuplicationIndex:
@@ -63,7 +62,6 @@ class DuplicationIndex:
 
         self._index.insert(code_key, min_hash)
         if len(close_duplicates) > 0:
-
             for base_duplicate in close_duplicates:
                 if base_duplicate in self._duplicate_clusters:
                     self._duplicate_clusters[base_duplicate].add(code_key)
@@ -245,7 +243,7 @@ def deduplicate_dataset(
         >>> ds_dedup, duplicate_clusters = deduplicate_dataset(ds, jaccard_threshold=0.85)
     """
     duplicate_clusters = make_duplicate_clusters(dataset, jaccard_threshold)
-    duplicate_indices = set(x["base_index"] for cluster in duplicate_clusters for x in cluster)
+    duplicate_indices = {x["base_index"] for cluster in duplicate_clusters for x in cluster}
     extreme_dict = {}
     extremes_clusters = find_extremes(duplicate_clusters, dataset, jaccard_threshold)
     for extremes in extremes_clusters:

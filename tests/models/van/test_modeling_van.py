@@ -25,6 +25,7 @@ from transformers.utils import cached_property, is_scipy_available, is_torch_ava
 
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ModelTesterMixin, _config_zero_init, floats_tensor, ids_tensor
+from ...test_pipeline_mixin import PipelineTesterMixin
 
 
 if is_scipy_available():
@@ -41,7 +42,7 @@ if is_torch_available():
 if is_vision_available():
     from PIL import Image
 
-    from transformers import AutoFeatureExtractor
+    from transformers import AutoImageProcessor
 
 
 class VanModelTester:
@@ -115,13 +116,18 @@ class VanModelTester:
 
 
 @require_torch
-class VanModelTest(ModelTesterMixin, unittest.TestCase):
+class VanModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
     """
     Here we also overwrite some of the tests of test_modeling_common.py, as Van does not use input_ids, inputs_embeds,
     attention_mask and seq_length.
     """
 
     all_model_classes = (VanModel, VanForImageClassification) if is_torch_available() else ()
+    pipeline_model_mapping = (
+        {"feature-extraction": VanModel, "image-classification": VanForImageClassification}
+        if is_torch_available()
+        else {}
+    )
 
     test_pruning = False
     test_resize_embeddings = False
@@ -143,10 +149,6 @@ class VanModelTest(ModelTesterMixin, unittest.TestCase):
 
     def create_and_test_config_common_properties(self):
         return
-
-    @unittest.skip(reason="Van does not output attentions")
-    def test_attention_outputs(self):
-        pass
 
     @unittest.skip(reason="Van does not use inputs_embeds")
     def test_inputs_embeds(self):
@@ -252,16 +254,16 @@ def prepare_img():
 @require_vision
 class VanModelIntegrationTest(unittest.TestCase):
     @cached_property
-    def default_feature_extractor(self):
-        return AutoFeatureExtractor.from_pretrained(VAN_PRETRAINED_MODEL_ARCHIVE_LIST[0])
+    def default_image_processor(self):
+        return AutoImageProcessor.from_pretrained(VAN_PRETRAINED_MODEL_ARCHIVE_LIST[0])
 
     @slow
     def test_inference_image_classification_head(self):
         model = VanForImageClassification.from_pretrained(VAN_PRETRAINED_MODEL_ARCHIVE_LIST[0]).to(torch_device)
 
-        feature_extractor = self.default_feature_extractor
+        image_processor = self.default_image_processor
         image = prepare_img()
-        inputs = feature_extractor(images=image, return_tensors="pt").to(torch_device)
+        inputs = image_processor(images=image, return_tensors="pt").to(torch_device)
 
         # forward pass
         with torch.no_grad():

@@ -23,7 +23,6 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.utils.checkpoint
-from packaging import version
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
@@ -69,7 +68,6 @@ if is_pytorch_quantization_available():
 
 _CHECKPOINT_FOR_DOC = "bert-base-uncased"
 _CONFIG_FOR_DOC = "QDQBertConfig"
-_TOKENIZER_FOR_DOC = "BertTokenizer"
 
 QDQBERT_PRETRAINED_MODEL_ARCHIVE_LIST = [
     "bert-base-uncased",
@@ -166,13 +164,12 @@ class QDQBertEmbeddings(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
-        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
-        if version.parse(torch.__version__) > version.parse("1.6.0"):
-            self.register_buffer(
-                "token_type_ids",
-                torch.zeros(self.position_ids.size(), dtype=torch.long),
-                persistent=False,
-            )
+        self.register_buffer(
+            "position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)), persistent=False
+        )
+        self.register_buffer(
+            "token_type_ids", torch.zeros(self.position_ids.size(), dtype=torch.long), persistent=False
+        )
 
     def forward(
         self,
@@ -579,9 +576,8 @@ class QDQBertEncoder(nn.Module):
             past_key_value = past_key_values[i] if past_key_values is not None else None
 
             if self.gradient_checkpointing and self.training:
-
                 if use_cache:
-                    logger.warning(
+                    logger.warning_once(
                         "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`..."
                     )
                     use_cache = False
@@ -744,7 +740,6 @@ class QDQBertPreTrainedModel(PreTrainedModel):
     load_tf_weights = load_tf_weights_in_qdqbert
     base_model_prefix = "bert"
     supports_gradient_checkpointing = True
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
 
     def _init_weights(self, module):
         """Initialize the weights"""
@@ -788,7 +783,7 @@ QDQBERT_INPUTS_DOCSTRING = r"""
         input_ids (`torch.LongTensor` of shape `({0})`):
             Indices of input sequence tokens in the vocabulary.
 
-            Indices can be obtained using [`BertTokenizer`]. See [`PreTrainedTokenizer.encode`] and
+            Indices can be obtained using [`AutoTokenizer`]. See [`PreTrainedTokenizer.encode`] and
             [`PreTrainedTokenizer.__call__`] for details.
 
             [What are input IDs?](../glossary#input-ids)
@@ -879,7 +874,6 @@ class QDQBertModel(QDQBertPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(QDQBERT_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
-        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=BaseModelOutputWithPoolingAndCrossAttentions,
         config_class=_CONFIG_FOR_DOC,
@@ -1019,9 +1013,7 @@ class QDQBertModel(QDQBertPreTrainedModel):
     """QDQBERT Model with a `language modeling` head on top for CLM fine-tuning.""", QDQBERT_START_DOCSTRING
 )
 class QDQBertLMHeadModel(QDQBertPreTrainedModel):
-
-    _keys_to_ignore_on_load_unexpected = [r"pooler"]
-    _keys_to_ignore_on_load_missing = [r"position_ids", r"predictions.decoder.bias"]
+    _tied_weights_keys = ["predictions.decoder.weight", "predictions.decoder.bias"]
 
     def __init__(self, config):
         super().__init__(config)
@@ -1089,10 +1081,10 @@ class QDQBertLMHeadModel(QDQBertPreTrainedModel):
         Example:
 
         ```python
-        >>> from transformers import BertTokenizer, QDQBertLMHeadModel, QDQBertConfig
+        >>> from transformers import AutoTokenizer, QDQBertLMHeadModel, QDQBertConfig
         >>> import torch
 
-        >>> tokenizer = BertTokenizer.from_pretrained("bert-base-cased")
+        >>> tokenizer = AutoTokenizer.from_pretrained("bert-base-cased")
         >>> config = QDQBertConfig.from_pretrained("bert-base-cased")
         >>> config.is_decoder = True
         >>> model = QDQBertLMHeadModel.from_pretrained("bert-base-cased", config=config)
@@ -1149,9 +1141,9 @@ class QDQBertLMHeadModel(QDQBertPreTrainedModel):
     def prepare_inputs_for_generation(
         self,
         input_ids: Optional[torch.LongTensor],
-        past=None,
+        past_key_values=None,
         attention_mask: Optional[torch.Tensor] = None,
-        **model_kwargs
+        **model_kwargs,
     ):
         input_shape = input_ids.shape
         # if model is used as a decoder in encoder-decoder model, the decoder attention mask is created on the fly
@@ -1159,23 +1151,21 @@ class QDQBertLMHeadModel(QDQBertPreTrainedModel):
             attention_mask = input_ids.new_ones(input_shape)
 
         # cut decoder_input_ids if past is used
-        if past is not None:
+        if past_key_values is not None:
             input_ids = input_ids[:, -1:]
 
-        return {"input_ids": input_ids, "attention_mask": attention_mask, "past_key_values": past}
+        return {"input_ids": input_ids, "attention_mask": attention_mask, "past_key_values": past_key_values}
 
-    def _reorder_cache(self, past, beam_idx):
+    def _reorder_cache(self, past_key_values, beam_idx):
         reordered_past = ()
-        for layer_past in past:
+        for layer_past in past_key_values:
             reordered_past += (tuple(past_state.index_select(0, beam_idx) for past_state in layer_past),)
         return reordered_past
 
 
 @add_start_docstrings("""QDQBERT Model with a `language modeling` head on top.""", QDQBERT_START_DOCSTRING)
 class QDQBertForMaskedLM(QDQBertPreTrainedModel):
-
-    _keys_to_ignore_on_load_unexpected = [r"pooler"]
-    _keys_to_ignore_on_load_missing = [r"position_ids", r"predictions.decoder.bias"]
+    _tied_weights_keys = ["predictions.decoder.weight", "predictions.decoder.bias"]
 
     def __init__(self, config):
         super().__init__(config)
@@ -1200,7 +1190,6 @@ class QDQBertForMaskedLM(QDQBertPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(QDQBERT_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
-        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=MaskedLMOutput,
         config_class=_CONFIG_FOR_DOC,
@@ -1324,10 +1313,10 @@ class QDQBertForNextSentencePrediction(QDQBertPreTrainedModel):
         Example:
 
         ```python
-        >>> from transformers import BertTokenizer, QDQBertForNextSentencePrediction
+        >>> from transformers import AutoTokenizer, QDQBertForNextSentencePrediction
         >>> import torch
 
-        >>> tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+        >>> tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
         >>> model = QDQBertForNextSentencePrediction.from_pretrained("bert-base-uncased")
 
         >>> prompt = "In Italy, pizza served in formal settings, such as at a restaurant, is presented unsliced."
@@ -1403,7 +1392,6 @@ class QDQBertForSequenceClassification(QDQBertPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(QDQBERT_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
-        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=SequenceClassifierOutput,
         config_class=_CONFIG_FOR_DOC,
@@ -1500,7 +1488,6 @@ class QDQBertForMultipleChoice(QDQBertPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(QDQBERT_INPUTS_DOCSTRING.format("batch_size, num_choices, sequence_length"))
     @add_code_sample_docstrings(
-        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=MultipleChoiceModelOutput,
         config_class=_CONFIG_FOR_DOC,
@@ -1580,9 +1567,6 @@ class QDQBertForMultipleChoice(QDQBertPreTrainedModel):
     QDQBERT_START_DOCSTRING,
 )
 class QDQBertForTokenClassification(QDQBertPreTrainedModel):
-
-    _keys_to_ignore_on_load_unexpected = [r"pooler"]
-
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
@@ -1596,7 +1580,6 @@ class QDQBertForTokenClassification(QDQBertPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(QDQBERT_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
-        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=TokenClassifierOutput,
         config_class=_CONFIG_FOR_DOC,
@@ -1662,9 +1645,6 @@ class QDQBertForTokenClassification(QDQBertPreTrainedModel):
     QDQBERT_START_DOCSTRING,
 )
 class QDQBertForQuestionAnswering(QDQBertPreTrainedModel):
-
-    _keys_to_ignore_on_load_unexpected = [r"pooler"]
-
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
@@ -1677,7 +1657,6 @@ class QDQBertForQuestionAnswering(QDQBertPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(QDQBERT_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
-        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=QuestionAnsweringModelOutput,
         config_class=_CONFIG_FOR_DOC,

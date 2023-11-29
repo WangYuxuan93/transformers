@@ -28,7 +28,6 @@ from ...test_tokenization_common import TokenizerTesterMixin
 
 
 class CanineTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
-
     tokenizer_class = CanineTokenizer
     test_rust_tokenizer = False
 
@@ -80,8 +79,9 @@ class CanineTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
             "What's the weater?",
             "It's about 25 degrees.",
         ]
-        with tokenizer.as_target_tokenizer():
-            targets = tokenizer(tgt_text, max_length=32, padding="max_length", truncation=True, return_tensors="pt")
+        targets = tokenizer(
+            text_target=tgt_text, max_length=32, padding="max_length", truncation=True, return_tensors="pt"
+        )
         self.assertEqual(32, targets["input_ids"].shape[1])
 
     # cannot use default save_and_load_tokenzier test method because tokenzier has no vocab
@@ -187,7 +187,6 @@ class CanineTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
         tokenizers = self.get_tokenizers(do_lower_case=False)
         for tokenizer in tokenizers:
             with self.subTest(f"{tokenizer.__class__.__name__}"):
-
                 # a special token for Canine can be defined as follows:
                 NEW_TOKEN = 0xE006
                 new_token = chr(NEW_TOKEN)
@@ -261,7 +260,6 @@ class CanineTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
         tokenizers = self.get_tokenizers(do_lower_case=False)
         for tokenizer in tokenizers:
             with self.subTest(f"{tokenizer.__class__.__name__}"):
-
                 input = "hello world"
                 if self.space_between_special_tokens:
                     output = "[CLS] hello world [SEP]"

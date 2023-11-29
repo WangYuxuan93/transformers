@@ -287,7 +287,7 @@ class DataTrainingArguments:
         metadata={
             "help": (
                 "If :obj:`True`, will use the token generated when running"
-                ":obj:`transformers-cli login` as HTTP bearer authorization for remote files."
+                ":obj:`huggingface-cli login` as HTTP bearer authorization for remote files."
             )
         },
     )
@@ -327,7 +327,6 @@ class DataTrainingArguments:
 
 @dataclass
 class SpeechDataCollatorWithPadding:
-
     processor: AutoProcessor
     decoder_start_token_id: Optional[int] = None
     padding: Union[bool, str] = "longest"
@@ -349,13 +348,12 @@ class SpeechDataCollatorWithPadding:
 
         if self.pad_labels:
             label_features = [{"input_ids": feature["labels"]} for feature in features]
-            with self.processor.as_target_processor():
-                labels_batch = self.processor.pad(
-                    label_features,
-                    padding=self.padding,
-                    pad_to_multiple_of=self.pad_to_multiple_of_labels,
-                    return_tensors="pt",
-                )
+            labels_batch = self.processor.pad(
+                labels=label_features,
+                padding=self.padding,
+                pad_to_multiple_of=self.pad_to_multiple_of_labels,
+                return_tensors="pt",
+            )
 
             # replace padding with -100 to ignore loss correctly
             labels = labels_batch["input_ids"].masked_fill(labels_batch.attention_mask.ne(1), -100)
@@ -402,7 +400,7 @@ def create_vocabulary_from_data(
         | (set(vocabs["predict"]["vocab"][0]) if "predict" in vocabs else set())
     )
 
-    vocab_dict = {v: k for k, v in enumerate(sorted(list(vocab_set)))}
+    vocab_dict = {v: k for k, v in enumerate(sorted(vocab_set))}
 
     # replace white space with delimiter token
     if word_delimiter_token is not None:
@@ -864,7 +862,6 @@ def main():
 
     # Training
     if training_args.do_train:
-
         # use last checkpoint if exist
         if last_checkpoint is not None:
             checkpoint = last_checkpoint

@@ -16,16 +16,26 @@
 # limitations under the License.
 """ TF 2.0 LXMERT model."""
 
+
+from __future__ import annotations
+
 import warnings
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 
+import numpy as np
 import tensorflow as tf
 
-from transformers.tf_utils import stable_softmax
-
 from ...activations_tf import get_tf_activation
-from ...modeling_tf_utils import TFPreTrainedModel, get_initializer, keras_serializable, shape_list, unpack_inputs
+from ...modeling_tf_utils import (
+    TFModelInputType,
+    TFPreTrainedModel,
+    get_initializer,
+    keras_serializable,
+    shape_list,
+    unpack_inputs,
+)
+from ...tf_utils import check_embeddings_within_bounds, stable_softmax
 from ...utils import (
     ModelOutput,
     add_code_sample_docstrings,
@@ -41,7 +51,6 @@ logger = logging.get_logger(__name__)
 
 _CHECKPOINT_FOR_DOC = "unc-nlp/lxmert-base-uncased"
 _CONFIG_FOR_DOC = "LxmertConfig"
-_TOKENIZER_FOR_DOC = "LxmertTokenizer"
 
 TF_LXMERT_PRETRAINED_MODEL_ARCHIVE_LIST = [
     "unc-nlp/lxmert-base-uncased",
@@ -84,14 +93,14 @@ class TFLxmertModelOutput(ModelOutput):
             the self-attention heads.
     """
 
-    language_output: Optional[tf.Tensor] = None
-    vision_output: Optional[tf.Tensor] = None
-    pooled_output: Optional[tf.Tensor] = None
-    language_hidden_states: Optional[Tuple[tf.Tensor]] = None
-    vision_hidden_states: Optional[Tuple[tf.Tensor]] = None
-    language_attentions: Optional[Tuple[tf.Tensor]] = None
-    vision_attentions: Optional[Tuple[tf.Tensor]] = None
-    cross_encoder_attentions: Optional[Tuple[tf.Tensor]] = None
+    language_output: tf.Tensor | None = None
+    vision_output: tf.Tensor | None = None
+    pooled_output: tf.Tensor | None = None
+    language_hidden_states: Tuple[tf.Tensor] | None = None
+    vision_hidden_states: Tuple[tf.Tensor] | None = None
+    language_attentions: Tuple[tf.Tensor] | None = None
+    vision_attentions: Tuple[tf.Tensor] | None = None
+    cross_encoder_attentions: Tuple[tf.Tensor] | None = None
 
 
 @dataclass
@@ -105,10 +114,10 @@ class TFLxmertForPreTrainingOutput(ModelOutput):
             (classification) loss.
         prediction_logits (`tf.Tensor` of shape `(batch_size, sequence_length, config.vocab_size)`):
             Prediction scores of the language modeling head (scores for each vocabulary token before SoftMax).
-        cross_relationship_score: (`tf.Tensor` of shape `(batch_size, 2)`):
+        cross_relationship_score (`tf.Tensor` of shape `(batch_size, 2)`):
             Prediction scores of the textual matching objective (classification) head (scores of True/False
             continuation before SoftMax).
-        question_answering_score: (`tf.Tensor` of shape `(batch_size, n_qa_answers)`):
+        question_answering_score (`tf.Tensor` of shape `(batch_size, n_qa_answers)`):
             Prediction scores of question answering objective (classification).
         language_hidden_states (`tuple(tf.Tensor)`, *optional*, returned when `output_hidden_states=True` is passed or when `config.output_hidden_states=True`):
             Tuple of `tf.Tensor` (one for input features + one for the output of each cross-modality layer) of shape
@@ -131,15 +140,15 @@ class TFLxmertForPreTrainingOutput(ModelOutput):
 
     """
 
-    loss: Optional[tf.Tensor] = None
-    prediction_logits: Optional[tf.Tensor] = None
-    cross_relationship_score: Optional[tf.Tensor] = None
-    question_answering_score: Optional[tf.Tensor] = None
-    language_hidden_states: Optional[Tuple[tf.Tensor]] = None
-    vision_hidden_states: Optional[Tuple[tf.Tensor]] = None
-    language_attentions: Optional[Tuple[tf.Tensor]] = None
-    vision_attentions: Optional[Tuple[tf.Tensor]] = None
-    cross_encoder_attentions: Optional[Tuple[tf.Tensor]] = None
+    loss: tf.Tensor | None = None
+    prediction_logits: tf.Tensor | None = None
+    cross_relationship_score: tf.Tensor | None = None
+    question_answering_score: tf.Tensor | None = None
+    language_hidden_states: Tuple[tf.Tensor] | None = None
+    vision_hidden_states: Tuple[tf.Tensor] | None = None
+    language_attentions: Tuple[tf.Tensor] | None = None
+    vision_attentions: Tuple[tf.Tensor] | None = None
+    cross_encoder_attentions: Tuple[tf.Tensor] | None = None
 
 
 class TFLxmertVisualFeatureEncoder(tf.keras.layers.Layer):
@@ -185,8 +194,7 @@ class TFLxmertEmbeddings(tf.keras.layers.Layer):
     def __init__(self, config, **kwargs):
         super().__init__(**kwargs)
 
-        self.vocab_size = config.vocab_size
-        self.type_vocab_size = config.type_vocab_size
+        self.config = config
         self.hidden_size = config.hidden_size
         self.max_position_embeddings = config.max_position_embeddings
         self.initializer_range = config.initializer_range
@@ -197,14 +205,14 @@ class TFLxmertEmbeddings(tf.keras.layers.Layer):
         with tf.name_scope("word_embeddings"):
             self.weight = self.add_weight(
                 name="weight",
-                shape=[self.vocab_size, self.hidden_size],
+                shape=[self.config.vocab_size, self.hidden_size],
                 initializer=get_initializer(initializer_range=self.initializer_range),
             )
 
         with tf.name_scope("token_type_embeddings"):
             self.token_type_embeddings = self.add_weight(
                 name="embeddings",
-                shape=[self.type_vocab_size, self.hidden_size],
+                shape=[self.config.type_vocab_size, self.hidden_size],
                 initializer=get_initializer(initializer_range=self.initializer_range),
             )
 
@@ -227,6 +235,7 @@ class TFLxmertEmbeddings(tf.keras.layers.Layer):
         assert not (input_ids is None and inputs_embeds is None)
 
         if input_ids is not None:
+            check_embeddings_within_bounds(input_ids, self.config.vocab_size)
             inputs_embeds = tf.gather(params=self.weight, indices=input_ids)
 
         input_shape = shape_list(inputs_embeds)[:-1]
@@ -627,26 +636,6 @@ class TFLxmertEncoder(tf.keras.layers.Layer):
 class TFLxmertMainLayer(tf.keras.layers.Layer):
     config_class = LxmertConfig
 
-    @property
-    def dummy_inputs(self):
-        """
-        Dummy inputs to build the network.
-
-        Returns:
-            tf.Tensor with dummy inputs
-        """
-        batch_size = 2
-        num_visual_features = 10
-        input_ids = tf.constant([[3, 5, 6], [2, 3, 4]])
-        visual_feats = tf.random.uniform((batch_size, num_visual_features, self.config.visual_feat_dim))
-        visual_pos = tf.random.uniform((batch_size, num_visual_features, 4))
-
-        return {
-            "input_ids": input_ids,
-            "visual_feats": visual_feats,
-            "visual_pos": visual_pos,
-        }
-
     def __init__(self, config, **kwargs):
         super().__init__(**kwargs)
 
@@ -688,7 +677,6 @@ class TFLxmertMainLayer(tf.keras.layers.Layer):
         return_dict=None,
         training=False,
     ):
-
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
@@ -794,25 +782,35 @@ class TFLxmertPreTrainedModel(TFPreTrainedModel):
     base_model_prefix = "lxmert"
 
     @property
-    def dummy_inputs(self) -> Dict[str, tf.Tensor]:
-        return getattr(self, self.base_model_prefix).dummy_inputs
+    def dummy_inputs(self):
+        """
+        Dummy inputs to build the network.
 
-    @tf.function(
-        input_signature=[
-            {
-                "input_ids": tf.TensorSpec((None, None), tf.int32, name="input_ids"),
-                "attention_mask": tf.TensorSpec((None, None), tf.int32, name="attention_mask"),
-                "visual_feats": tf.TensorSpec((None, None, None), tf.float32, name="visual_feats"),
-                "visual_pos": tf.TensorSpec((None, None, None), tf.float32, name="visual_pos"),
-                "visual_attention_mask": tf.TensorSpec((None, None), tf.int32, name="visual_attention_mask"),
-                "token_type_ids": tf.TensorSpec((None, None), tf.int32, name="token_type_ids"),
-            }
-        ]
-    )
-    def serving(self, inputs):
-        output = self.call(inputs)
+        Returns:
+            tf.Tensor with dummy inputs
+        """
+        batch_size = 2
+        num_visual_features = 10
+        input_ids = tf.constant([[3, 5, 6], [2, 3, 4]], dtype=tf.int32)
+        visual_feats = tf.random.uniform((batch_size, num_visual_features, self.config.visual_feat_dim))
+        visual_pos = tf.random.uniform((batch_size, num_visual_features, 4))
 
-        return self.serving_output(output)
+        return {
+            "input_ids": input_ids,
+            "visual_feats": visual_feats,
+            "visual_pos": visual_pos,
+        }
+
+    @property
+    def input_signature(self):
+        return {
+            "input_ids": tf.TensorSpec((None, None), tf.int32, name="input_ids"),
+            "attention_mask": tf.TensorSpec((None, None), tf.int32, name="attention_mask"),
+            "visual_feats": tf.TensorSpec((None, None, self.config.visual_feat_dim), tf.float32, name="visual_feats"),
+            "visual_pos": tf.TensorSpec((None, None, 4), tf.float32, name="visual_pos"),
+            "visual_attention_mask": tf.TensorSpec((None, None), tf.int32, name="visual_attention_mask"),
+            "token_type_ids": tf.TensorSpec((None, None), tf.int32, name="token_type_ids"),
+        }
 
 
 LXMERT_START_DOCSTRING = r"""
@@ -829,22 +827,27 @@ LXMERT_START_DOCSTRING = r"""
 
     <Tip>
 
-    TF 2.0 models accepts two formats as inputs:
+    TensorFlow models and layers in `transformers` accept two formats as input:
 
     - having all inputs as keyword arguments (like PyTorch models), or
-    - having all inputs as a list, tuple or dict in the first positional arguments.
+    - having all inputs as a list, tuple or dict in the first positional argument.
 
-    This second option is useful when using [`tf.keras.Model.fit`] method which currently requires having all the
-    tensors in the first argument of the model call function: `model(inputs)`.
+    The reason the second format is supported is that Keras methods prefer this format when passing inputs to models
+    and layers. Because of this support, when using methods like `model.fit()` things should "just work" for you - just
+    pass your inputs and labels in any format that `model.fit()` supports! If, however, you want to use the second
+    format outside of Keras methods like `fit()` and `predict()`, such as when creating your own layers or models with
+    the Keras `Functional` API, there are three possibilities you can use to gather all the input Tensors in the first
+    positional argument:
 
-    If you choose this second option, there are three possibilities you can use to gather all the input Tensors in the
-    first positional argument :
-
-    - a single Tensor with `input_ids` only and nothing else: `model(inputs_ids)`
+    - a single Tensor with `input_ids` only and nothing else: `model(input_ids)`
     - a list of varying length with one or several input Tensors IN THE ORDER given in the docstring:
     `model([input_ids, attention_mask])` or `model([input_ids, attention_mask, token_type_ids])`
     - a dictionary with one or several input Tensors associated to the input names given in the docstring:
     `model({"input_ids": input_ids, "token_type_ids": token_type_ids})`
+
+    Note that when creating models and layers with
+    [subclassing](https://keras.io/guides/making_new_layers_and_models_via_subclassing/) then you don't need to worry
+    about any of this, as you can just pass inputs like you would to any other Python function!
 
     </Tip>
 
@@ -859,16 +862,16 @@ LXMERT_INPUTS_DOCSTRING = r"""
         input_ids (`np.ndarray` or `tf.Tensor` of shape `(batch_size, sequence_length)`):
             Indices of input sequence tokens in the vocabulary.
 
-            Indices can be obtained using [`LxmertTokenizer`]. See [`PreTrainedTokenizer.__call__`] and
+            Indices can be obtained using [`AutoTokenizer`]. See [`PreTrainedTokenizer.__call__`] and
             [`PreTrainedTokenizer.encode`] for details.
 
             [What are input IDs?](../glossary#input-ids)
-        visual_feats: (`tf.Tensor` of shape `(batch_size, num_visual_features, visual_feat_dim)`):
+        visual_feats (`tf.Tensor` of shape `(batch_size, num_visual_features, visual_feat_dim)`):
             This input represents visual features. They ROI pooled object features from bounding boxes using a
             faster-RCNN model)
 
             These are currently not provided by the transformers library.
-        visual_pos: (`tf.Tensor` of shape `(batch_size, num_visual_features, visual_feat_dim)`):
+        visual_pos (`tf.Tensor` of shape `(batch_size, num_visual_features, visual_feat_dim)`):
             This input represents spacial features corresponding to their relative (via index) visual features. The
             pre-trained LXMERT model expects these spacial features to be normalized bounding boxes on a scale of 0 to
             1.
@@ -929,25 +932,24 @@ class TFLxmertModel(TFLxmertPreTrainedModel):
     @unpack_inputs
     @add_start_docstrings_to_model_forward(LXMERT_INPUTS_DOCSTRING)
     @add_code_sample_docstrings(
-        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=TFLxmertModelOutput,
         config_class=_CONFIG_FOR_DOC,
     )
     def call(
         self,
-        input_ids=None,
-        visual_feats=None,
-        visual_pos=None,
-        attention_mask=None,
-        visual_attention_mask=None,
-        token_type_ids=None,
-        inputs_embeds=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-        training=False,
-    ):
+        input_ids: TFModelInputType | None = None,
+        visual_feats: tf.Tensor | None = None,
+        visual_pos: tf.Tensor | None = None,
+        attention_mask: np.ndarray | tf.Tensor | None = None,
+        visual_attention_mask: np.ndarray | tf.Tensor | None = None,
+        token_type_ids: np.ndarray | tf.Tensor | None = None,
+        inputs_embeds: np.ndarray | tf.Tensor | None = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+        training: bool = False,
+    ) -> Union[Tuple, TFLxmertModelOutput]:
         outputs = self.lxmert(
             input_ids,
             visual_feats,
@@ -963,24 +965,6 @@ class TFLxmertModel(TFLxmertPreTrainedModel):
         )
 
         return outputs
-
-    def serving_output(self, output):
-        l_hs = tf.convert_to_tensor(output.language_hidden_states) if self.config.output_hidden_states else None
-        v_hs = tf.convert_to_tensor(output.vision_hidden_states) if self.config.output_hidden_states else None
-        l_attns = tf.convert_to_tensor(output.language_attentions) if self.config.output_attentions else None
-        v_attns = tf.convert_to_tensor(output.vision_attentions) if self.config.output_attentions else None
-        c_enc_attns = tf.convert_to_tensor(output.cross_encoder_attentions) if self.config.output_attentions else None
-
-        return TFLxmertModelOutput(
-            pooled_output=output.pooled_output,
-            language_output=output.language_output,
-            vision_output=output.vision_output,
-            language_hidden_states=l_hs,
-            vision_hidden_states=v_hs,
-            language_attentions=l_attns,
-            vision_attentions=v_attns,
-            cross_encoder_attentions=c_enc_attns,
-        )
 
 
 class TFLxmertPooler(tf.keras.layers.Layer):
@@ -1032,7 +1016,7 @@ class TFLxmertLMPredictionHead(tf.keras.layers.Layer):
     def __init__(self, config: LxmertConfig, input_embeddings: tf.keras.layers.Layer, **kwargs):
         super().__init__(**kwargs)
 
-        self.vocab_size = config.vocab_size
+        self.config = config
         self.hidden_size = config.hidden_size
 
         self.transform = TFLxmertPredictionHeadTransform(config, name="transform")
@@ -1042,7 +1026,7 @@ class TFLxmertLMPredictionHead(tf.keras.layers.Layer):
         self.input_embeddings = input_embeddings
 
     def build(self, input_shape: tf.TensorShape):
-        self.bias = self.add_weight(shape=(self.vocab_size,), initializer="zeros", trainable=True, name="bias")
+        self.bias = self.add_weight(shape=(self.config.vocab_size,), initializer="zeros", trainable=True, name="bias")
 
         super().build(input_shape)
 
@@ -1058,14 +1042,14 @@ class TFLxmertLMPredictionHead(tf.keras.layers.Layer):
 
     def set_bias(self, value: tf.Variable):
         self.bias = value["bias"]
-        self.vocab_size = shape_list(value["bias"])[0]
+        self.config.vocab_size = shape_list(value["bias"])[0]
 
     def call(self, hidden_states: tf.Tensor) -> tf.Tensor:
         hidden_states = self.transform(hidden_states=hidden_states)
         seq_length = shape_list(hidden_states)[1]
         hidden_states = tf.reshape(tensor=hidden_states, shape=[-1, self.hidden_size])
         hidden_states = tf.matmul(a=hidden_states, b=self.input_embeddings.weight, transpose_b=True)
-        hidden_states = tf.reshape(tensor=hidden_states, shape=[-1, seq_length, self.vocab_size])
+        hidden_states = tf.reshape(tensor=hidden_states, shape=[-1, seq_length, self.config.vocab_size])
         hidden_states = tf.nn.bias_add(value=hidden_states, bias=self.bias)
 
         return hidden_states
@@ -1138,7 +1122,7 @@ class TFLxmertVisualObjHead(tf.keras.layers.Layer):
             visual_losses["obj"] = {"shape": (-1,), "num": config.num_object_labels}
         if config.visual_attr_loss:
             visual_losses["attr"] = {"shape": (-1,), "num": config.num_attr_labels}
-        if config.visual_obj_loss:
+        if config.visual_feat_loss:
             visual_losses["feat"] = {"shape": (-1, 2048), "num": config.visual_feat_dim}
         self.visual_losses = visual_losses
 
@@ -1206,7 +1190,7 @@ class TFLxmertForPreTraining(TFLxmertPreTrainedModel):
                 "num": config.num_attr_labels,
                 "loss": "visn_ce",
             }
-        if config.visual_obj_loss:
+        if config.visual_feat_loss:
             visual_losses["feat"] = {
                 "shape": (-1, config.visual_feat_dim),
                 "num": config.visual_feat_dim,
@@ -1224,7 +1208,7 @@ class TFLxmertForPreTraining(TFLxmertPreTrainedModel):
         """
         batch_size = 2
         num_visual_features = 10
-        input_ids = tf.constant([[3, 5, 6], [2, 3, 4]])
+        input_ids = tf.constant([[3, 5, 6], [2, 3, 4]], dtype=tf.int32)
         visual_feats = tf.random.uniform((batch_size, num_visual_features, self.config.visual_feat_dim))
         visual_pos = tf.random.uniform((batch_size, num_visual_features, 4))
 
@@ -1288,7 +1272,7 @@ class TFLxmertForPreTraining(TFLxmertPreTrainedModel):
             Labels for computing the masked language modeling loss. Indices should be in `[-100, 0, ...,
             config.vocab_size]` (see `input_ids` docstring) Tokens with indices set to `-100` are ignored (masked), the
             loss is only computed for the tokens with labels in `[0, ..., config.vocab_size]`
-        obj_labels: (`Dict[Str: Tuple[tf.Tensor, tf.Tensor]]`, *optional*, defaults to `None`):
+        obj_labels (`Dict[Str: Tuple[tf.Tensor, tf.Tensor]]`, *optional*, defaults to `None`):
             each key is named after each one of the visual losses and each element of the tuple is of the shape
             `(batch_size, num_features)` and `(batch_size, num_features, visual_feature_dim)` for each the label id and
             the label score respectively
@@ -1402,22 +1386,4 @@ class TFLxmertForPreTraining(TFLxmertPreTrainedModel):
             language_attentions=lxmert_output.language_attentions,
             vision_attentions=lxmert_output.vision_attentions,
             cross_encoder_attentions=lxmert_output.cross_encoder_attentions,
-        )
-
-    def serving_output(self, output):
-        l_hs = tf.convert_to_tensor(output.language_hidden_states) if self.config.output_hidden_states else None
-        v_hs = tf.convert_to_tensor(output.vision_hidden_states) if self.config.output_hidden_states else None
-        l_attns = tf.convert_to_tensor(output.language_attentions) if self.config.output_attentions else None
-        v_attns = tf.convert_to_tensor(output.vision_attentions) if self.config.output_attentions else None
-        c_enc_attns = tf.convert_to_tensor(output.cross_encoder_attentions) if self.config.output_attentions else None
-
-        return TFLxmertForPreTrainingOutput(
-            prediction_logits=output.prediction_logits,
-            cross_relationship_score=output.cross_relationship_score,
-            question_answering_score=output.question_answering_score,
-            language_hidden_states=l_hs,
-            vision_hidden_states=v_hs,
-            language_attentions=l_attns,
-            vision_attentions=v_attns,
-            cross_encoder_attentions=c_enc_attns,
         )

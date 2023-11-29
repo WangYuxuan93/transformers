@@ -16,6 +16,7 @@
 """ Fine-tuning a 🤗 Flax Transformers model on token classification tasks (NER, POS, CHUNKS)"""
 import json
 import logging
+import math
 import os
 import random
 import sys
@@ -27,19 +28,20 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import datasets
-import numpy as np
-from datasets import ClassLabel, load_dataset, load_metric
-from tqdm import tqdm
-
+import evaluate
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax
-import transformers
+from datasets import ClassLabel, load_dataset
 from flax import struct, traverse_util
-from flax.jax_utils import replicate, unreplicate
+from flax.jax_utils import pad_shard_unpad, replicate, unreplicate
 from flax.training import train_state
 from flax.training.common_utils import get_metrics, onehot, shard
-from huggingface_hub import Repository
+from huggingface_hub import Repository, create_repo
+from tqdm import tqdm
+
+import transformers
 from transformers import (
     AutoConfig,
     AutoTokenizer,
@@ -53,7 +55,7 @@ from transformers.utils.versions import require_version
 
 logger = logging.getLogger(__name__)
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
-check_min_version("4.21.0.dev0")
+check_min_version("4.31.0.dev0")
 
 require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/token-classification/requirements.txt")
 
@@ -151,7 +153,7 @@ class ModelArguments:
         default=False,
         metadata={
             "help": (
-                "Will use the token generated when running `transformers-cli login` (necessary to use this script "
+                "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
                 "with private models)."
             )
         },
@@ -284,12 +286,17 @@ def create_train_state(
     # to bias and LayerNorm scale parameters. decay_mask_fn returns a
     # mask boolean with the same structure as the parameters.
     # The mask is True for parameters that should be decayed.
-    # Note that this mask is specifically adapted for FlaxBERT-like models.
-    # For other models, one should correct the layer norm parameter naming
-    # accordingly.
     def decay_mask_fn(params):
         flat_params = traverse_util.flatten_dict(params)
-        flat_mask = {path: (path[-1] != "bias" and path[-2:] != ("LayerNorm", "scale")) for path in flat_params}
+        # find out all LayerNorm parameters
+        layer_norm_candidates = ["layernorm", "layer_norm", "ln"]
+        layer_norm_named_params = {
+            layer[-2:]
+            for layer_norm_name in layer_norm_candidates
+            for layer in flat_params.keys()
+            if layer_norm_name in "".join(layer).lower()
+        }
+        flat_mask = {path: (path[-1] != "bias" and path[-2:] not in layer_norm_named_params) for path in flat_params}
         return traverse_util.unflatten_dict(flat_mask)
 
     tx = optax.adamw(
@@ -344,11 +351,15 @@ def train_data_collator(rng: PRNGKey, dataset: Dataset, batch_size: int):
 
 
 def eval_data_collator(dataset: Dataset, batch_size: int):
-    """Returns batches of size `batch_size` from `eval dataset`, sharded over all local devices."""
-    for i in range(len(dataset) // batch_size):
-        batch = dataset[i * batch_size : (i + 1) * batch_size]
+    """Returns batches of size `batch_size` from `eval dataset`. Sharding handled by `pad_shard_unpad` in the eval loop."""
+    batch_idx = np.arange(len(dataset))
+
+    steps_per_epoch = math.ceil(len(dataset) / batch_size)
+    batch_idx = np.array_split(batch_idx, steps_per_epoch)
+
+    for idx in batch_idx:
+        batch = dataset[idx]
         batch = {k: np.array(v) for k, v in batch.items()}
-        batch = shard(batch)
 
         yield batch
 
@@ -393,7 +404,8 @@ def main():
             )
         else:
             repo_name = training_args.hub_model_id
-        repo = Repository(training_args.output_dir, clone_from=repo_name)
+        create_repo(repo_name, exist_ok=True, token=training_args.hub_token)
+        repo = Repository(training_args.output_dir, clone_from=repo_name, token=training_args.hub_token)
 
     # Get the datasets: you can either provide your own CSV/JSON/TXT training and evaluation files (see below)
     # or just provide the name of one of the public datasets for token classification task available on the hub at https://huggingface.co/datasets/
@@ -593,6 +605,7 @@ def main():
     dropout_rngs = jax.random.split(rng, jax.local_device_count())
 
     train_batch_size = training_args.per_device_train_batch_size * jax.local_device_count()
+    per_device_eval_batch_size = int(training_args.per_device_eval_batch_size)
     eval_batch_size = training_args.per_device_eval_batch_size * jax.local_device_count()
 
     learning_rate_fn = create_learning_rate_fn(
@@ -633,7 +646,7 @@ def main():
 
     p_eval_step = jax.pmap(eval_step, axis_name="batch")
 
-    metric = load_metric("seqeval")
+    metric = evaluate.load("seqeval")
 
     def get_labels(y_pred, y_true):
         # Transform predictions and references tensos to numpy arrays
@@ -680,7 +693,6 @@ def main():
     total_steps = step_per_epoch * num_epochs
     epochs = tqdm(range(num_epochs), desc=f"Epoch ... (1/{num_epochs})", position=0)
     for epoch in epochs:
-
         train_start = time.time()
         train_metrics = []
 
@@ -716,39 +728,20 @@ def main():
                 train_metrics = []
 
             if cur_step % training_args.eval_steps == 0 and cur_step > 0:
-
                 eval_metrics = {}
                 # evaluate
                 for batch in tqdm(
                     eval_data_collator(eval_dataset, eval_batch_size),
-                    total=len(eval_dataset) // eval_batch_size,
+                    total=math.ceil(len(eval_dataset) / eval_batch_size),
                     desc="Evaluating ...",
                     position=2,
                 ):
                     labels = batch.pop("labels")
-                    predictions = p_eval_step(state, batch)
-                    predictions = np.array([pred for pred in chain(*predictions)])
-                    labels = np.array([label for label in chain(*labels)])
-                    labels[np.array(chain(*batch["attention_mask"])) == 0] = -100
-                    preds, refs = get_labels(predictions, labels)
-                    metric.add_batch(
-                        predictions=preds,
-                        references=refs,
+                    predictions = pad_shard_unpad(p_eval_step)(
+                        state, batch, min_device_batch=per_device_eval_batch_size
                     )
-
-                # evaluate also on leftover examples (not divisible by batch_size)
-                num_leftover_samples = len(eval_dataset) % eval_batch_size
-
-                # make sure leftover batch is evaluated on one device
-                if num_leftover_samples > 0 and jax.process_index() == 0:
-                    # take leftover samples
-                    batch = eval_dataset[-num_leftover_samples:]
-                    batch = {k: np.array(v) for k, v in batch.items()}
-
-                    labels = batch.pop("labels")
-                    predictions = eval_step(unreplicate(state), batch)
-                    labels = np.array(labels)
-                    labels[np.array(batch["attention_mask"]) == 0] = -100
+                    predictions = np.array(predictions)
+                    labels[np.array(chain(*batch["attention_mask"])) == 0] = -100
                     preds, refs = get_labels(predictions, labels)
                     metric.add_batch(
                         predictions=preds,
@@ -784,25 +777,9 @@ def main():
         eval_loader = eval_data_collator(eval_dataset, eval_batch_size)
         for batch in tqdm(eval_loader, total=len(eval_dataset) // eval_batch_size, desc="Evaluating ...", position=2):
             labels = batch.pop("labels")
-            predictions = p_eval_step(state, batch)
-            predictions = np.array([pred for pred in chain(*predictions)])
-            labels = np.array([label for label in chain(*labels)])
+            predictions = pad_shard_unpad(p_eval_step)(state, batch, min_device_batch=per_device_eval_batch_size)
+            predictions = np.array(predictions)
             labels[np.array(chain(*batch["attention_mask"])) == 0] = -100
-            preds, refs = get_labels(predictions, labels)
-            metric.add_batch(predictions=preds, references=refs)
-
-        # evaluate also on leftover examples (not divisible by batch_size)
-        num_leftover_samples = len(eval_dataset) % eval_batch_size
-
-        # make sure leftover batch is evaluated on one device
-        if num_leftover_samples > 0 and jax.process_index() == 0:
-            # take leftover samples
-            batch = eval_dataset[-num_leftover_samples:]
-            batch = {k: np.array(v) for k, v in batch.items()}
-
-            labels = np.array(batch.pop("labels"))
-            predictions = eval_step(unreplicate(state), batch)
-            labels[np.array(batch["attention_mask"]) == 0] = -100
             preds, refs = get_labels(predictions, labels)
             metric.add_batch(predictions=preds, references=refs)
 

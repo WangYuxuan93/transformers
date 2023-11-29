@@ -36,11 +36,11 @@ VOCAB_FILES_NAMES = {"tokenizer_file": "tokenizer.json"}
 PRETRAINED_VOCAB_FILES_MAP = {
     "tokenizer_file": {
         "bigscience/tokenizer": "https://huggingface.co/bigscience/tokenizer/blob/main/tokenizer.json",
-        "bigscience/bloom-350m": "https://huggingface.co/bigscience/bloom-350m/blob/main/tokenizer.json",
-        "bigscience/bloom-760m": "https://huggingface.co/bigscience/bloom-760m/blob/main/tokenizer.json",
-        "bigscience/bloom-1b3": "https://huggingface.co/bigscience/bloom-1b3/blob/main/tokenizer.json",
-        "bigscience/bloom-2b5": "https://huggingface.co/bigscience/bloom-2b5/blob/main/tokenizer.json",
-        "bigscience/bloom-6b3": "https://huggingface.co/bigscience/bloom-2b5/blob/main/tokenizer.json",
+        "bigscience/bloom-560m": "https://huggingface.co/bigscience/bloom-560m/blob/main/tokenizer.json",
+        "bigscience/bloom-1b1": "https://huggingface.co/bigscience/bloom-1b1/blob/main/tokenizer.json",
+        "bigscience/bloom-1b7": "https://huggingface.co/bigscience/bloom-1b7/blob/main/tokenizer.json",
+        "bigscience/bloom-3b": "https://huggingface.co/bigscience/bloom-3b/blob/main/tokenizer.json",
+        "bigscience/bloom-7b1": "https://huggingface.co/bigscience/bloom-7b1/blob/main/tokenizer.json",
         "bigscience/bloom": "https://huggingface.co/bigscience/bloom/blob/main/tokenizer.json",
     },
 }
@@ -54,13 +54,15 @@ class BloomTokenizerFast(PreTrainedTokenizerFast):
     This tokenizer has been trained to treat spaces like parts of the tokens (a bit like sentencepiece) so a word will
     be encoded differently whether it is at the beginning of the sentence (without space) or not:
 
-    ```
+    ```python
     >>> from transformers import BloomTokenizerFast
+
     >>> tokenizer = BloomTokenizerFast.from_pretrained("bigscience/bloom")
-    >>> tokenizer("Hello world")['input_ids']
-    [15496, 995]
-    >>> tokenizer(" Hello world")['input_ids']
-    [18435, 995]
+    >>> tokenizer("Hello world")["input_ids"]
+    [59414, 8876]
+
+    >>> tokenizer(" Hello world")["input_ids"]
+    [86153, 8876]
     ```
 
     You can get around that behavior by passing `add_prefix_space=True` when instantiating this tokenizer, but since
@@ -113,7 +115,8 @@ class BloomTokenizerFast(PreTrainedTokenizerFast):
         eos_token="</s>",
         pad_token="<pad>",
         add_prefix_space=False,
-        **kwargs
+        clean_up_tokenization_spaces=False,
+        **kwargs,
     ):
         super().__init__(
             vocab_file,
@@ -124,6 +127,7 @@ class BloomTokenizerFast(PreTrainedTokenizerFast):
             eos_token=eos_token,
             pad_token=pad_token,
             add_prefix_space=add_prefix_space,
+            clean_up_tokenization_spaces=clean_up_tokenization_spaces,
             **kwargs,
         )
         pre_tok_state = json.loads(self.backend_tokenizer.pre_tokenizer.__getstate__())

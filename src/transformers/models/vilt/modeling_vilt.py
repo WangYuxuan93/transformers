@@ -17,11 +17,10 @@
 import collections.abc
 import math
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.utils.checkpoint
-from packaging import version
 from torch import nn
 from torch.nn import CrossEntropyLoss
 
@@ -32,20 +31,19 @@ from ...modeling_outputs import (
     MaskedLMOutput,
     ModelOutput,
     SequenceClassifierOutput,
+    TokenClassifierOutput,
 )
 from ...modeling_utils import PreTrainedModel
-from ...pytorch_utils import find_pruneable_heads_and_indices, prune_linear_layer
+from ...pytorch_utils import (
+    find_pruneable_heads_and_indices,
+    meshgrid,
+    prune_linear_layer,
+)
 from ...utils import add_start_docstrings, add_start_docstrings_to_model_forward, logging, replace_return_docstrings
 from .configuration_vilt import ViltConfig
 
 
 logger = logging.get_logger(__name__)
-
-if torch.__version__ < (1, 10, 0):
-    logger.warning(
-        f"You are using torch=={torch.__version__}, but torch>=1.10.0 is required to use "
-        "ViltModel. Please upgrade torch."
-    )
 
 _CONFIG_FOR_DOC = "ViltConfig"
 _CHECKPOINT_FOR_DOC = "dandelin/vilt-b32-mlm"
@@ -136,9 +134,10 @@ class ViltEmbeddings(nn.Module):
 
         pos_embed = pos_embed.flatten(2).transpose(1, 2)
         x = x.flatten(2).transpose(1, 2)
+        # Set `device` here, otherwise `patch_index` will always be on `CPU` and will fail near the end for torch>=1.13
         patch_index = torch.stack(
-            torch.meshgrid(torch.arange(x_mask.shape[-2]), torch.arange(x_mask.shape[-1]), indexing="ij"), dim=-1
-        )
+            meshgrid(torch.arange(x_mask.shape[-2]), torch.arange(x_mask.shape[-1]), indexing="ij"), dim=-1
+        ).to(device=x_mask.device)
         patch_index = patch_index[None, None, :, :, :]
         patch_index = patch_index.expand(x_mask.shape[0], x_mask.shape[1], -1, -1, -1)
         patch_index = patch_index.flatten(1, 3)
@@ -165,7 +164,7 @@ class ViltEmbeddings(nn.Module):
         non_valid_nums = [v.size(0) for v in non_valid_row_idx]
         pad_nums = [max_image_length - v for v in valid_nums]
 
-        select = list()
+        select = []
         for i, (v, nv, p) in enumerate(zip(valid_nums, non_valid_nums, pad_nums)):
             if p <= 0:
                 valid_choice = torch.multinomial(torch.ones(v).float(), max_image_length)
@@ -177,6 +176,7 @@ class ViltEmbeddings(nn.Module):
         select = torch.cat(select, dim=0)
         x = x[select[:, 0], select[:, 1]].view(batch_size, -1, num_channels)
         x_mask = x_mask[select[:, 0], select[:, 1]].view(batch_size, -1)
+        # `patch_index` should be on the same device as `select` (for torch>=1.13), which is ensured at definition time.
         patch_index = patch_index[select[:, 0], select[:, 1]].view(batch_size, -1, 2)
         pos_embed = pos_embed[select[:, 0], select[:, 1]].view(batch_size, -1, num_channels)
 
@@ -249,13 +249,12 @@ class TextEmbeddings(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
-        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
-        if version.parse(torch.__version__) > version.parse("1.6.0"):
-            self.register_buffer(
-                "token_type_ids",
-                torch.zeros(self.position_ids.size(), dtype=torch.long),
-                persistent=False,
-            )
+        self.register_buffer(
+            "position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)), persistent=False
+        )
+        self.register_buffer(
+            "token_type_ids", torch.zeros(self.position_ids.size(), dtype=torch.long), persistent=False
+        )
 
     def forward(self, input_ids=None, token_type_ids=None, position_ids=None, inputs_embeds=None):
         if input_ids is not None:
@@ -395,7 +394,6 @@ class ViltSelfOutput(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, hidden_states: torch.Tensor, input_tensor: torch.Tensor) -> torch.Tensor:
-
         hidden_states = self.dense(hidden_states)
         hidden_states = self.dropout(hidden_states)
 
@@ -447,7 +445,6 @@ class ViltIntermediate(nn.Module):
             self.intermediate_act_fn = config.hidden_act
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-
         hidden_states = self.dense(hidden_states)
         hidden_states = self.intermediate_act_fn(hidden_states)
 
@@ -494,7 +491,7 @@ class ViltLayer(nn.Module):
         outputs = self_attention_outputs[1:]  # add self attentions if we output attention weights
 
         # first residual connection
-        hidden_states = attention_output + hidden_states
+        hidden_states = attention_output + hidden_states.to(attention_output.device)
 
         # in ViLT, layernorm is also applied after self-attention
         layer_output = self.layernorm_after(hidden_states)
@@ -576,6 +573,7 @@ class ViltPreTrainedModel(PreTrainedModel):
     config_class = ViltConfig
     base_model_prefix = "vilt"
     supports_gradient_checkpointing = True
+    _no_split_modules = ["ViltSelfAttention"]
 
     def _init_weights(self, module):
         """Initialize the weights"""
@@ -630,8 +628,8 @@ VILT_INPUTS_DOCSTRING = r"""
             [What are token type IDs?](../glossary#token-type-ids)
 
         pixel_values (`torch.FloatTensor` of shape `(batch_size, num_channels, height, width)`):
-            Pixel values. Pixel values can be obtained using [`ViltFeatureExtractor`]. See
-            [`ViltFeatureExtractor.__call__`] for details.
+            Pixel values. Pixel values can be obtained using [`AutoImageProcessor`]. See
+            [`ViltImageProcessor.__call__`] for details.
 
         pixel_mask (`torch.LongTensor` of shape `(batch_size, height, width)`, *optional*):
             Mask to avoid performing attention on padding pixel values. Mask values selected in `[0, 1]`:
@@ -685,8 +683,8 @@ VILT_IMAGES_AND_TEXT_CLASSIFICATION_INPUTS_DOCSTRING = r"""
             [What are token type IDs?](../glossary#token-type-ids)
 
         pixel_values (`torch.FloatTensor` of shape `(batch_size, num_images, num_channels, height, width)`):
-            Pixel values. Pixel values can be obtained using [`ViltFeatureExtractor`]. See
-            [`ViltFeatureExtractor.__call__`] for details.
+            Pixel values. Pixel values can be obtained using [`AutoImageProcessor`]. See
+            [`ViltImageProcessor.__call__`] for details.
 
         pixel_mask (`torch.LongTensor` of shape `(batch_size, num_images, height, width)`, *optional*):
             Mask to avoid performing attention on padding pixel values. Mask values selected in `[0, 1]`:
@@ -756,19 +754,19 @@ class ViltModel(ViltPreTrainedModel):
     @replace_return_docstrings(output_type=BaseModelOutputWithPooling, config_class=_CONFIG_FOR_DOC)
     def forward(
         self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        pixel_values=None,
-        pixel_mask=None,
-        head_mask=None,
-        inputs_embeds=None,
-        image_embeds=None,
-        image_token_type_idx=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-    ):
+        input_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.FloatTensor] = None,
+        token_type_ids: Optional[torch.LongTensor] = None,
+        pixel_values: Optional[torch.FloatTensor] = None,
+        pixel_mask: Optional[torch.LongTensor] = None,
+        head_mask: Optional[torch.FloatTensor] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        image_embeds: Optional[torch.FloatTensor] = None,
+        image_token_type_idx: Optional[int] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ) -> Union[BaseModelOutputWithPooling, Tuple[torch.FloatTensor]]:
         r"""
         Returns:
 
@@ -890,6 +888,8 @@ class ViltPooler(nn.Module):
     VILT_START_DOCSTRING,
 )
 class ViltForMaskedLM(ViltPreTrainedModel):
+    _tied_weights_keys = ["mlm_score.decoder.weight", "mlm_score.decoder.bias"]
+
     def __init__(self, config):
         super().__init__(config)
 
@@ -909,19 +909,19 @@ class ViltForMaskedLM(ViltPreTrainedModel):
     @replace_return_docstrings(output_type=MaskedLMOutput, config_class=_CONFIG_FOR_DOC)
     def forward(
         self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        pixel_values=None,
-        pixel_mask=None,
-        head_mask=None,
-        inputs_embeds=None,
-        image_embeds=None,
-        labels=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-    ):
+        input_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.FloatTensor] = None,
+        token_type_ids: Optional[torch.LongTensor] = None,
+        pixel_values: Optional[torch.FloatTensor] = None,
+        pixel_mask: Optional[torch.LongTensor] = None,
+        head_mask: Optional[torch.FloatTensor] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        image_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.LongTensor] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ) -> Union[MaskedLMOutput, Tuple[torch.FloatTensor]]:
         r"""
         labels (*torch.LongTensor* of shape *(batch_size, sequence_length)*, *optional*):
             Labels for computing the masked language modeling loss. Indices should be in *[-100, 0, ...,
@@ -1004,6 +1004,8 @@ class ViltForMaskedLM(ViltPreTrainedModel):
         masked_lm_loss = None
         if labels is not None:
             loss_fct = CrossEntropyLoss()  # -100 index = padding token
+            # move labels to correct device to enable PP
+            labels = labels.to(mlm_logits.device)
             masked_lm_loss = loss_fct(mlm_logits.view(-1, self.config.vocab_size), labels.view(-1))
 
         if not return_dict:
@@ -1083,19 +1085,19 @@ class ViltForQuestionAnswering(ViltPreTrainedModel):
     @replace_return_docstrings(output_type=SequenceClassifierOutput, config_class=_CONFIG_FOR_DOC)
     def forward(
         self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        pixel_values=None,
-        pixel_mask=None,
-        head_mask=None,
-        inputs_embeds=None,
-        image_embeds=None,
-        labels=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-    ):
+        input_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.FloatTensor] = None,
+        token_type_ids: Optional[torch.LongTensor] = None,
+        pixel_values: Optional[torch.FloatTensor] = None,
+        pixel_mask: Optional[torch.LongTensor] = None,
+        head_mask: Optional[torch.FloatTensor] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        image_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.LongTensor] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ) -> Union[SequenceClassifierOutput, Tuple[torch.FloatTensor]]:
         r"""
         labels (`torch.FloatTensor` of shape `(batch_size, num_labels)`, *optional*):
             Labels for computing the visual question answering loss. This tensor must be either a one-hot encoding of
@@ -1150,6 +1152,8 @@ class ViltForQuestionAnswering(ViltPreTrainedModel):
 
         loss = None
         if labels is not None:
+            # move labels to correct device to enable PP
+            labels = labels.to(logits.device)
             loss = nn.functional.binary_cross_entropy_with_logits(logits, labels) * labels.shape[1]
             # see https://github.com/jnhwkim/ban-vqa/blob/master/train.py#L19
 
@@ -1188,19 +1192,19 @@ class ViltForImageAndTextRetrieval(ViltPreTrainedModel):
     @replace_return_docstrings(output_type=SequenceClassifierOutput, config_class=_CONFIG_FOR_DOC)
     def forward(
         self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        pixel_values=None,
-        pixel_mask=None,
-        head_mask=None,
-        inputs_embeds=None,
-        image_embeds=None,
-        labels=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-    ):
+        input_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.FloatTensor] = None,
+        token_type_ids: Optional[torch.LongTensor] = None,
+        pixel_values: Optional[torch.FloatTensor] = None,
+        pixel_mask: Optional[torch.LongTensor] = None,
+        head_mask: Optional[torch.FloatTensor] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        image_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.LongTensor] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ) -> Union[SequenceClassifierOutput, Tuple[torch.FloatTensor]]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
             Labels are currently not supported.
@@ -1251,6 +1255,8 @@ class ViltForImageAndTextRetrieval(ViltPreTrainedModel):
 
         loss = None
         if labels is not None:
+            # move labels to correct device to enable PP
+            labels = labels.to(logits.device)
             raise NotImplementedError("Training is not yet supported.")
 
         if not return_dict:
@@ -1294,19 +1300,19 @@ class ViltForImagesAndTextClassification(ViltPreTrainedModel):
     @replace_return_docstrings(output_type=ViltForImagesAndTextClassificationOutput, config_class=_CONFIG_FOR_DOC)
     def forward(
         self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        pixel_values=None,
-        pixel_mask=None,
-        head_mask=None,
-        inputs_embeds=None,
-        image_embeds=None,
-        labels=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-    ):
+        input_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.FloatTensor] = None,
+        token_type_ids: Optional[torch.LongTensor] = None,
+        pixel_values: Optional[torch.FloatTensor] = None,
+        pixel_mask: Optional[torch.LongTensor] = None,
+        head_mask: Optional[torch.FloatTensor] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        image_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.LongTensor] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ) -> Union[ViltForImagesAndTextClassificationOutput, Tuple[torch.FloatTensor]]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
             Binary classification labels.
@@ -1390,6 +1396,8 @@ class ViltForImagesAndTextClassification(ViltPreTrainedModel):
         loss = None
         if labels is not None:
             loss_fct = CrossEntropyLoss()
+            # move labels to correct device to enable PP
+            labels = labels.to(logits.device)
             loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
         if not return_dict:
@@ -1401,4 +1409,90 @@ class ViltForImagesAndTextClassification(ViltPreTrainedModel):
             logits=logits,
             hidden_states=hidden_states,
             attentions=attentions,
+        )
+
+
+@add_start_docstrings(
+    """
+    ViLT Model with a token classification head on top (a linear layer on top of the final hidden-states of the text
+    tokens) e.g. for Named-Entity-Recognition (NER) tasks.
+    """,
+    VILT_START_DOCSTRING,
+)
+class ViltForTokenClassification(ViltPreTrainedModel):
+    def __init__(self, config):
+        super().__init__(config)
+
+        self.num_labels = config.num_labels
+        self.vilt = ViltModel(config, add_pooling_layer=False)
+
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.classifier = nn.Linear(config.hidden_size, config.num_labels)
+
+        # Initialize weights and apply final processing
+        self.post_init()
+
+    @add_start_docstrings_to_model_forward(VILT_INPUTS_DOCSTRING)
+    @replace_return_docstrings(output_type=TokenClassifierOutput, config_class=_CONFIG_FOR_DOC)
+    def forward(
+        self,
+        input_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.FloatTensor] = None,
+        token_type_ids: Optional[torch.LongTensor] = None,
+        pixel_values: Optional[torch.FloatTensor] = None,
+        pixel_mask: Optional[torch.LongTensor] = None,
+        head_mask: Optional[torch.FloatTensor] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        image_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.LongTensor] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ) -> Union[TokenClassifierOutput, Tuple[torch.FloatTensor]]:
+        r"""
+        labels (`torch.LongTensor` of shape `(batch_size, text_sequence_length)`, *optional*):
+            Labels for computing the token classification loss. Indices should be in `[0, ..., config.num_labels - 1]`.
+
+        Returns:
+        """
+
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        outputs = self.vilt(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            pixel_values=pixel_values,
+            pixel_mask=pixel_mask,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+            image_embeds=image_embeds,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+        sequence_output = outputs[0]
+
+        text_input_size = input_ids.shape[1] if input_ids is not None else inputs_embeds.shape[1]
+
+        sequence_output = self.dropout(sequence_output)
+        logits = self.classifier(sequence_output[:, :text_input_size])
+
+        loss = None
+        if labels is not None:
+            loss_fct = CrossEntropyLoss()
+            # move labels to correct device to enable PP
+            labels = labels.to(logits.device)
+            loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+
+        if not return_dict:
+            output = (logits,) + outputs[2:]
+            return ((loss,) + output) if loss is not None else output
+
+        return TokenClassifierOutput(
+            loss=loss,
+            logits=logits,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
         )

@@ -18,13 +18,15 @@ import tempfile
 import unittest
 
 from huggingface_hub.hf_api import list_models
+
 from transformers import MarianConfig, is_torch_available
 from transformers.testing_utils import require_sentencepiece, require_tokenizers, require_torch, slow, torch_device
 from transformers.utils import cached_property
 
-from ...generation.test_generation_utils import GenerationTesterMixin
+from ...generation.test_utils import GenerationTesterMixin
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ModelTesterMixin, ids_tensor
+from ...test_pipeline_mixin import PipelineTesterMixin
 
 
 if is_torch_available():
@@ -123,6 +125,12 @@ class MarianModelTester:
         self.bos_token_id = bos_token_id
         self.decoder_start_token_id = decoder_start_token_id
 
+        # forcing a certain token to be generated, sets all other tokens to -inf
+        # if however the token to be generated is already at -inf then it can lead token
+        # `nan` values and thus break generation
+        self.forced_bos_token_id = None
+        self.forced_eos_token_id = None
+
     def prepare_config_and_inputs(self):
         input_ids = ids_tensor([self.batch_size, self.seq_length], self.vocab_size).clamp(
             3,
@@ -152,6 +160,8 @@ class MarianModelTester:
             bos_token_id=self.bos_token_id,
             pad_token_id=self.pad_token_id,
             decoder_start_token_id=self.decoder_start_token_id,
+            forced_bos_token_id=self.forced_bos_token_id,
+            forced_eos_token_id=self.forced_eos_token_id,
         )
 
     def prepare_config_and_inputs_for_common(self):
@@ -226,9 +236,21 @@ class MarianModelTester:
 
 
 @require_torch
-class MarianModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase):
+class MarianModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixin, unittest.TestCase):
     all_model_classes = (MarianModel, MarianMTModel) if is_torch_available() else ()
     all_generative_model_classes = (MarianMTModel,) if is_torch_available() else ()
+    pipeline_model_mapping = (
+        {
+            "conversational": MarianMTModel,
+            "feature-extraction": MarianModel,
+            "summarization": MarianMTModel,
+            "text-generation": MarianForCausalLM,
+            "text2text-generation": MarianMTModel,
+            "translation": MarianMTModel,
+        }
+        if is_torch_available()
+        else {}
+    )
     is_encoder_decoder = True
     fx_compatible = True
     test_pruning = False
@@ -430,10 +452,7 @@ class TestMarian_EN_DE_More(MarianIntegrationTest):
         src, tgt = ["I am a small frog"], ["Ich bin ein kleiner Frosch."]
         expected_ids = [38, 121, 14, 697, 38848, 0]
 
-        model_inputs = self.tokenizer(src, return_tensors="pt").to(torch_device)
-        with self.tokenizer.as_target_tokenizer():
-            targets = self.tokenizer(tgt, return_tensors="pt")
-        model_inputs["labels"] = targets["input_ids"].to(torch_device)
+        model_inputs = self.tokenizer(src, text_target=tgt, return_tensors="pt").to(torch_device)
 
         self.assertListEqual(expected_ids, model_inputs.input_ids[0].tolist())
 
@@ -599,7 +618,7 @@ class TestMarian_FI_EN_V2(MarianIntegrationTest):
         return cls
 
     @slow
-    def test_batch_generation_en_fr(self):
+    def test_batch_generation_fi_en(self):
         self._assert_generated_batch_equal_expected()
 
 
@@ -843,3 +862,7 @@ class MarianStandaloneDecoderModelTest(ModelTesterMixin, GenerationTesterMixin, 
     def test_retain_grad_hidden_states_attentions(self):
         # decoder cannot keep gradients
         return
+
+    @unittest.skip("The model doesn't support left padding")  # and it's not used enough to be worth fixing :)
+    def test_left_padding_compatibility(self):
+        pass

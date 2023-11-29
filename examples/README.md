@@ -43,6 +43,22 @@ To browse the examples corresponding to released versions of 🤗 Transformers, 
 <details>
   <summary>Examples for older versions of 🤗 Transformers</summary>
 	<ul>
+	    <li><a href="https://github.com/huggingface/transformers/tree/v4.21.0/examples">v4.21.0</a></li>
+		<li><a href="https://github.com/huggingface/transformers/tree/v4.20.1/examples">v4.20.1</a></li>
+		<li><a href="https://github.com/huggingface/transformers/tree/v4.19.4/examples">v4.19.4</a></li>
+		<li><a href="https://github.com/huggingface/transformers/tree/v4.18.0/examples">v4.18.0</a></li>
+		<li><a href="https://github.com/huggingface/transformers/tree/v4.17.0/examples">v4.17.0</a></li>
+		<li><a href="https://github.com/huggingface/transformers/tree/v4.16.2/examples">v4.16.2</a></li>
+		<li><a href="https://github.com/huggingface/transformers/tree/v4.15.0/examples">v4.15.0</a></li>
+		<li><a href="https://github.com/huggingface/transformers/tree/v4.14.1/examples">v4.14.1</a></li>
+		<li><a href="https://github.com/huggingface/transformers/tree/v4.13.0/examples">v4.13.0</a></li>
+		<li><a href="https://github.com/huggingface/transformers/tree/v4.12.5/examples">v4.12.5</a></li>
+	    <li><a href="https://github.com/huggingface/transformers/tree/v4.11.3/examples">v4.11.3</a></li>
+	    <li><a href="https://github.com/huggingface/transformers/tree/v4.10.3/examples">v4.10.3</a></li>
+	    <li><a href="https://github.com/huggingface/transformers/tree/v4.9.2/examples">v4.9.2</a></li>
+	    <li><a href="https://github.com/huggingface/transformers/tree/v4.8.2/examples">v4.8.2</a></li>
+	    <li><a href="https://github.com/huggingface/transformers/tree/v4.7.0/examples">v4.7.0</a></li>
+	    <li><a href="https://github.com/huggingface/transformers/tree/v4.6.1/examples">v4.6.1</a></li>
 		<li><a href="https://github.com/huggingface/transformers/tree/v4.5.1/examples">v4.5.1</a></li>
 		<li><a href="https://github.com/huggingface/transformers/tree/v4.4.2/examples">v4.4.2</a></li>
 		<li><a href="https://github.com/huggingface/transformers/tree/v4.3.3/examples">v4.3.3</a></li>
@@ -78,3 +94,41 @@ Alternatively, you can switch your cloned 🤗 Transformers to a specific versio
 git checkout tags/v3.5.1
 ```
 and run the example command as usual afterward.
+
+## Running the Examples on Remote Hardware with Auto-Setup
+
+[run_on_remote.py](./run_on_remote.py) is a script that launches any example on remote self-hosted hardware, 
+with automatic hardware and environment setup. It uses [Runhouse](https://github.com/run-house/runhouse) to launch 
+on self-hosted hardware (e.g. in your own cloud account or on-premise cluster) but there are other options 
+for running remotely as well. You can easily customize the example used, command line arguments, dependencies, 
+and type of compute hardware, and then run the script to automatically launch the example.
+
+You can refer to 
+[hardware setup](https://runhouse-docs.readthedocs-hosted.com/en/latest/api/python/cluster.html#hardware-setup)
+for more information about hardware and dependency setup with Runhouse, or this
+[Colab tutorial](https://colab.research.google.com/drive/1sh_aNQzJX5BKAdNeXthTNGxKz7sM9VPc) for a more in-depth 
+walkthrough.
+
+You can run the script with the following commands:
+
+```bash
+# First install runhouse:
+pip install runhouse
+
+# For an on-demand V100 with whichever cloud provider you have configured:
+python run_on_remote.py \
+    --example pytorch/text-generation/run_generation.py \
+    --model_type=gpt2 \
+    --model_name_or_path=gpt2 \
+    --prompt "I am a language model and"
+
+# For byo (bring your own) cluster:
+python run_on_remote.py --host <cluster_ip> --user <ssh_user> --key_path <ssh_key_path> \
+  --example <example> <args>
+
+# For on-demand instances
+python run_on_remote.py --instance <instance> --provider <provider> \
+  --example <example> <args>
+```
+
+You can also adapt the script to your own needs.

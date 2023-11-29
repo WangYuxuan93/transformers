@@ -14,15 +14,16 @@
 # limitations under the License.
 """ TF 2.0 Data2Vec Vision model."""
 
+
+from __future__ import annotations
+
 import collections.abc
 import math
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import tensorflow as tf
-
-from transformers.tf_utils import shape_list, stable_softmax
 
 from ...activations_tf import get_tf_activation
 from ...modeling_tf_outputs import (
@@ -39,6 +40,7 @@ from ...modeling_tf_utils import (
     keras_serializable,
     unpack_inputs,
 )
+from ...tf_utils import shape_list, stable_softmax
 from ...utils import (
     add_code_sample_docstrings,
     add_start_docstrings,
@@ -53,7 +55,6 @@ logger = logging.get_logger(__name__)
 
 # General docstring
 _CONFIG_FOR_DOC = "Data2VecVisionConfig"
-_FEAT_EXTRACTOR_FOR_DOC = "BeitFeatureExtractor"
 
 # Base docstring
 _CHECKPOINT_FOR_DOC = "facebook/data2vec-vision-base"
@@ -96,8 +97,8 @@ class TFData2VecVisionModelOutputWithPooling(TFBaseModelOutputWithPooling):
 
     last_hidden_state: tf.Tensor = None
     pooler_output: tf.Tensor = None
-    hidden_states: Optional[Tuple[tf.Tensor]] = None
-    attentions: Optional[Tuple[tf.Tensor]] = None
+    hidden_states: Tuple[tf.Tensor] | None = None
+    attentions: Tuple[tf.Tensor] | None = None
 
 
 class TFData2VecVisionDropPath(tf.keras.layers.Layer):
@@ -165,8 +166,7 @@ class TFData2VecVisionEmbeddings(tf.keras.layers.Layer):
 
         super().build(input_shape)
 
-    def call(self, pixel_values: tf.Tensor, bool_masked_pos: Optional[tf.Tensor] = None) -> tf.Tensor:
-
+    def call(self, pixel_values: tf.Tensor, bool_masked_pos: tf.Tensor | None = None) -> tf.Tensor:
         embeddings = self.patch_embeddings(pixel_values)
         batch_size, seq_len, projection_dim = shape_list(embeddings)
 
@@ -464,7 +464,7 @@ class TFData2VecVisionLayer(tf.keras.layers.Layer):
         )
         self.init_values = config.layer_scale_init_value
 
-    def build(self, input_shape: tf.TensorShape):
+    def build(self, input_shape: tf.TensorShape = None):
         if self.init_values > 0:
             self.lambda_1 = self.add_weight(
                 shape=(self.config.hidden_size),
@@ -598,7 +598,7 @@ class TFData2VecVisionEncoder(tf.keras.layers.Layer):
             self.relative_position_bias = None
 
         # stochastic depth decay rule
-        dpr = [x for x in tf.linspace(0.0, config.drop_path_rate, config.num_hidden_layers)]
+        dpr = list(tf.linspace(0.0, config.drop_path_rate, config.num_hidden_layers))
         self.layer = [
             TFData2VecVisionLayer(
                 config,
@@ -612,7 +612,7 @@ class TFData2VecVisionEncoder(tf.keras.layers.Layer):
     def call(
         self,
         hidden_states: tf.Tensor,
-        head_mask: Optional[tf.Tensor] = None,
+        head_mask: tf.Tensor | None = None,
         output_attentions: bool = False,
         output_hidden_states: bool = False,
         return_dict: bool = True,
@@ -688,9 +688,9 @@ class TFData2VecVisionMainLayer(tf.keras.layers.Layer):
     @unpack_inputs
     def call(
         self,
-        pixel_values: Optional[tf.Tensor] = None,
-        bool_masked_pos: Optional[tf.Tensor] = None,
-        head_mask: Optional[tf.Tensor] = None,
+        pixel_values: tf.Tensor | None = None,
+        bool_masked_pos: tf.Tensor | None = None,
+        head_mask: tf.Tensor | None = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -774,36 +774,6 @@ class TFData2VecVisionPreTrainedModel(TFPreTrainedModel):
     main_input_name = "pixel_values"
     _keys_to_ignore_on_load_unexpected = [r"relative_position_index"]
 
-    @property
-    def dummy_inputs(self) -> Dict[str, tf.Tensor]:
-        """
-        Dummy inputs to build the network. Returns:
-            `Dict[str, tf.Tensor]`: The dummy inputs.
-        """
-        VISION_DUMMY_INPUTS = tf.random.uniform(
-            shape=(3, self.config.num_channels, self.config.image_size, self.config.image_size),
-            dtype=tf.float32,
-        )
-        return {"pixel_values": tf.constant(VISION_DUMMY_INPUTS)}
-
-    @tf.function(
-        input_signature=[
-            {
-                "pixel_values": tf.TensorSpec((None, None, None, None), tf.float32, name="pixel_values"),
-            }
-        ]
-    )
-    def serving(self, inputs):
-        """
-        Method used for serving the model.
-
-        Args:
-            inputs (`Dict[str, tf.Tensor]`):
-                The input of the saved model as a dictionary of tensors.
-        """
-
-        return self.call(inputs)
-
 
 DATA2VEC_VISION_START_DOCSTRING = r"""
     This model inherits from [`TFPreTrainedModel`]. Check the superclass documentation for the generic methods the
@@ -816,13 +786,27 @@ DATA2VEC_VISION_START_DOCSTRING = r"""
 
     <Tip>
 
-    TF 2.0 models accepts two formats as inputs:
+    TensorFlow models and layers in `transformers` accept two formats as input:
 
     - having all inputs as keyword arguments (like PyTorch models), or
-    - having all inputs as a list, tuple or dict in the first positional arguments.
+    - having all inputs as a list, tuple or dict in the first positional argument.
 
-    This second option is useful when using [`tf.keras.Model.fit`] method which currently requires having all the
-    tensors in the first argument of the model call function: `model(inputs)`.
+    The reason the second format is supported is that Keras methods prefer this format when passing inputs to models
+    and layers. Because of this support, when using methods like `model.fit()` things should "just work" for you - just
+    pass your inputs and labels in any format that `model.fit()` supports! If, however, you want to use the second
+    format outside of Keras methods like `fit()` and `predict()`, such as when creating your own layers or models with
+    the Keras `Functional` API, there are three possibilities you can use to gather all the input Tensors in the first
+    positional argument:
+
+    - a single Tensor with `pixel_values` only and nothing else: `model(pixel_values)`
+    - a list of varying length with one or several input Tensors IN THE ORDER given in the docstring:
+    `model([pixel_values, attention_mask])` or `model([pixel_values, attention_mask, token_type_ids])`
+    - a dictionary with one or several input Tensors associated to the input names given in the docstring:
+    `model({"pixel_values": pixel_values, "token_type_ids": token_type_ids})`
+
+    Note that when creating models and layers with
+    [subclassing](https://keras.io/guides/making_new_layers_and_models_via_subclassing/) then you don't need to worry
+    about any of this, as you can just pass inputs like you would to any other Python function!
 
     </Tip>
 
@@ -834,9 +818,9 @@ DATA2VEC_VISION_START_DOCSTRING = r"""
 
 DATA2VEC_VISION_INPUTS_DOCSTRING = r"""
     Args:
-        pixel_values (`np.ndarray`, `tf.Tensor`, `List[tf.Tensor]` ``Dict[str, tf.Tensor]` or `Dict[str, np.ndarray]` and each example must have the shape `(batch_size, num_channels, height, width)`):
-            Pixel values. Pixel values can be obtained using [`BeitFeatureExtractor`]. See
-            [`BeitFeatureExtractor.__call__`] for details.
+        pixel_values (`np.ndarray`, `tf.Tensor`, `List[tf.Tensor]` `Dict[str, tf.Tensor]` or `Dict[str, np.ndarray]` and each example must have the shape `(batch_size, num_channels, height, width)`):
+            Pixel values. Pixel values can be obtained using [`AutoImageProcessor`]. See
+            [`BeitImageProcessor.__call__`] for details.
 
         head_mask (`np.ndarray` or `tf.Tensor` of shape `(num_heads,)` or `(num_layers, num_heads)`, *optional*):
             Mask to nullify selected heads of the self-attention modules. Mask values selected in `[0, 1]`:
@@ -880,7 +864,6 @@ class TFData2VecVisionModel(TFData2VecVisionPreTrainedModel):
     @unpack_inputs
     @add_start_docstrings_to_model_forward(DATA2VEC_VISION_INPUTS_DOCSTRING)
     @add_code_sample_docstrings(
-        processor_class=_FEAT_EXTRACTOR_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=TFData2VecVisionModelOutputWithPooling,
         config_class=_CONFIG_FOR_DOC,
@@ -889,15 +872,18 @@ class TFData2VecVisionModel(TFData2VecVisionPreTrainedModel):
     )
     def call(
         self,
-        pixel_values: Optional[TFModelInputType] = None,
-        bool_masked_pos: Optional[tf.Tensor] = None,
-        head_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        pixel_values: TFModelInputType | None = None,
+        bool_masked_pos: tf.Tensor | None = None,
+        head_mask: np.ndarray | tf.Tensor | None = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         training: bool = False,
     ) -> Union[tuple, TFData2VecVisionModelOutputWithPooling]:
-
+        r"""
+        bool_masked_pos (`tf.Tensor` of shape `(batch_size, num_patches)`, *optional*):
+            Boolean masked positions. Indicates which patches are masked (1) and which aren't (0).
+        """
         outputs = self.data2vec_vision(
             pixel_values=pixel_values,
             bool_masked_pos=bool_masked_pos,
@@ -935,7 +921,6 @@ class TFData2VecVisionForImageClassification(TFData2VecVisionPreTrainedModel, TF
     @unpack_inputs
     @add_start_docstrings_to_model_forward(DATA2VEC_VISION_INPUTS_DOCSTRING)
     @add_code_sample_docstrings(
-        processor_class=_FEAT_EXTRACTOR_FOR_DOC,
         checkpoint=_IMAGE_CLASS_CHECKPOINT,
         output_type=TFSequenceClassifierOutput,
         config_class=_CONFIG_FOR_DOC,
@@ -943,12 +928,12 @@ class TFData2VecVisionForImageClassification(TFData2VecVisionPreTrainedModel, TF
     )
     def call(
         self,
-        pixel_values: Optional[TFModelInputType] = None,
-        head_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        pixel_values: TFModelInputType | None = None,
+        head_mask: np.ndarray | tf.Tensor | None = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        labels: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        labels: np.ndarray | tf.Tensor | None = None,
         training: Optional[bool] = False,
     ) -> Union[TFSequenceClassifierOutput, tuple]:
         r"""
@@ -999,7 +984,7 @@ class TFData2VecVisionConvModule(tf.keras.layers.Layer):
         padding: str = "valid",
         bias: bool = False,
         dilation: Union[int, Tuple[int, int]] = 1,
-        **kwargs
+        **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.conv = tf.keras.layers.Conv2D(
@@ -1010,7 +995,7 @@ class TFData2VecVisionConvModule(tf.keras.layers.Layer):
             dilation_rate=dilation,
             name="conv",
         )
-        self.bn = tf.keras.layers.BatchNormalization(name="bn")
+        self.bn = tf.keras.layers.BatchNormalization(name="bn", momentum=0.9, epsilon=1e-5)
         self.activation = tf.nn.relu
 
     def call(self, input: tf.Tensor) -> tf.Tensor:
@@ -1233,7 +1218,7 @@ class TFData2VecVisionFCNHead(tf.keras.layers.Layer):
         in_index: int = 2,
         kernel_size: int = 3,
         dilation: Union[int, Tuple[int, int]] = 1,
-        **kwargs
+        **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.in_channels = config.hidden_size
@@ -1300,7 +1285,7 @@ class TFData2VecVisionForSemanticSegmentation(TFData2VecVisionPreTrainedModel):
         # FPNs
         self.fpn1 = [
             tf.keras.layers.Conv2DTranspose(config.hidden_size, kernel_size=2, strides=2, name="fpn1.0"),
-            tf.keras.layers.BatchNormalization(name="fpn1.1"),
+            tf.keras.layers.BatchNormalization(name="fpn1.1", momentum=0.9, epsilon=1e-5),
             tf.keras.layers.Activation("gelu"),
             tf.keras.layers.Conv2DTranspose(config.hidden_size, kernel_size=2, strides=2, name="fpn1.3"),
         ]
@@ -1335,8 +1320,8 @@ class TFData2VecVisionForSemanticSegmentation(TFData2VecVisionPreTrainedModel):
             loss_ = loss_fct(real, pred)
             mask = tf.cast(mask, dtype=loss_.dtype)
             loss_ *= mask
-
-            return tf.reduce_sum(loss_) / tf.reduce_sum(mask)
+            reduced_masked_loss = tf.reduce_sum(loss_) / tf.reduce_sum(mask)
+            return tf.reshape(reduced_masked_loss, (1,))
 
         main_loss = masked_loss(labels, upsampled_logits)
         auxiliary_loss = masked_loss(labels, upsampled_auxiliary_logits)
@@ -1349,9 +1334,9 @@ class TFData2VecVisionForSemanticSegmentation(TFData2VecVisionPreTrainedModel):
     @replace_return_docstrings(output_type=TFSemanticSegmenterOutput, config_class=_CONFIG_FOR_DOC)
     def call(
         self,
-        pixel_values: Optional[tf.Tensor] = None,
-        head_mask: Optional[tf.Tensor] = None,
-        labels: Optional[tf.Tensor] = None,
+        pixel_values: tf.Tensor | None = None,
+        head_mask: tf.Tensor | None = None,
+        labels: tf.Tensor | None = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -1366,17 +1351,17 @@ class TFData2VecVisionForSemanticSegmentation(TFData2VecVisionPreTrainedModel):
         Examples:
 
         ```python
-        >>> from transformers import AutoFeatureExtractor, TFData2VecVisionForSemanticSegmentation
+        >>> from transformers import AutoImageProcessor, TFData2VecVisionForSemanticSegmentation
         >>> from PIL import Image
         >>> import requests
 
         >>> url = "http://images.cocodataset.org/val2017/000000039769.jpg"
         >>> image = Image.open(requests.get(url, stream=True).raw)
 
-        >>> feature_extractor = AutoFeatureExtractor.from_pretrained("facebook/data2vec-vision-base")
+        >>> image_processor = AutoImageProcessor.from_pretrained("facebook/data2vec-vision-base")
         >>> model = TFData2VecVisionForSemanticSegmentation.from_pretrained("facebook/data2vec-vision-base")
 
-        >>> inputs = feature_extractor(images=image, return_tensors="pt")
+        >>> inputs = image_processor(images=image, return_tensors="pt")
         >>> outputs = model(**inputs)
         >>> # logits are of shape (batch_size, num_labels, height, width)
         >>> logits = outputs.logits
@@ -1398,11 +1383,11 @@ class TFData2VecVisionForSemanticSegmentation(TFData2VecVisionPreTrainedModel):
         # only keep certain features, and reshape
         # note that we do +1 as the encoder_hidden_states also includes the initial embeddings
         features = [feature for idx, feature in enumerate(encoder_hidden_states) if idx + 1 in self.config.out_indices]
-        batch_size = shape_list(pixel_values)[0]
         patch_resolution = self.config.image_size // self.config.patch_size
 
         def reshape_features(x):
-            x = tf.reshape(x, (batch_size, patch_resolution, patch_resolution, -1))
+            # We do it this way so TF can always infer the non-batch dims at compile time
+            x = tf.reshape(x, (-1, patch_resolution, patch_resolution, self.config.hidden_size))
             return x
 
         features = [reshape_features(x[:, 1:, :]) for x in features]

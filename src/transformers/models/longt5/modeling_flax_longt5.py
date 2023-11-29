@@ -18,13 +18,13 @@
 import copy
 from typing import Any, Callable, List, Optional, Tuple
 
-import numpy as np
-
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+import numpy as np
 from flax.core.frozen_dict import FrozenDict, freeze, unfreeze
 from flax.linen import combine_masks, make_causal_mask
+from flax.linen import partitioning as nn_partitioning
 from flax.linen.attention import dot_product_attention_weights
 from flax.traverse_util import flatten_dict, unflatten_dict
 from jax.random import PRNGKey
@@ -51,7 +51,8 @@ logger = logging.get_logger(__name__)
 
 _CHECKPOINT_FOR_DOC = "google/long-t5-local-base"
 _CONFIG_FOR_DOC = "LongT5Config"
-_TOKENIZER_FOR_DOC = "T5Tokenizer"
+
+remat = nn_partitioning.remat
 
 
 # Copied from transformers.models.bart.modeling_flax_bart.shift_tokens_right
@@ -59,11 +60,11 @@ def shift_tokens_right(input_ids: np.array, pad_token_id: int, decoder_start_tok
     """
     Shift input ids one token to the right.
     """
-    shifted_input_ids = np.zeros_like(input_ids)
-    shifted_input_ids[:, 1:] = input_ids[:, :-1]
-    shifted_input_ids[:, 0] = decoder_start_token_id
+    shifted_input_ids = jnp.zeros_like(input_ids)
+    shifted_input_ids = shifted_input_ids.at[:, 1:].set(input_ids[:, :-1])
+    shifted_input_ids = shifted_input_ids.at[:, 0].set(decoder_start_token_id)
 
-    shifted_input_ids = np.where(shifted_input_ids == -100, pad_token_id, shifted_input_ids)
+    shifted_input_ids = jnp.where(shifted_input_ids == -100, pad_token_id, shifted_input_ids)
     return shifted_input_ids
 
 
@@ -365,6 +366,7 @@ class FlaxLongT5Attention(nn.Module):
                 self.relative_attention_num_buckets,
                 self.n_heads,
                 embedding_init=jax.nn.initializers.normal(kv_init_std),
+                dtype=self.dtype,
             )
 
     @staticmethod
@@ -1356,7 +1358,6 @@ class FlaxLongT5LayerCollection(nn.Module):
         encoder_attention_mask=None,
         encoder_decoder_position_bias=None,
         output_attentions=False,
-        return_dict=True,
         deterministic=True,
         init_cache=False,
     ):
@@ -1377,13 +1378,31 @@ class FlaxLongT5LayerCollection(nn.Module):
 class FlaxLongT5BlockCollection(nn.Module):
     config: LongT5Config
     dtype: jnp.dtype = jnp.float32  # the dtype of the computation
+    gradient_checkpointing: bool = False
 
     def setup(self):
         self.causal = self.config.causal
-        self.blocks = [
-            FlaxLongT5LayerCollection(self.config, has_relative_attention_bias=(i == 0), dtype=self.dtype, name=str(i))
-            for i in range(self.config.num_layers)
-        ]
+        if self.gradient_checkpointing:
+            FlaxLongT5CheckpointLayer = remat(FlaxLongT5LayerCollection, static_argnums=(6, 7, 8))
+            self.blocks = [
+                FlaxLongT5CheckpointLayer(
+                    self.config,
+                    has_relative_attention_bias=(i == 0),
+                    dtype=self.dtype,
+                    name=str(i),
+                )
+                for i in range(self.config.num_layers)
+            ]
+        else:
+            self.blocks = [
+                FlaxLongT5LayerCollection(
+                    self.config,
+                    has_relative_attention_bias=(i == 0),
+                    dtype=self.dtype,
+                    name=str(i),
+                )
+                for i in range(self.config.num_layers)
+            ]
 
     def __call__(
         self,
@@ -1409,14 +1428,14 @@ class FlaxLongT5BlockCollection(nn.Module):
 
             layer_outputs = layer_module(
                 hidden_states,
-                attention_mask=attention_mask,
-                position_bias=position_bias,
-                encoder_hidden_states=encoder_hidden_states,
-                encoder_attention_mask=encoder_attention_mask,
-                encoder_decoder_position_bias=encoder_decoder_position_bias,
-                output_attentions=output_attentions,
-                deterministic=deterministic,
-                init_cache=init_cache,
+                attention_mask,
+                position_bias,
+                encoder_hidden_states,
+                encoder_attention_mask,
+                encoder_decoder_position_bias,
+                output_attentions,
+                deterministic,
+                init_cache,
             )
 
             hidden_states = layer_outputs[0]
@@ -1447,11 +1466,14 @@ class FlaxLongT5Stack(nn.Module):
     config: LongT5Config
     embed_tokens: nn.Embed
     dtype: jnp.dtype = jnp.float32  # the dtype of the computation
+    gradient_checkpointing: bool = False
 
     def setup(self):
         self.causal = self.config.causal
 
-        self.block = FlaxLongT5BlockCollection(self.config, dtype=self.dtype)
+        self.block = FlaxLongT5BlockCollection(
+            self.config, dtype=self.dtype, gradient_checkpointing=self.gradient_checkpointing
+        )
         self.final_layer_norm = FlaxLongT5LayerNorm(
             self.config.d_model, eps=self.config.layer_norm_epsilon, dtype=self.dtype
         )
@@ -1517,7 +1539,7 @@ LONGT5_ENCODE_INPUTS_DOCSTRING = r"""
             Indices of input sequence tokens in the vocabulary. LongT5 is a model with relative position embeddings so
             you should be able to pad the inputs on both the right and the left.
 
-            Indices can be obtained using [`T5Tokenizer`]. See [`PreTrainedTokenizer.encode`] and
+            Indices can be obtained using [`AutoTokenizer`]. See [`PreTrainedTokenizer.encode`] and
             [`PreTrainedTokenizer.__call__`] for detail.
 
             To know more on how to prepare `input_ids` for pretraining take a look a [LONGT5
@@ -1544,7 +1566,7 @@ LONGT5_DECODE_INPUTS_DOCSTRING = r"""
         decoder_input_ids (`jnp.ndarray` of shape `(batch_size, target_sequence_length)`):
             Indices of decoder input sequence tokens in the vocabulary.
 
-            Indices can be obtained using [`T5Tokenizer`]. See [`PreTrainedTokenizer.encode`] and
+            Indices can be obtained using [`AutoTokenizer`]. See [`PreTrainedTokenizer.encode`] and
             [`PreTrainedTokenizer.__call__`] for details.
 
             [What are decoder input IDs?](../glossary#decoder-input-ids)
@@ -1587,7 +1609,7 @@ LONGT5_INPUTS_DOCSTRING = r"""
             Indices of input sequence tokens in the vocabulary. LongT5 is a model with relative position embeddings so
             you should be able to pad the inputs on both the right and the left.
 
-            Indices can be obtained using [`T5Tokenizer`]. See [`PreTrainedTokenizer.encode`] and
+            Indices can be obtained using [`AutoTokenizer`]. See [`PreTrainedTokenizer.encode`] and
             [`PreTrainedTokenizer.__call__`] for detail.
 
             [What are input IDs?](../glossary#input-ids)
@@ -1604,7 +1626,7 @@ LONGT5_INPUTS_DOCSTRING = r"""
         decoder_input_ids (`jnp.ndarray` of shape `(batch_size, target_sequence_length)`, *optional*):
             Indices of decoder input sequence tokens in the vocabulary.
 
-            Indices can be obtained using [`T5Tokenizer`]. See [`PreTrainedTokenizer.encode`] and
+            Indices can be obtained using [`AutoTokenizer`]. See [`PreTrainedTokenizer.encode`] and
             [`PreTrainedTokenizer.__call__`] for details.
 
             [What are decoder input IDs?](../glossary#decoder-input-ids)
@@ -1658,10 +1680,17 @@ class FlaxLongT5PreTrainedModel(FlaxPreTrainedModel):
         seed: int = 0,
         dtype: jnp.dtype = jnp.float32,
         _do_init: bool = True,
-        **kwargs
+        **kwargs,
     ):
         module = self.module_class(config=config, dtype=dtype, **kwargs)
         super().__init__(config, module, input_shape=input_shape, seed=seed, dtype=dtype, _do_init=_do_init)
+
+    def enable_gradient_checkpointing(self):
+        self._module = self.module_class(
+            config=self.config,
+            dtype=self.dtype,
+            gradient_checkpointing=True,
+        )
 
     def init_weights(self, rng: jax.random.PRNGKey, input_shape: Tuple, params: FrozenDict = None) -> FrozenDict:
         # init input tensors
@@ -1797,9 +1826,9 @@ class FlaxLongT5PreTrainedModel(FlaxPreTrainedModel):
         Example:
 
         ```python
-        >>> from transformers import T5Tokenizer, FlaxLongT5ForConditionalGeneration
+        >>> from transformers import AutoTokenizer, FlaxLongT5ForConditionalGeneration
 
-        >>> tokenizer = T5Tokenizer.from_pretrained("t5-base")
+        >>> tokenizer = AutoTokenizer.from_pretrained("t5-base")
         >>> model = FlaxLongT5ForConditionalGeneration.from_pretrained("google/long-t5-local-base")
 
         >>> text = "My friends are cool but they eat too many carbs."
@@ -1858,10 +1887,10 @@ class FlaxLongT5PreTrainedModel(FlaxPreTrainedModel):
         Example:
 
         ```python
-        >>> from transformers import T5Tokenizer, FlaxLongT5ForConditionalGeneration
+        >>> from transformers import AutoTokenizer, FlaxLongT5ForConditionalGeneration
         >>> import jax.numpy as jnp
 
-        >>> tokenizer = T5Tokenizer.from_pretrained("t5-base")
+        >>> tokenizer = AutoTokenizer.from_pretrained("t5-base")
         >>> model = FlaxLongT5ForConditionalGeneration.from_pretrained("google/long-t5-local-base")
 
         >>> text = "My friends are cool but they eat too many carbs."
@@ -1989,6 +2018,7 @@ LONGT5_START_DOCSTRING = r"""
 class FlaxLongT5Module(nn.Module):
     config: LongT5Config
     dtype: jnp.dtype = jnp.float32  # the dtype of the computation
+    gradient_checkpointing: bool = False
 
     def _get_encoder_module(self):
         return self.encoder
@@ -2001,16 +2031,27 @@ class FlaxLongT5Module(nn.Module):
             self.config.vocab_size,
             self.config.d_model,
             embedding_init=jax.nn.initializers.normal(self.config.initializer_factor * 1.0),
+            dtype=self.dtype,
         )
 
         encoder_config = copy.deepcopy(self.config)
         encoder_config.causal = False
-        self.encoder = FlaxLongT5Stack(encoder_config, embed_tokens=self.shared, dtype=self.dtype)
+        self.encoder = FlaxLongT5Stack(
+            encoder_config,
+            embed_tokens=self.shared,
+            dtype=self.dtype,
+            gradient_checkpointing=self.gradient_checkpointing,
+        )
 
         decoder_config = copy.deepcopy(self.config)
         decoder_config.causal = True
         decoder_config.num_layers = self.config.num_decoder_layers
-        self.decoder = FlaxLongT5Stack(decoder_config, embed_tokens=self.shared, dtype=self.dtype)
+        self.decoder = FlaxLongT5Stack(
+            decoder_config,
+            embed_tokens=self.shared,
+            dtype=self.dtype,
+            gradient_checkpointing=self.gradient_checkpointing,
+        )
 
     def __call__(
         self,
@@ -2068,9 +2109,7 @@ class FlaxLongT5Model(FlaxLongT5PreTrainedModel):
     module_class = FlaxLongT5Module
 
 
-append_call_sample_docstring(
-    FlaxLongT5Model, _TOKENIZER_FOR_DOC, _CHECKPOINT_FOR_DOC, FlaxSeq2SeqModelOutput, _CONFIG_FOR_DOC
-)
+append_call_sample_docstring(FlaxLongT5Model, _CHECKPOINT_FOR_DOC, FlaxSeq2SeqModelOutput, _CONFIG_FOR_DOC)
 
 FLAX_LONGT5_MODEL_DOCSTRING = """
     Returns:
@@ -2078,9 +2117,9 @@ FLAX_LONGT5_MODEL_DOCSTRING = """
     Example:
 
     ```python
-    >>> from transformers import T5Tokenizer, FlaxLongT5Model
+    >>> from transformers import AutoTokenizer, FlaxLongT5Model
 
-    >>> tokenizer = T5Tokenizer.from_pretrained("t5-base")
+    >>> tokenizer = AutoTokenizer.from_pretrained("t5-base")
     >>> model = FlaxLongT5Model.from_pretrained("google/long-t5-local-base")
 
     >>> input_ids = tokenizer(
@@ -2104,6 +2143,7 @@ append_replace_return_docstrings(FlaxLongT5Model, output_type=FlaxSeq2SeqLMOutpu
 class FlaxLongT5ForConditionalGenerationModule(nn.Module):
     config: LongT5Config
     dtype: jnp.dtype = jnp.float32  # the dtype of the computation
+    gradient_checkpointing: bool = False
 
     def _get_encoder_module(self):
         return self.encoder
@@ -2118,19 +2158,24 @@ class FlaxLongT5ForConditionalGenerationModule(nn.Module):
             self.config.vocab_size,
             self.config.d_model,
             embedding_init=jax.nn.initializers.normal(self.config.initializer_factor),
+            dtype=self.dtype,
         )
 
         encoder_config = copy.deepcopy(self.config)
         encoder_config.causal = False
         encoder_config.use_cache = False
         encoder_config.is_encoder_decoder = False
-        self.encoder = FlaxLongT5Stack(encoder_config, self.shared, dtype=self.dtype)
+        self.encoder = FlaxLongT5Stack(
+            encoder_config, self.shared, dtype=self.dtype, gradient_checkpointing=self.gradient_checkpointing
+        )
 
         decoder_config = copy.deepcopy(self.config)
         decoder_config.causal = True
         decoder_config.is_encoder_decoder = False
         decoder_config.num_layers = self.config.num_decoder_layers
-        self.decoder = FlaxLongT5Stack(decoder_config, self.shared, dtype=self.dtype)
+        self.decoder = FlaxLongT5Stack(
+            decoder_config, self.shared, dtype=self.dtype, gradient_checkpointing=self.gradient_checkpointing
+        )
 
         self.lm_head = nn.Dense(
             self.config.vocab_size,
@@ -2230,10 +2275,10 @@ class FlaxLongT5ForConditionalGeneration(FlaxLongT5PreTrainedModel):
         Example:
 
         ```python
-        >>> from transformers import T5Tokenizer, FlaxLongT5ForConditionalGeneration
+        >>> from transformers import AutoTokenizer, FlaxLongT5ForConditionalGeneration
         >>> import jax.numpy as jnp
 
-        >>> tokenizer = T5Tokenizer.from_pretrained("t5-base")
+        >>> tokenizer = AutoTokenizer.from_pretrained("t5-base")
         >>> model = FlaxLongT5ForConditionalGeneration.from_pretrained("google/long-t5-local-base")
 
         >>> text = "summarize: My friends are cool but they eat too many carbs."
@@ -2346,7 +2391,7 @@ class FlaxLongT5ForConditionalGeneration(FlaxLongT5PreTrainedModel):
         attention_mask: Optional[jnp.DeviceArray] = None,
         decoder_attention_mask: Optional[jnp.DeviceArray] = None,
         encoder_outputs=None,
-        **kwargs
+        **kwargs,
     ):
         # initializing the cache
         batch_size, seq_length = decoder_input_ids.shape
@@ -2379,9 +2424,9 @@ FLAX_LONGT5_CONDITIONAL_GENERATION_DOCSTRING = """
     Example:
 
     ```python
-    >>> from transformers import T5Tokenizer, FlaxLongT5ForConditionalGeneration
+    >>> from transformers import AutoTokenizer, FlaxLongT5ForConditionalGeneration
 
-    >>> tokenizer = T5Tokenizer.from_pretrained("t5-base")
+    >>> tokenizer = AutoTokenizer.from_pretrained("t5-base")
     >>> model = FlaxLongT5ForConditionalGeneration.from_pretrained("google/long-t5-local-base")
 
     >>> ARTICLE_TO_SUMMARIZE = "summarize: My friends are cool but they eat too many carbs."

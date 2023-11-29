@@ -23,7 +23,6 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.utils.checkpoint
-from packaging import version
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
@@ -55,7 +54,6 @@ logger = logging.get_logger(__name__)
 
 _CHECKPOINT_FOR_DOC = "sijunhe/nezha-cn-base"
 _CONFIG_FOR_DOC = "NezhaConfig"
-_TOKENIZER_FOR_DOC = "BertTokenizer"
 
 NEZHA_PRETRAINED_MODEL_ARCHIVE_LIST = [
     "sijunhe/nezha-cn-base",
@@ -165,7 +163,7 @@ class NezhaRelativePositionsEncoding(nn.Module):
         my_shape = list(final_mat.size())
         my_shape.append(depth)
         positions_encoding = positions_encoding.view(my_shape)
-        self.register_buffer("positions_encoding", positions_encoding)
+        self.register_buffer("positions_encoding", positions_encoding, persistent=False)
 
     def forward(self, length):
         return self.positions_encoding[:length, :length, :]
@@ -183,12 +181,9 @@ class NezhaEmbeddings(nn.Module):
         # any TensorFlow checkpoint file
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        if version.parse(torch.__version__) > version.parse("1.6.0"):
-            self.register_buffer(
-                "token_type_ids",
-                torch.zeros((1, config.max_position_embeddings), dtype=torch.long),
-                persistent=False,
-            )
+        self.register_buffer(
+            "token_type_ids", torch.zeros((1, config.max_position_embeddings), dtype=torch.long), persistent=False
+        )
 
     def forward(
         self,
@@ -228,7 +223,7 @@ class NezhaEmbeddings(nn.Module):
 class NezhaSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
-        if config.hidden_size % config.num_attention_heads != 0 and not hasattr(config, "embedding_size"):
+        if config.hidden_size % config.num_attention_heads != 0:
             raise ValueError(
                 f"The hidden size ({config.hidden_size}) is not a multiple of the number of attention "
                 f"heads ({config.num_attention_heads})"
@@ -566,6 +561,13 @@ class NezhaEncoder(nn.Module):
         all_self_attentions = () if output_attentions else None
         all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
 
+        if self.gradient_checkpointing and self.training:
+            if use_cache:
+                logger.warning_once(
+                    "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`..."
+                )
+                use_cache = False
+
         next_decoder_cache = () if use_cache else None
         for i, layer_module in enumerate(self.layer):
             if output_hidden_states:
@@ -575,12 +577,6 @@ class NezhaEncoder(nn.Module):
             past_key_value = past_key_values[i] if past_key_values is not None else None
 
             if self.gradient_checkpointing and self.training:
-
-                if use_cache:
-                    logger.warning(
-                        "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`..."
-                    )
-                    use_cache = False
 
                 def create_custom_forward(module):
                     def custom_forward(*inputs):
@@ -739,7 +735,6 @@ class NezhaPreTrainedModel(PreTrainedModel):
     load_tf_weights = load_tf_weights_in_nezha
     base_model_prefix = "nezha"
     supports_gradient_checkpointing = True
-    _keys_to_ignore_on_load_missing = [r"positions_encoding"]
 
     def _init_weights(self, module):
         """Initialize the weights"""
@@ -817,7 +812,7 @@ NEZHA_INPUTS_DOCSTRING = r"""
         input_ids (`torch.LongTensor` of shape `({0})`):
             Indices of input sequence tokens in the vocabulary.
 
-            Indices can be obtained using [`BertTokenizer`]. See [`PreTrainedTokenizer.encode`] and
+            Indices can be obtained using [`AutoTokenizer`]. See [`PreTrainedTokenizer.encode`] and
             [`PreTrainedTokenizer.__call__`] for details.
 
             [What are input IDs?](../glossary#input-ids)
@@ -902,7 +897,6 @@ class NezhaModel(NezhaPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(NEZHA_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
-        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=BaseModelOutputWithPoolingAndCrossAttentions,
         config_class=_CONFIG_FOR_DOC,
@@ -1042,6 +1036,8 @@ class NezhaModel(NezhaPreTrainedModel):
     NEZHA_START_DOCSTRING,
 )
 class NezhaForPreTraining(NezhaPreTrainedModel):
+    _tied_weights_keys = ["cls.predictions.decoder"]
+
     def __init__(self, config):
         super().__init__(config)
 
@@ -1091,10 +1087,10 @@ class NezhaForPreTraining(NezhaPreTrainedModel):
         Example:
 
         ```python
-        >>> from transformers import BertTokenizer, NezhaForPreTraining
+        >>> from transformers import AutoTokenizer, NezhaForPreTraining
         >>> import torch
 
-        >>> tokenizer = BertTokenizer.from_pretrained("sijunhe/nezha-cn-base")
+        >>> tokenizer = AutoTokenizer.from_pretrained("sijunhe/nezha-cn-base")
         >>> model = NezhaForPreTraining.from_pretrained("sijunhe/nezha-cn-base")
 
         >>> inputs = tokenizer("Hello, my dog is cute", return_tensors="pt")
@@ -1142,9 +1138,7 @@ class NezhaForPreTraining(NezhaPreTrainedModel):
 
 @add_start_docstrings("""Nezha Model with a `language modeling` head on top.""", NEZHA_START_DOCSTRING)
 class NezhaForMaskedLM(NezhaPreTrainedModel):
-
-    _keys_to_ignore_on_load_unexpected = [r"pooler"]
-    _keys_to_ignore_on_load_missing = [r"predictions.decoder.bias", r"positions_encoding"]
+    _tied_weights_keys = ["cls.predictions.decoder"]
 
     def __init__(self, config):
         super().__init__(config)
@@ -1169,7 +1163,6 @@ class NezhaForMaskedLM(NezhaPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(NEZHA_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
-        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=MaskedLMOutput,
         config_class=_CONFIG_FOR_DOC,
@@ -1288,10 +1281,10 @@ class NezhaForNextSentencePrediction(NezhaPreTrainedModel):
         Example:
 
         ```python
-        >>> from transformers import BertTokenizer, NezhaForNextSentencePrediction
+        >>> from transformers import AutoTokenizer, NezhaForNextSentencePrediction
         >>> import torch
 
-        >>> tokenizer = BertTokenizer.from_pretrained("sijunhe/nezha-cn-base")
+        >>> tokenizer = AutoTokenizer.from_pretrained("sijunhe/nezha-cn-base")
         >>> model = NezhaForNextSentencePrediction.from_pretrained("sijunhe/nezha-cn-base")
 
         >>> prompt = "In Italy, pizza served in formal settings, such as at a restaurant, is presented unsliced."
@@ -1371,7 +1364,6 @@ class NezhaForSequenceClassification(NezhaPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(NEZHA_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
-        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=SequenceClassifierOutput,
         config_class=_CONFIG_FOR_DOC,
@@ -1469,7 +1461,6 @@ class NezhaForMultipleChoice(NezhaPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(NEZHA_INPUTS_DOCSTRING.format("batch_size, num_choices, sequence_length"))
     @add_code_sample_docstrings(
-        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=MultipleChoiceModelOutput,
         config_class=_CONFIG_FOR_DOC,
@@ -1547,9 +1538,6 @@ class NezhaForMultipleChoice(NezhaPreTrainedModel):
     NEZHA_START_DOCSTRING,
 )
 class NezhaForTokenClassification(NezhaPreTrainedModel):
-
-    _keys_to_ignore_on_load_unexpected = [r"pooler"]
-
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
@@ -1566,7 +1554,6 @@ class NezhaForTokenClassification(NezhaPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(NEZHA_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
-        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=TokenClassifierOutput,
         config_class=_CONFIG_FOR_DOC,
@@ -1630,9 +1617,6 @@ class NezhaForTokenClassification(NezhaPreTrainedModel):
     NEZHA_START_DOCSTRING,
 )
 class NezhaForQuestionAnswering(NezhaPreTrainedModel):
-
-    _keys_to_ignore_on_load_unexpected = [r"pooler"]
-
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
@@ -1645,7 +1629,6 @@ class NezhaForQuestionAnswering(NezhaPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(NEZHA_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
-        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=QuestionAnsweringModelOutput,
         config_class=_CONFIG_FOR_DOC,

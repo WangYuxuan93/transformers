@@ -28,18 +28,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import numpy as np
-from datasets import load_dataset
-from tqdm import tqdm
-
 import jax
 import jax.numpy as jnp
+import numpy as np
+from datasets import load_dataset
 from flax import jax_utils
 from flax.optim import Adam
 from flax.training import common_utils
 from flax.training.common_utils import get_metrics
 from jax.nn import log_softmax
 from modeling_flax_performer import FlaxPerformerForMaskedLM
+from tqdm import tqdm
+
 from transformers import (
     MODEL_FOR_MASKED_LM_MAPPING,
     AutoTokenizer,
@@ -433,7 +433,7 @@ def eval_step(params, batch):
     return compute_metrics(logits, targets, token_mask)
 
 
-def generate_batch_splits(samples_idx: jnp.ndarray, batch_size: int) -> jnp.ndarray:
+def generate_batch_splits(samples_idx: np.ndarray, batch_size: int) -> np.ndarray:
     nb_samples = len(samples_idx)
     samples_to_remove = nb_samples % batch_size
 
@@ -632,14 +632,14 @@ if __name__ == "__main__":
 
     epochs = tqdm(range(nb_epochs), desc=f"Epoch ... (1/{nb_epochs})", position=0)
     for epoch in epochs:
-
         # ======================== Training ================================
         # Create sampling rng
         rng, training_rng, eval_rng = jax.random.split(rng, 3)
 
         # Generate an epoch by shuffling sampling indices from the train dataset
         nb_training_samples = len(tokenized_datasets["train"])
-        training_samples_idx = jax.random.permutation(training_rng, jnp.arange(nb_training_samples))
+        # Avoid using jax.numpy here in case of TPU training
+        training_samples_idx = np.random.permutation(np.arange(nb_training_samples))
         training_batch_idx = generate_batch_splits(training_samples_idx, batch_size)
 
         # Gather the indexes for creating the batch and do a training step
@@ -658,7 +658,8 @@ if __name__ == "__main__":
 
         # ======================== Evaluating ==============================
         nb_eval_samples = len(tokenized_datasets["validation"])
-        eval_samples_idx = jnp.arange(nb_eval_samples)
+        # Avoid using jax.numpy here in case of TPU training
+        eval_samples_idx = np.arange(nb_eval_samples)
         eval_batch_idx = generate_batch_splits(eval_samples_idx, eval_batch_size)
 
         eval_metrics = []
@@ -672,9 +673,9 @@ if __name__ == "__main__":
             eval_metrics.append(metrics)
 
         eval_metrics_np = get_metrics(eval_metrics)
-        eval_metrics_np = jax.tree_map(jnp.sum, eval_metrics_np)
+        eval_metrics_np = jax.tree_util.tree_map(jnp.sum, eval_metrics_np)
         eval_normalizer = eval_metrics_np.pop("normalizer")
-        eval_summary = jax.tree_map(lambda x: x / eval_normalizer, eval_metrics_np)
+        eval_summary = jax.tree_util.tree_map(lambda x: x / eval_normalizer, eval_metrics_np)
 
         # Update progress bar
         epochs.desc = (

@@ -66,6 +66,9 @@ class UniSpeechSatConfig(PretrainedConfig):
             The dropout ratio for the attention probabilities.
         final_dropout (`float`, *optional*, defaults to 0.1):
             The dropout probability for the final projection layer of [`UniSpeechSatForCTC`].
+        layerdrop (`float`, *optional*, defaults to 0.1):
+            The LayerDrop probability. See the [LayerDrop paper](see https://arxiv.org/abs/1909.11556) for more
+            details.
         initializer_range (`float`, *optional*, defaults to 0.02):
             The standard deviation of the truncated_normal_initializer for initializing all weight matrices.
         layer_norm_eps (`float`, *optional*, defaults to 1e-12):
@@ -86,10 +89,10 @@ class UniSpeechSatConfig(PretrainedConfig):
             feature encoder. The length of *conv_dim* defines the number of 1D convolutional layers.
         conv_stride (`Tuple[int]` or `List[int]`, *optional*, defaults to `(5, 2, 2, 2, 2, 2, 2)`):
             A tuple of integers defining the stride of each 1D convolutional layer in the feature encoder. The length
-            of *conv_stride* defines the number of convolutional layers and has to match the the length of *conv_dim*.
+            of *conv_stride* defines the number of convolutional layers and has to match the length of *conv_dim*.
         conv_kernel (`Tuple[int]` or `List[int]`, *optional*, defaults to `(10, 3, 3, 3, 3, 3, 3)`):
             A tuple of integers defining the kernel size of each 1D convolutional layer in the feature encoder. The
-            length of *conv_kernel* defines the number of convolutional layers and has to match the the length of
+            length of *conv_kernel* defines the number of convolutional layers and has to match the length of
             *conv_dim*.
         conv_bias (`bool`, *optional*, defaults to `False`):
             Whether the 1D convolutional layers have a bias.
@@ -239,7 +242,7 @@ class UniSpeechSatConfig(PretrainedConfig):
         bos_token_id=1,
         eos_token_id=2,
         num_clusters=504,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(**kwargs, pad_token_id=pad_token_id, bos_token_id=bos_token_id, eos_token_id=eos_token_id)
         self.hidden_size = hidden_size

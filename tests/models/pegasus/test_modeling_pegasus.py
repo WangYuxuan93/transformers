@@ -21,9 +21,10 @@ from transformers import PegasusConfig, is_torch_available
 from transformers.testing_utils import require_sentencepiece, require_tokenizers, require_torch, slow, torch_device
 from transformers.utils import cached_property
 
-from ...generation.test_generation_utils import GenerationTesterMixin
+from ...generation.test_utils import GenerationTesterMixin
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ModelTesterMixin, ids_tensor
+from ...test_pipeline_mixin import PipelineTesterMixin
 from ..mbart.test_modeling_mbart import AbstractSeq2SeqIntegrationTest
 
 
@@ -104,6 +105,12 @@ class PegasusModelTester:
         self.pad_token_id = pad_token_id
         self.bos_token_id = bos_token_id
 
+        # forcing a certain token to be generated, sets all other tokens to -inf
+        # if however the token to be generated is already at -inf then it can lead token
+        # `nan` values and thus break generation
+        self.forced_bos_token_id = None
+        self.forced_eos_token_id = None
+
     def prepare_config_and_inputs(self):
         input_ids = ids_tensor([self.batch_size, self.seq_length], self.vocab_size)
         input_ids = ids_tensor([self.batch_size, self.seq_length], self.vocab_size).clamp(
@@ -151,6 +158,8 @@ class PegasusModelTester:
             eos_token_id=self.eos_token_id,
             bos_token_id=self.bos_token_id,
             pad_token_id=self.pad_token_id,
+            forced_bos_token_id=self.forced_bos_token_id,
+            forced_eos_token_id=self.forced_eos_token_id,
         )
 
     def prepare_config_and_inputs_for_common(self):
@@ -225,9 +234,21 @@ class PegasusModelTester:
 
 
 @require_torch
-class PegasusModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase):
+class PegasusModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixin, unittest.TestCase):
     all_model_classes = (PegasusModel, PegasusForConditionalGeneration) if is_torch_available() else ()
     all_generative_model_classes = (PegasusForConditionalGeneration,) if is_torch_available() else ()
+    pipeline_model_mapping = (
+        {
+            "conversational": PegasusForConditionalGeneration,
+            "feature-extraction": PegasusModel,
+            "summarization": PegasusForConditionalGeneration,
+            "text-generation": PegasusForCausalLM,
+            "text2text-generation": PegasusForConditionalGeneration,
+            "translation": PegasusForConditionalGeneration,
+        }
+        if is_torch_available()
+        else {}
+    )
     is_encoder_decoder = True
     fx_compatible = True
     test_resize_position_embeddings = True
@@ -552,3 +573,7 @@ class PegasusStandaloneDecoderModelTest(ModelTesterMixin, GenerationTesterMixin,
     def test_retain_grad_hidden_states_attentions(self):
         # decoder cannot keep gradients
         return
+
+    @unittest.skip("The model doesn't support left padding")  # and it's not used enough to be worth fixing :)
+    def test_left_padding_compatibility(self):
+        pass

@@ -14,6 +14,7 @@
 # limitations under the License.
 import json
 import os
+import re
 import tempfile
 import unittest
 
@@ -37,7 +38,6 @@ else:
 @require_sentencepiece
 @require_tokenizers
 class T5TokenizationTest(TokenizerTesterMixin, unittest.TestCase):
-
     tokenizer_class = T5Tokenizer
     rust_tokenizer_class = T5TokenizerFast
     test_rust_tokenizer = True
@@ -210,10 +210,9 @@ class T5TokenizationTest(TokenizerTesterMixin, unittest.TestCase):
             "Summary of the text.",
             "Another summary.",
         ]
-        with tokenizer.as_target_tokenizer():
-            targets = tokenizer(
-                tgt_text, max_length=32, padding="max_length", truncation=True, return_tensors=FRAMEWORK
-            )
+        targets = tokenizer(
+            text_target=tgt_text, max_length=32, padding="max_length", truncation=True, return_tensors=FRAMEWORK
+        )
         self.assertEqual(32, targets["input_ids"].shape[1])
 
     def test_outputs_not_longer_than_maxlen(self):
@@ -235,12 +234,10 @@ class T5TokenizationTest(TokenizerTesterMixin, unittest.TestCase):
         expected_src_tokens = [71, 307, 8986, 21, 4505, 1635, 1707, 5, 1]
         expected_tgt_tokens = [20698, 13, 8, 1499, 5, 1]
 
-        batch = tokenizer(src_text)
-        with tokenizer.as_target_tokenizer():
-            targets = tokenizer(tgt_text)
+        batch = tokenizer(src_text, text_target=tgt_text)
 
         self.assertEqual(expected_src_tokens, batch["input_ids"][0])
-        self.assertEqual(expected_tgt_tokens, targets["input_ids"][0])
+        self.assertEqual(expected_tgt_tokens, batch["labels"][0])
 
     def test_token_type_ids(self):
         src_text_1 = ["A first paragraph for summarization."]
@@ -274,7 +271,6 @@ class T5TokenizationTest(TokenizerTesterMixin, unittest.TestCase):
     def test_special_tokens_initialization(self):
         for tokenizer, pretrained_name, kwargs in self.tokenizers_list:
             with self.subTest(f"{tokenizer.__class__.__name__} ({pretrained_name})"):
-
                 added_tokens = [f"<extra_id_{i}>" for i in range(100)] + [AddedToken("<special>", lstrip=True)]
 
                 tokenizer_r = self.rust_tokenizer_class.from_pretrained(
@@ -308,7 +304,6 @@ class T5TokenizationTest(TokenizerTesterMixin, unittest.TestCase):
             tokenizer_list.append((self.rust_tokenizer_class, self.get_rust_tokenizer()))
 
         for tokenizer_class, tokenizer_utils in tokenizer_list:
-
             with tempfile.TemporaryDirectory() as tmp_dir:
                 tokenizer_utils.save_pretrained(tmp_dir)
 
@@ -382,3 +377,57 @@ class T5TokenizationTest(TokenizerTesterMixin, unittest.TestCase):
             model_name="t5-base",
             revision="5a7ff2d8f5117c194c7e32ec1ccbf04642cca99b",
         )
+
+    def test_get_sentinel_tokens(self):
+        tokenizer = T5Tokenizer(SAMPLE_VOCAB, extra_ids=10)
+        sentinel_tokens = tokenizer.get_sentinel_tokens()
+        self.assertEquals(len(sentinel_tokens), 10)
+        self.assertListEqual(sorted(sentinel_tokens), sorted([f"<extra_id_{str(i)}>" for i in range(0, 10)]))
+        self.assertTrue([re.search(r"<extra_id_\d+>", token) is not None for token in sentinel_tokens])
+
+    def test_get_sentinel_token_ids(self):
+        tokenizer = T5Tokenizer(SAMPLE_VOCAB, extra_ids=10)
+        self.assertListEqual(sorted(tokenizer.get_sentinel_token_ids()), sorted(range(1000, 1010)))
+
+    def test_get_sentinel_tokens_for_fasttokenizer(self):
+        tokenizer = T5TokenizerFast(SAMPLE_VOCAB, extra_ids=10)
+        sentinel_tokens = tokenizer.get_sentinel_tokens()
+        self.assertEquals(len(sentinel_tokens), 10)
+        self.assertListEqual(sorted(sentinel_tokens), sorted([f"<extra_id_{str(i)}>" for i in range(0, 10)]))
+        self.assertTrue([re.search(r"<extra_id_\d+>", token) is not None for token in sentinel_tokens])
+
+    def test_get_sentinel_token_ids_for_fasttokenizer(self):
+        tokenizer = T5TokenizerFast(SAMPLE_VOCAB, extra_ids=10)
+        self.assertListEqual(sorted(tokenizer.get_sentinel_token_ids()), sorted(range(1000, 1010)))
+
+    def test_encode_extra_ids(self):
+        tokenizer = T5Tokenizer(SAMPLE_VOCAB, extra_ids=0)
+        tokenizer.add_special_tokens({"additional_special_tokens": ["<extra_id_0>"]})
+        tokenizer._create_trie(tokenizer.all_special_tokens)
+        # TODO ArthurZ the above is necessary as addedTokens / intialization sucks. Trie is not correctly created
+        # So the extra ids are split....
+
+        input_ids = tokenizer.encode(". Hello")
+        self.assertEquals(input_ids, [7, 4, 156, 86, 20, 2])
+        tokens = tokenizer.tokenize(". Hello")
+        self.assertEquals(tokens, ["▁", ".", "▁He", "ll", "o"])
+
+        input_ids = tokenizer.encode(" . Hello")
+        self.assertEquals(input_ids, [7, 4, 156, 86, 20, 2])
+        tokens = tokenizer.tokenize(" . Hello")
+        self.assertEquals(tokens, ["▁", ".", "▁He", "ll", "o"])
+
+        input_ids = tokenizer.encode("Hello, <extra_id_0>I")
+        self.assertEquals(input_ids, [156, 86, 20, 3, 999, 8, 2])
+        tokens = tokenizer.tokenize("Hello, <extra_id_0>I")
+        self.assertEquals(tokens, ["▁He", "ll", "o", ",", "<extra_id_0>", "▁I"])
+
+        input_ids = tokenizer.encode("Hello, <extra_id_0>,")
+        self.assertEquals(input_ids, [156, 86, 20, 3, 999, 3, 2])
+        tokens = tokenizer.tokenize("Hello, <extra_id_0>,")
+        self.assertEquals(tokens, ["▁He", "ll", "o", ",", "<extra_id_0>", ","])
+
+        input_ids = tokenizer.encode(" <extra_id_0> ,")
+        self.assertEquals(input_ids, [999, 3, 2])
+        tokens = tokenizer.tokenize(" <extra_id_0> ,")
+        self.assertEquals(tokens, ["<extra_id_0>", ","])  # spaces are eaten by rstrip / lstrip

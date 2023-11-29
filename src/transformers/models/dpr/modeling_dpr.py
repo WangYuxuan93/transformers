@@ -170,7 +170,6 @@ class DPRPreTrainedModel(PreTrainedModel):
 
 
 class DPREncoder(DPRPreTrainedModel):
-
     base_model_prefix = "bert_model"
 
     def __init__(self, config: DPRConfig):
@@ -227,7 +226,6 @@ class DPREncoder(DPRPreTrainedModel):
 
 
 class DPRSpanPredictor(DPRPreTrainedModel):
-
     base_model_prefix = "encoder"
 
     def __init__(self, config: DPRConfig):
@@ -298,7 +296,6 @@ class DPRPretrainedContextEncoder(DPRPreTrainedModel):
     config_class = DPRConfig
     load_tf_weights = None
     base_model_prefix = "ctx_encoder"
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
 
 
 class DPRPretrainedQuestionEncoder(DPRPreTrainedModel):
@@ -310,7 +307,6 @@ class DPRPretrainedQuestionEncoder(DPRPreTrainedModel):
     config_class = DPRConfig
     load_tf_weights = None
     base_model_prefix = "question_encoder"
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
 
 
 class DPRPretrainedReader(DPRPreTrainedModel):
@@ -322,7 +318,6 @@ class DPRPretrainedReader(DPRPreTrainedModel):
     config_class = DPRConfig
     load_tf_weights = None
     base_model_prefix = "span_predictor"
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
 
 
 ###############
@@ -369,7 +364,7 @@ DPR_ENCODERS_INPUTS_DOCSTRING = r"""
             DPR is a model with absolute position embeddings so it's usually advised to pad the inputs on the right
             rather than the left.
 
-            Indices can be obtained using [`DPRTokenizer`]. See [`PreTrainedTokenizer.encode`] and
+            Indices can be obtained using [`AutoTokenizer`]. See [`PreTrainedTokenizer.encode`] and
             [`PreTrainedTokenizer.__call__`] for details.
 
             [What are input IDs?](../glossary#input-ids)
@@ -404,7 +399,7 @@ DPR_ENCODERS_INPUTS_DOCSTRING = r"""
 
 DPR_READER_INPUTS_DOCSTRING = r"""
     Args:
-        input_ids: (`Tuple[torch.LongTensor]` of shapes `(n_passages, sequence_length)`):
+        input_ids (`Tuple[torch.LongTensor]` of shapes `(n_passages, sequence_length)`):
             Indices of input sequence tokens in the vocabulary. It has to be a sequence triplet with 1) the question
             and 2) the passages titles and 3) the passages texts To match pretraining, DPR `input_ids` sequence should
             be formatted with [CLS] and [SEP] with the format:

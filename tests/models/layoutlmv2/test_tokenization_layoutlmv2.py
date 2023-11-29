@@ -21,7 +21,14 @@ import tempfile
 import unittest
 from typing import List
 
-from transformers import AddedToken, LayoutLMv2TokenizerFast, SpecialTokensMixin, is_tf_available, is_torch_available
+from transformers import (
+    AddedToken,
+    LayoutLMv2TokenizerFast,
+    SpecialTokensMixin,
+    is_tf_available,
+    is_torch_available,
+    logging,
+)
 from transformers.models.layoutlmv2.tokenization_layoutlmv2 import (
     VOCAB_FILES_NAMES,
     BasicTokenizer,
@@ -31,7 +38,14 @@ from transformers.models.layoutlmv2.tokenization_layoutlmv2 import (
     _is_punctuation,
     _is_whitespace,
 )
-from transformers.testing_utils import is_pt_tf_cross_test, require_pandas, require_tokenizers, require_torch, slow
+from transformers.testing_utils import (
+    is_pt_tf_cross_test,
+    require_detectron2,
+    require_pandas,
+    require_tokenizers,
+    require_torch,
+    slow,
+)
 
 from ...test_tokenization_common import (
     SMALL_TRAINING_CORPUS,
@@ -39,6 +53,9 @@ from ...test_tokenization_common import (
     filter_non_english,
     merge_model_tokenizer_mappings,
 )
+
+
+logger = logging.get_logger(__name__)
 
 
 @require_tokenizers
@@ -274,7 +291,6 @@ class LayoutLMv2TokenizationTest(TokenizerTesterMixin, unittest.TestCase):
         tokenizers: List[LayoutLMv2Tokenizer] = self.get_tokenizers(do_lower_case=False)
         for tokenizer in tokenizers:
             with self.subTest(f"{tokenizer.__class__.__name__}"):
-
                 special_token = "[SPECIAL_TOKEN]"
                 special_token_box = [1000, 1000, 1000, 1000]
 
@@ -509,7 +525,6 @@ class LayoutLMv2TokenizationTest(TokenizerTesterMixin, unittest.TestCase):
         tokenizers = self.get_tokenizers(do_lower_case=False)
         for tokenizer in tokenizers:
             with self.subTest(f"{tokenizer.__class__.__name__}"):
-
                 # test 1: single sequence
                 words, boxes = self.get_words_and_boxes()
 
@@ -787,6 +802,49 @@ class LayoutLMv2TokenizationTest(TokenizerTesterMixin, unittest.TestCase):
                 input_p = tokenizer_r.pad(input_p, max_length=max_length, padding="max_length")
 
                 self.assert_batch_padded_input_match(input_r, input_p, max_length, pad_token_id)
+
+    def test_padding_warning_message_fast_tokenizer(self):
+        if not self.test_rust_tokenizer:
+            return
+
+        words, boxes = self.get_words_and_boxes_batch()
+
+        tokenizer_fast = self.get_rust_tokenizer()
+
+        encoding_fast = tokenizer_fast(
+            words,
+            boxes=boxes,
+        )
+
+        with self.assertLogs("transformers", level="WARNING") as cm:
+            tokenizer_fast.pad(encoding_fast)
+        self.assertEqual(len(cm.records), 1)
+        self.assertIn(
+            "Please note that with a fast tokenizer, using the `__call__` method is faster than using a method to"
+            " encode the text followed by a call to the `pad` method to get a padded encoding.",
+            cm.records[0].message,
+        )
+
+        if not self.test_slow_tokenizer:
+            return
+
+        tokenizer_slow = self.get_tokenizer()
+
+        encoding_slow = tokenizer_slow(
+            words,
+            boxes=boxes,
+        )
+
+        with self.assertLogs(level="WARNING") as cm:
+            # We want to assert there are no warnings, but the 'assertLogs' method does not support that.
+            # Therefore, we are adding a dummy warning, and then we will assert it is the only warning.
+            logger.warning("Dummy warning")
+            tokenizer_slow.pad(encoding_slow)
+        self.assertEqual(len(cm.records), 1)
+        self.assertIn(
+            "Dummy warning",
+            cm.records[0].message,
+        )
 
     def test_call(self):
         # Tests that all call wrap to encode_plus and batch_encode_plus
@@ -1135,7 +1193,6 @@ class LayoutLMv2TokenizationTest(TokenizerTesterMixin, unittest.TestCase):
         tokenizers = self.get_tokenizers()
         for tokenizer in tokenizers:
             with self.subTest(f"{tokenizer.__class__.__name__}"):
-
                 # test 1: single sequence
                 words, boxes = self.get_words_and_boxes()
 
@@ -1211,6 +1268,7 @@ class LayoutLMv2TokenizationTest(TokenizerTesterMixin, unittest.TestCase):
                 self.assertEqual(sum(tokens_with_offsets["special_tokens_mask"]), added_tokens)
 
     @require_torch
+    @require_detectron2
     @slow
     def test_torch_encode_plus_sent_to_model(self):
         import torch
@@ -1222,7 +1280,6 @@ class LayoutLMv2TokenizationTest(TokenizerTesterMixin, unittest.TestCase):
         tokenizers = self.get_tokenizers(do_lower_case=False)
         for tokenizer in tokenizers:
             with self.subTest(f"{tokenizer.__class__.__name__}"):
-
                 if tokenizer.__class__ not in MODEL_TOKENIZER_MAPPING:
                     return
 
@@ -1490,7 +1547,6 @@ class LayoutLMv2TokenizationTest(TokenizerTesterMixin, unittest.TestCase):
     def test_special_tokens_initialization(self):
         for tokenizer, pretrained_name, kwargs in self.tokenizers_list:
             with self.subTest(f"{tokenizer.__class__.__name__} ({pretrained_name})"):
-
                 added_tokens = [AddedToken("<special>", lstrip=True)]
 
                 tokenizer_r = self.rust_tokenizer_class.from_pretrained(
@@ -1726,7 +1782,6 @@ class LayoutLMv2TokenizationTest(TokenizerTesterMixin, unittest.TestCase):
             tokenizer = self.rust_tokenizer_class.from_pretrained(pretrained_name, **kwargs)
 
             with self.subTest(f"{tokenizer.__class__.__name__} ({pretrained_name}, {tokenizer.__class__.__name__})"):
-
                 if is_torch_available():
                     returned_tensor = "pt"
                 elif is_tf_available():
@@ -2183,7 +2238,9 @@ class LayoutLMv2TokenizationTest(TokenizerTesterMixin, unittest.TestCase):
                 sequence = tokenizer(seq_0, boxes=boxes_0, add_special_tokens=False)
                 total_length = len(sequence["input_ids"])
 
-                self.assertGreater(total_length, 4, "Issue with the testing sequence, please update it it's too short")
+                self.assertGreater(
+                    total_length, 4, "Issue with the testing sequence, please update it, it's too short"
+                )
 
                 # Test with max model input length
                 model_max_length = tokenizer.model_max_length
@@ -2193,7 +2250,9 @@ class LayoutLMv2TokenizationTest(TokenizerTesterMixin, unittest.TestCase):
                 sequence1 = tokenizer(seq_1, boxes=boxes_1, add_special_tokens=False)
                 total_length1 = len(sequence1["input_ids"])
                 self.assertGreater(
-                    total_length1, model_max_length, "Issue with the testing sequence, please update it it's too short"
+                    total_length1,
+                    model_max_length,
+                    "Issue with the testing sequence, please update it, it's too short",
                 )
 
                 # Simple
@@ -2333,7 +2392,6 @@ class LayoutLMv2TokenizationTest(TokenizerTesterMixin, unittest.TestCase):
 
     @slow
     def test_layoutlmv2_integration_test(self):
-
         tokenizer_p = LayoutLMv2Tokenizer.from_pretrained("microsoft/layoutlmv2-base-uncased")
         tokenizer_r = LayoutLMv2TokenizerFast.from_pretrained("microsoft/layoutlmv2-base-uncased")
 

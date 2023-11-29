@@ -9,9 +9,8 @@ modified_only_fixup:
 	$(eval modified_py_files := $(shell python utils/get_modified_files.py $(check_dirs)))
 	@if test -n "$(modified_py_files)"; then \
 		echo "Checking/fixing $(modified_py_files)"; \
-		black --preview $(modified_py_files); \
-		isort $(modified_py_files); \
-		flake8 $(modified_py_files); \
+		black $(modified_py_files); \
+		ruff $(modified_py_files) --fix; \
 	else \
 		echo "No library .py files were modified"; \
 	fi
@@ -40,17 +39,20 @@ repo-consistency:
 	python utils/check_repo.py
 	python utils/check_inits.py
 	python utils/check_config_docstrings.py
-	python utils/tests_fetcher.py --sanity_check
+	python utils/check_config_attributes.py
+	python utils/check_doctest_list.py
+	python utils/update_metadata.py --check-only
+	python utils/check_task_guides.py
 
 # this target runs checks on all files
 
 quality:
-	black --check --preview $(check_dirs)
-	isort --check-only $(check_dirs)
+	black --check $(check_dirs) setup.py conftest.py
 	python utils/custom_init_isort.py --check_only
 	python utils/sort_auto_mappings.py --check_only
-	flake8 $(check_dirs)
+	ruff $(check_dirs) setup.py conftest.py
 	doc-builder style src/transformers docs/source --max_len 119 --check_only --path_to_docs docs/source
+	python utils/check_doc_toc.py
 
 # Format source code automatically and check is there are any problems left that need manual fixing
 
@@ -58,12 +60,13 @@ extra_style_checks:
 	python utils/custom_init_isort.py
 	python utils/sort_auto_mappings.py
 	doc-builder style src/transformers docs/source --max_len 119 --path_to_docs docs/source
+	python utils/check_doc_toc.py --fix_and_overwrite
 
 # this target runs checks on all files and potentially modifies some of them
 
 style:
-	black --preview $(check_dirs)
-	isort $(check_dirs)
+	black $(check_dirs) setup.py conftest.py
+	ruff $(check_dirs) setup.py conftest.py --fix
 	${MAKE} autogenerate_code
 	${MAKE} extra_style_checks
 
@@ -77,6 +80,7 @@ fix-copies:
 	python utils/check_copies.py --fix_and_overwrite
 	python utils/check_table.py --fix_and_overwrite
 	python utils/check_dummies.py --fix_and_overwrite
+	python utils/check_task_guides.py --fix_and_overwrite
 
 # Run tests for the library
 
@@ -107,3 +111,10 @@ post-release:
 
 post-patch:
 	python utils/release.py --post_release --patch
+
+build-release:
+	rm -rf dist
+	rm -rf build
+	python setup.py bdist_wheel
+	python setup.py sdist
+	python utils/check_build.py

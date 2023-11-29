@@ -37,7 +37,6 @@ logger = logging.get_logger(__name__)
 
 # General docstring
 _CONFIG_FOR_DOC = "RegNetConfig"
-_FEAT_EXTRACTOR_FOR_DOC = "AutoFeatureExtractor"
 
 # Base docstring
 _CHECKPOINT_FOR_DOC = "facebook/regnet-y-040"
@@ -45,7 +44,7 @@ _EXPECTED_OUTPUT_SHAPE = [1, 1088, 7, 7]
 
 # Image classification docstring
 _IMAGE_CLASS_CHECKPOINT = "facebook/regnet-y-040"
-_IMAGE_CLASS_EXPECTED_OUTPUT = "'tabby, tabby cat'"
+_IMAGE_CLASS_EXPECTED_OUTPUT = "tabby, tabby cat"
 
 REGNET_PRETRAINED_MODEL_ARCHIVE_LIST = [
     "facebook/regnet-y-040",
@@ -275,7 +274,6 @@ class RegNetEncoder(nn.Module):
         return BaseModelOutputWithNoAttention(last_hidden_state=hidden_state, hidden_states=hidden_states)
 
 
-# Copied from transformers.models.resnet.modeling_resnet.ResNetPreTrainedModel with ResNet->RegNet,resnet->regnet
 class RegNetPreTrainedModel(PreTrainedModel):
     """
     An abstract class to handle weights initialization and a simple interface for downloading and loading pretrained
@@ -287,6 +285,7 @@ class RegNetPreTrainedModel(PreTrainedModel):
     main_input_name = "pixel_values"
     supports_gradient_checkpointing = True
 
+    # Copied from transformers.models.resnet.modeling_resnet.ResNetPreTrainedModel._init_weights
     def _init_weights(self, module):
         if isinstance(module, nn.Conv2d):
             nn.init.kaiming_normal_(module.weight, mode="fan_out", nonlinearity="relu")
@@ -313,8 +312,8 @@ REGNET_START_DOCSTRING = r"""
 REGNET_INPUTS_DOCSTRING = r"""
     Args:
         pixel_values (`torch.FloatTensor` of shape `(batch_size, num_channels, height, width)`):
-            Pixel values. Pixel values can be obtained using [`AutoFeatureExtractor`]. See
-            [`AutoFeatureExtractor.__call__`] for details.
+            Pixel values. Pixel values can be obtained using [`AutoImageProcessor`]. See
+            [`ConvNextImageProcessor.__call__`] for details.
 
         output_hidden_states (`bool`, *optional*):
             Whether or not to return the hidden states of all layers. See `hidden_states` under returned tensors for
@@ -341,7 +340,6 @@ class RegNetModel(RegNetPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(REGNET_INPUTS_DOCSTRING)
     @add_code_sample_docstrings(
-        processor_class=_FEAT_EXTRACTOR_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=BaseModelOutputWithPoolingAndNoAttention,
         config_class=_CONFIG_FOR_DOC,
@@ -399,7 +397,6 @@ class RegNetForImageClassification(RegNetPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(REGNET_INPUTS_DOCSTRING)
     @add_code_sample_docstrings(
-        processor_class=_FEAT_EXTRACTOR_FOR_DOC,
         checkpoint=_IMAGE_CLASS_CHECKPOINT,
         output_type=ImageClassifierOutputWithNoAttention,
         config_class=_CONFIG_FOR_DOC,
@@ -407,10 +404,10 @@ class RegNetForImageClassification(RegNetPreTrainedModel):
     )
     def forward(
         self,
-        pixel_values: Tensor = None,
-        labels: Tensor = None,
-        output_hidden_states: bool = None,
-        return_dict: bool = None,
+        pixel_values: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.LongTensor] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
     ) -> ImageClassifierOutputWithNoAttention:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):

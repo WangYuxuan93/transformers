@@ -38,7 +38,7 @@ from torchvision.transforms.functional import InterpolationMode
 
 import transformers
 from transformers import (
-    AutoFeatureExtractor,
+    AutoImageProcessor,
     AutoModel,
     AutoTokenizer,
     HfArgumentParser,
@@ -54,7 +54,7 @@ from transformers.utils.versions import require_version
 logger = logging.getLogger(__name__)
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
-check_min_version("4.21.0.dev0")
+check_min_version("4.31.0.dev0")
 
 require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/contrastive-image-text/requirements.txt")
 
@@ -74,7 +74,7 @@ class ModelArguments:
     tokenizer_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
     )
-    feature_extractor_name: str = field(default=None, metadata={"help": "Name or path of preprocessor config."})
+    image_processor_name: str = field(default=None, metadata={"help": "Name or path of preprocessor config."})
     cache_dir: Optional[str] = field(
         default=None, metadata={"help": "Where do you want to store the pretrained models downloaded from s3"}
     )
@@ -90,7 +90,7 @@ class ModelArguments:
         default=False,
         metadata={
             "help": (
-                "Will use the token generated when running `transformers-cli login` (necessary to use this script "
+                "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
                 "with private models)."
             )
         },
@@ -131,6 +131,10 @@ class DataTrainingArguments:
         default=None,
         metadata={"help": "An optional input evaluation data file (a jsonlines file)."},
     )
+    test_file: Optional[str] = field(
+        default=None,
+        metadata={"help": "An optional input testing data file (a jsonlines file)."},
+    )
     max_seq_length: Optional[int] = field(
         default=128,
         metadata={
@@ -157,9 +161,6 @@ class DataTrainingArguments:
                 "value if set."
             )
         },
-    )
-    overwrite_cache: bool = field(
-        default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
     )
     overwrite_cache: bool = field(
         default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
@@ -201,7 +202,8 @@ class Transform(torch.nn.Module):
             Normalize(mean, std),
         )
 
-    def forward(self, x: Image) -> torch.Tensor:
+    def forward(self, x) -> torch.Tensor:
+        """`x` should be an instance of `PIL.Image.Image`"""
         with torch.no_grad():
             x = self.transforms(x)
         return x
@@ -243,6 +245,10 @@ def main():
         datefmt="%m/%d/%Y %H:%M:%S",
         handlers=[logging.StreamHandler(sys.stdout)],
     )
+
+    if training_args.should_log:
+        # The default of training_args.log_level is passive, so we set log level at info here to have that default.
+        transformers.utils.logging.set_verbosity_info()
 
     log_level = training_args.get_process_log_level()
     logger.setLevel(log_level)
@@ -310,7 +316,7 @@ def main():
     # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
     # https://huggingface.co/docs/datasets/loading_datasets.html.
 
-    # 5. Load pretrained model, tokenizer, and feature extractor
+    # 5. Load pretrained model, tokenizer, and image processor
     if model_args.tokenizer_name:
         tokenizer = AutoTokenizer.from_pretrained(
             model_args.tokenizer_name, cache_dir=model_args.cache_dir, use_fast=model_args.use_fast_tokenizer
@@ -325,9 +331,9 @@ def main():
             "You can do it from another script, save it, and load it from here, using --tokenizer_name."
         )
 
-    # Load feature_extractor, in this script we only use this to get the mean and std for normalization.
-    feature_extractor = AutoFeatureExtractor.from_pretrained(
-        model_args.feature_extractor_name or model_args.model_name_or_path,
+    # Load image_processor, in this script we only use this to get the mean and std for normalization.
+    image_processor = AutoImageProcessor.from_pretrained(
+        model_args.image_processor_name or model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
@@ -388,14 +394,14 @@ def main():
     # 7. Preprocessing the datasets.
     # Initialize torchvision transforms and jit it for faster processing.
     image_transformations = Transform(
-        config.vision_config.image_size, feature_extractor.image_mean, feature_extractor.image_std
+        config.vision_config.image_size, image_processor.image_mean, image_processor.image_std
     )
     image_transformations = torch.jit.script(image_transformations)
 
     # Preprocessing the datasets.
     # We need to tokenize input captions and transform the images.
     def tokenize_captions(examples):
-        captions = [caption for caption in examples[caption_column]]
+        captions = list(examples[caption_column])
         text_inputs = tokenizer(captions, max_length=data_args.max_seq_length, padding="max_length", truncation=True)
         examples["input_ids"] = text_inputs.input_ids
         examples["attention_mask"] = text_inputs.attention_mask
@@ -504,6 +510,8 @@ def main():
             checkpoint = last_checkpoint
         train_result = trainer.train(resume_from_checkpoint=checkpoint)
         trainer.save_model()
+        tokenizer.save_pretrained(training_args.output_dir)
+        image_processor.save_pretrained(training_args.output_dir)
         trainer.log_metrics("train", train_result.metrics)
         trainer.save_metrics("train", train_result.metrics)
         trainer.save_state()

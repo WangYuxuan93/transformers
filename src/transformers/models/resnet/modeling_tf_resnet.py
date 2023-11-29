@@ -14,7 +14,7 @@
 # limitations under the License.
 """ TensorFlow ResNet model."""
 
-from typing import Dict, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import tensorflow as tf
 
@@ -34,7 +34,6 @@ logger = logging.get_logger(__name__)
 
 # General docstring
 _CONFIG_FOR_DOC = "ResNetConfig"
-_FEAT_EXTRACTOR_FOR_DOC = "AutoFeatureExtractor"
 
 # Base docstring
 _CHECKPOINT_FOR_DOC = "microsoft/resnet-50"
@@ -60,7 +59,7 @@ class TFResNetConvLayer(tf.keras.layers.Layer):
             out_channels, kernel_size=kernel_size, strides=stride, padding="valid", use_bias=False, name="convolution"
         )
         # Use same default momentum and epsilon as PyTorch equivalent
-        self.normalization = tf.keras.layers.BatchNormalization(epsilon=1e-5, momentum=0.1, name="normalization")
+        self.normalization = tf.keras.layers.BatchNormalization(epsilon=1e-5, momentum=0.9, name="normalization")
         self.activation = ACT2FN[activation] if activation is not None else tf.keras.layers.Activation("linear")
 
     def convolution(self, hidden_state: tf.Tensor) -> tf.Tensor:
@@ -119,7 +118,7 @@ class TFResNetShortCut(tf.keras.layers.Layer):
             out_channels, kernel_size=1, strides=stride, use_bias=False, name="convolution"
         )
         # Use same default momentum and epsilon as PyTorch equivalent
-        self.normalization = tf.keras.layers.BatchNormalization(epsilon=1e-5, momentum=0.1, name="normalization")
+        self.normalization = tf.keras.layers.BatchNormalization(epsilon=1e-5, momentum=0.9, name="normalization")
 
     def call(self, x: tf.Tensor, training: bool = False) -> tf.Tensor:
         hidden_state = x
@@ -172,7 +171,7 @@ class TFResNetBottleNeckLayer(tf.keras.layers.Layer):
         stride: int = 1,
         activation: str = "relu",
         reduction: int = 4,
-        **kwargs
+        **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         should_apply_shortcut = in_channels != out_channels or stride != 1
@@ -263,10 +262,7 @@ class TFResNetEncoder(tf.keras.layers.Layer):
         if not return_dict:
             return tuple(v for v in [hidden_state, hidden_states] if v is not None)
 
-        return TFBaseModelOutputWithNoAttention(
-            last_hidden_state=hidden_state,
-            hidden_states=hidden_states,
-        )
+        return TFBaseModelOutputWithNoAttention(last_hidden_state=hidden_state, hidden_states=hidden_states)
 
 
 class TFResNetPreTrainedModel(TFPreTrainedModel):
@@ -280,13 +276,8 @@ class TFResNetPreTrainedModel(TFPreTrainedModel):
     main_input_name = "pixel_values"
 
     @property
-    def dummy_inputs(self) -> Dict[str, tf.Tensor]:
-        """
-        Dummy inputs to build the network. Returns:
-            `Dict[str, tf.Tensor]`: The dummy inputs.
-        """
-        VISION_DUMMY_INPUTS = tf.random.uniform(shape=(3, self.config.num_channels, 224, 224), dtype=tf.float32)
-        return {"pixel_values": tf.constant(VISION_DUMMY_INPUTS)}
+    def input_signature(self):
+        return {"pixel_values": tf.TensorSpec(shape=(None, self.config.num_channels, 224, 224), dtype=tf.float32)}
 
 
 RESNET_START_DOCSTRING = r"""
@@ -305,8 +296,8 @@ RESNET_START_DOCSTRING = r"""
 RESNET_INPUTS_DOCSTRING = r"""
     Args:
         pixel_values (`tf.Tensor` of shape `(batch_size, num_channels, height, width)`):
-            Pixel values. Pixel values can be obtained using [`AutoFeatureExtractor`]. See
-            [`AutoFeatureExtractor.__call__`] for details.
+            Pixel values. Pixel values can be obtained using [`AutoImageProcessor`]. See
+            [`ConvNextImageProcessor.__call__`] for details.
 
         output_hidden_states (`bool`, *optional*):
             Whether or not to return the hidden states of all layers. See `hidden_states` under returned tensors for
@@ -385,7 +376,6 @@ class TFResNetModel(TFResNetPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(RESNET_INPUTS_DOCSTRING)
     @add_code_sample_docstrings(
-        processor_class=_FEAT_EXTRACTOR_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=TFBaseModelOutputWithPoolingAndNoAttention,
         config_class=_CONFIG_FOR_DOC,
@@ -440,7 +430,6 @@ class TFResNetForImageClassification(TFResNetPreTrainedModel, TFSequenceClassifi
 
     @add_start_docstrings_to_model_forward(RESNET_INPUTS_DOCSTRING)
     @add_code_sample_docstrings(
-        processor_class=_FEAT_EXTRACTOR_FOR_DOC,
         checkpoint=_IMAGE_CLASS_CHECKPOINT,
         output_type=TFImageClassifierOutputWithNoAttention,
         config_class=_CONFIG_FOR_DOC,

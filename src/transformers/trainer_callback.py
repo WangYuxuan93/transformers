@@ -262,6 +262,12 @@ class TrainerCallback:
         """
         pass
 
+    def on_predict(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, metrics, **kwargs):
+        """
+        Event called after a successful prediction.
+        """
+        pass
+
     def on_save(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         """
         Event called after a checkpoint save.
@@ -372,6 +378,9 @@ class CallbackHandler(TrainerCallback):
         control.should_evaluate = False
         return self.call_event("on_evaluate", args, state, control, metrics=metrics)
 
+    def on_predict(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, metrics):
+        return self.call_event("on_predict", args, state, control, metrics=metrics)
+
     def on_save(self, args: TrainingArguments, state: TrainerState, control: TrainerControl):
         control.should_save = False
         return self.call_event("on_save", args, state, control)
@@ -464,7 +473,7 @@ class ProgressCallback(TrainerCallback):
 
     def on_train_begin(self, args, state, control, **kwargs):
         if state.is_local_process_zero:
-            self.training_bar = tqdm(total=state.max_steps)
+            self.training_bar = tqdm(total=state.max_steps, dynamic_ncols=True)
         self.current_step = 0
 
     def on_step_end(self, args, state, control, **kwargs):
@@ -475,10 +484,18 @@ class ProgressCallback(TrainerCallback):
     def on_prediction_step(self, args, state, control, eval_dataloader=None, **kwargs):
         if state.is_local_process_zero and has_length(eval_dataloader):
             if self.prediction_bar is None:
-                self.prediction_bar = tqdm(total=len(eval_dataloader), leave=self.training_bar is None)
+                self.prediction_bar = tqdm(
+                    total=len(eval_dataloader), leave=self.training_bar is None, dynamic_ncols=True
+                )
             self.prediction_bar.update(1)
 
     def on_evaluate(self, args, state, control, **kwargs):
+        if state.is_local_process_zero:
+            if self.prediction_bar is not None:
+                self.prediction_bar.close()
+            self.prediction_bar = None
+
+    def on_predict(self, args, state, control, **kwargs):
         if state.is_local_process_zero:
             if self.prediction_bar is not None:
                 self.prediction_bar.close()
@@ -519,7 +536,8 @@ class EarlyStoppingCallback(TrainerCallback):
             specified metric must improve to satisfy early stopping conditions. `
 
     This callback depends on [`TrainingArguments`] argument *load_best_model_at_end* functionality to set best_metric
-    in [`TrainerState`].
+    in [`TrainerState`]. Note that if the [`TrainingArguments`] argument *save_steps* differs from *eval_steps*, the
+    early stopping will not occur until the next save step.
     """
 
     def __init__(self, early_stopping_patience: int = 1, early_stopping_threshold: Optional[float] = 0.0):

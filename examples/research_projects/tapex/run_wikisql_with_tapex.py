@@ -32,9 +32,10 @@ import nltk  # Here to have a nice missing dependency error message early on
 import numpy as np
 import pandas as pd
 from datasets import load_dataset
+from filelock import FileLock
+from wikisql_utils import _TYPE_CONVERTER, retrieve_wikisql_query_answer_tapas
 
 import transformers
-from filelock import FileLock
 from transformers import (
     AutoConfig,
     BartForConditionalGeneration,
@@ -48,7 +49,6 @@ from transformers import (
 from transformers.file_utils import is_offline_mode
 from transformers.trainer_utils import get_last_checkpoint, is_main_process
 from transformers.utils import check_min_version
-from wikisql_utils import _TYPE_CONVERTER, retrieve_wikisql_query_answer_tapas
 
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
@@ -104,7 +104,7 @@ class ModelArguments:
         default=False,
         metadata={
             "help": (
-                "Will use the token generated when running `transformers-cli login` (necessary to use this script "
+                "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
                 "with private models)."
             )
         },
@@ -437,13 +437,12 @@ def main():
                 table=tables, query=questions, max_length=data_args.max_source_length, padding=padding, truncation=True
             )
 
-        with tokenizer.as_target_tokenizer():
-            labels = tokenizer(
-                answer=[", ".join(answer) for answer in answers],
-                max_length=max_target_length,
-                padding=padding,
-                truncation=True,
-            )
+        labels = tokenizer(
+            answer=[", ".join(answer) for answer in answers],
+            max_length=max_target_length,
+            padding=padding,
+            truncation=True,
+        )
 
         # If we are padding here, replace all tokenizer.pad_token_id in the labels by -100 when we want to ignore
         # padding in the loss.

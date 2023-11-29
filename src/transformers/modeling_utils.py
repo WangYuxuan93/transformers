@@ -13,8 +13,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import collections
 import gc
+import importlib.metadata
+import inspect
 import json
 import os
 import re
@@ -24,25 +26,23 @@ import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import partial
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
-from torch import Tensor, device, nn
+from packaging import version
+from torch import Tensor, nn
 from torch.nn import CrossEntropyLoss
-
-from requests import HTTPError
-from transformers.utils.hub import convert_file_size_to_int, get_checkpoint_shard_files
 
 from .activations import get_activation
 from .configuration_utils import PretrainedConfig
 from .deepspeed import deepspeed_config, is_deepspeed_zero3_enabled
 from .dynamic_module_utils import custom_object_save
-from .generation_utils import GenerationMixin
+from .generation import GenerationConfig, GenerationMixin
 from .pytorch_utils import (  # noqa: F401
     Conv1D,
     apply_chunking_to_forward,
     find_pruneable_heads_and_indices,
+    id_tensor_storage,
     prune_conv1d_layer,
     prune_layer,
     prune_linear_layer,
@@ -50,42 +50,68 @@ from .pytorch_utils import (  # noqa: F401
 from .utils import (
     DUMMY_INPUTS,
     FLAX_WEIGHTS_NAME,
-    HUGGINGFACE_CO_RESOLVE_ENDPOINT,
+    SAFE_WEIGHTS_INDEX_NAME,
+    SAFE_WEIGHTS_NAME,
     TF2_WEIGHTS_NAME,
     TF_WEIGHTS_NAME,
     WEIGHTS_INDEX_NAME,
     WEIGHTS_NAME,
     ContextManagers,
-    EntryNotFoundError,
     ModelOutput,
     PushToHubMixin,
-    RepositoryNotFoundError,
-    RevisionNotFoundError,
-    cached_path,
+    cached_file,
+    copy_func,
+    download_url,
     has_file,
-    hf_bucket_url,
     is_accelerate_available,
+    is_bitsandbytes_available,
     is_offline_mode,
+    is_optimum_available,
     is_remote_url,
+    is_safetensors_available,
+    is_torch_tpu_available,
     logging,
     replace_return_docstrings,
 )
+from .utils.hub import convert_file_size_to_int, get_checkpoint_shard_files
+from .utils.import_utils import ENV_VARS_TRUE_VALUES, is_sagemaker_mp_enabled
+from .utils.quantization_config import BitsAndBytesConfig
 from .utils.versions import require_version_core
 
+
+XLA_USE_BF16 = os.environ.get("XLA_USE_BF16", "0").upper()
+XLA_DOWNCAST_BF16 = os.environ.get("XLA_DOWNCAST_BF16", "0").upper()
 
 if is_accelerate_available():
     from accelerate import dispatch_model, infer_auto_device_map, init_empty_weights
     from accelerate.utils import (
+        check_tied_parameters_on_same_device,
+        find_tied_parameters,
+        get_balanced_memory,
         load_offloaded_weights,
         offload_weight,
         save_offload_index,
         set_module_tensor_to_device,
     )
 
+if is_safetensors_available():
+    from safetensors import safe_open
+    from safetensors.torch import load_file as safe_load_file
+    from safetensors.torch import save_file as safe_save_file
+
 logger = logging.get_logger(__name__)
 
 
 _init_weights = True
+
+
+if is_sagemaker_mp_enabled():
+    import smdistributed.modelparallel.torch as smp
+    from smdistributed.modelparallel import __version__ as SMP_VERSION
+
+    IS_SAGEMAKER_MP_POST_1_10 = version.parse(SMP_VERSION) >= version.parse("1.10")
+else:
+    IS_SAGEMAKER_MP_POST_1_10 = False
 
 
 @contextmanager
@@ -96,12 +122,13 @@ def no_init_weights(_enable=True):
     TODO(Patrick): Delete safety argument `_enable=True` at next major version. .
     """
     global _init_weights
+    old_init_weights = _init_weights
     if _enable:
         _init_weights = False
     try:
         yield
     finally:
-        _init_weights = True
+        _init_weights = old_init_weights
 
 
 try:
@@ -159,27 +186,45 @@ def get_parameter_dtype(parameter: Union[nn.Module, GenerationMixin, "ModuleUtil
     for t in parameter.parameters():
         last_dtype = t.dtype
         if t.is_floating_point():
+            # Adding fix for https://github.com/pytorch/xla/issues/4152
+            # Fixes issue where the model code passes a value that is out of range for XLA_USE_BF16=1
+            # and XLA_DOWNCAST_BF16=1 so the conversion would cast it to -inf
+            # NOTE: `is_torch_tpu_available()` is checked last as it induces a graph break in torch dynamo
+            if XLA_USE_BF16 in ENV_VARS_TRUE_VALUES and is_torch_tpu_available():
+                return torch.bfloat16
+            if XLA_DOWNCAST_BF16 in ENV_VARS_TRUE_VALUES and is_torch_tpu_available():
+                if t.dtype == torch.float:
+                    return torch.bfloat16
+                if t.dtype == torch.double:
+                    return torch.float32
             return t.dtype
 
     if last_dtype is not None:
         # if no floating dtype was found return whatever the first dtype is
         return last_dtype
 
-    else:
-        # For nn.DataParallel compatibility in PyTorch > 1.5
-        def find_tensor_attributes(module: nn.Module) -> List[Tuple[str, Tensor]]:
-            tuples = [(k, v) for k, v in module.__dict__.items() if torch.is_tensor(v)]
-            return tuples
+    # For nn.DataParallel compatibility in PyTorch > 1.5
+    def find_tensor_attributes(module: nn.Module) -> List[Tuple[str, Tensor]]:
+        tuples = [(k, v) for k, v in module.__dict__.items() if torch.is_tensor(v)]
+        return tuples
 
-        gen = parameter._named_members(get_members_fn=find_tensor_attributes)
-        last_tuple = None
-        for tuple in gen:
-            last_tuple = tuple
-            if tuple[1].is_floating_point():
-                return tuple[1].dtype
+    gen = parameter._named_members(get_members_fn=find_tensor_attributes)
+    last_tuple = None
+    for tuple in gen:
+        last_tuple = tuple
+        if tuple[1].is_floating_point():
+            return tuple[1].dtype
 
+    if last_tuple is not None:
         # fallback to the last dtype
         return last_tuple[1].dtype
+
+    # fallback to buffer dtype
+    for t in parameter.buffers():
+        last_dtype = t.dtype
+        if t.is_floating_point():
+            return t.dtype
+    return last_dtype
 
 
 def get_state_dict_float_dtype(state_dict):
@@ -226,7 +271,9 @@ def dtype_byte_size(dtype):
     return bit_size // 8
 
 
-def shard_checkpoint(state_dict: Dict[str, torch.Tensor], max_shard_size: Union[int, str] = "10GB"):
+def shard_checkpoint(
+    state_dict: Dict[str, torch.Tensor], max_shard_size: Union[int, str] = "10GB", weights_name: str = WEIGHTS_NAME
+):
     """
     Splits a model state dictionary in sub-checkpoints so that the final size of each sub-checkpoint does not exceed a
     given size.
@@ -248,39 +295,55 @@ def shard_checkpoint(state_dict: Dict[str, torch.Tensor], max_shard_size: Union[
         max_shard_size (`int` or `str`, *optional*, defaults to `"10GB"`):
             The maximum size of each sub-checkpoint. If expressed as a string, needs to be digits followed by a unit
             (like `"5MB"`).
+        weights_name (`str`, *optional*, defaults to `"pytorch_model.bin"`):
+            The name of the model save file.
     """
     max_shard_size = convert_file_size_to_int(max_shard_size)
 
-    sharded_state_dicts = []
-    current_block = {}
-    current_block_size = 0
+    sharded_state_dicts = [{}]
+    last_block_size = 0
     total_size = 0
+    storage_id_to_block = {}
 
     for key, weight in state_dict.items():
+        # when bnb serialization is used the weights in the state dict can be strings
+        # check: https://github.com/huggingface/transformers/pull/24416 for more details
+        if isinstance(weight, str):
+            continue
+        else:
+            storage_id = id_tensor_storage(weight)
+
+        # If a `weight` shares the same underlying storage as another tensor, we put `weight` in the same `block`
+        if storage_id in storage_id_to_block:
+            block_id = storage_id_to_block[storage_id]
+            sharded_state_dicts[block_id][key] = weight
+            continue
+
         weight_size = weight.numel() * dtype_byte_size(weight.dtype)
 
-        # If this weight is going to tip up over the maximal size, we split.
-        if current_block_size + weight_size > max_shard_size:
-            sharded_state_dicts.append(current_block)
-            current_block = {}
-            current_block_size = 0
+        # If this weight is going to tip up over the maximal size, we split, but only if we have put at least one
+        # weight in the current shard.
+        if last_block_size + weight_size > max_shard_size and len(sharded_state_dicts[-1]) > 0:
+            sharded_state_dicts.append({})
+            last_block_size = 0
 
-        current_block[key] = weight
-        current_block_size += weight_size
+        sharded_state_dicts[-1][key] = weight
+        last_block_size += weight_size
         total_size += weight_size
-
-    # Add the last block
-    sharded_state_dicts.append(current_block)
+        storage_id_to_block[storage_id] = len(sharded_state_dicts) - 1
 
     # If we only have one shard, we return it
     if len(sharded_state_dicts) == 1:
-        return {WEIGHTS_NAME: sharded_state_dicts[0]}, None
+        return {weights_name: sharded_state_dicts[0]}, None
 
     # Otherwise, let's build the index
     weight_map = {}
     shards = {}
     for idx, shard in enumerate(sharded_state_dicts):
-        shard_file = WEIGHTS_NAME.replace(".bin", f"-{idx+1:05d}-of-{len(sharded_state_dicts):05d}.bin")
+        shard_file = weights_name.replace(".bin", f"-{idx+1:05d}-of-{len(sharded_state_dicts):05d}.bin")
+        shard_file = shard_file.replace(
+            ".safetensors", f"-{idx + 1:05d}-of-{len(sharded_state_dicts):05d}.safetensors"
+        )
         shards[shard_file] = shard
         for key in shard.keys():
             weight_map[key] = shard_file
@@ -291,7 +354,7 @@ def shard_checkpoint(state_dict: Dict[str, torch.Tensor], max_shard_size: Union[
     return shards, index
 
 
-def load_sharded_checkpoint(model, folder, strict=True):
+def load_sharded_checkpoint(model, folder, strict=True, prefer_safe=True):
     """
     This is the same as
     [`torch.nn.Module.load_state_dict`](https://pytorch.org/docs/stable/generated/torch.nn.Module.html?highlight=load_state_dict#torch.nn.Module.load_state_dict)
@@ -305,6 +368,9 @@ def load_sharded_checkpoint(model, folder, strict=True):
         folder (`str` or `os.PathLike`): A path to a folder containing the sharded checkpoint.
         strict (`bool`, *optional`, defaults to `True`):
             Whether to strictly enforce that the keys in the model state dict match the keys in the sharded checkpoint.
+        prefer_safe (`bool`, *optional*, defaults to `False`)
+            If both safetensors and PyTorch save files are present in checkpoint and `prefer_safe` is True, the
+            safetensors files will be loaded. Otherwise, PyTorch files are always loaded when possible.
 
     Returns:
         `NamedTuple`: A named tuple with `missing_keys` and `unexpected_keys` fields
@@ -313,10 +379,32 @@ def load_sharded_checkpoint(model, folder, strict=True):
     """
     # Load the index
     index_file = os.path.join(folder, WEIGHTS_INDEX_NAME)
-    if not os.path.isfile(index_file):
-        raise ValueError(f"Can't find a checkpoint index ({WEIGHTS_INDEX_NAME}) in {folder}.")
+    safe_index_file = os.path.join(folder, SAFE_WEIGHTS_INDEX_NAME)
 
-    with open(index_file, "r", encoding="utf-8") as f:
+    index_present = os.path.isfile(index_file)
+    safe_index_present = os.path.isfile(safe_index_file)
+
+    if not index_present and not (safe_index_present and is_safetensors_available()):
+        filenames = (
+            (WEIGHTS_INDEX_NAME, SAFE_WEIGHTS_INDEX_NAME) if is_safetensors_available() else (WEIGHTS_INDEX_NAME,)
+        )
+        raise ValueError(f"Can't find a checkpoint index ({' or '.join(filenames)}) in {folder}.")
+
+    load_safe = False
+    if safe_index_present:
+        if prefer_safe:
+            if is_safetensors_available():
+                load_safe = True  # load safe due to preference
+            else:
+                logger.warning(
+                    f"Cannot load sharded checkpoint at {folder} safely since safetensors is not installed!"
+                )
+        elif not index_present:
+            load_safe = True  # load safe since we have no other choice
+
+    load_index = safe_index_file if load_safe else index_file
+
+    with open(load_index, "r", encoding="utf-8") as f:
         index = json.load(f)
 
     shard_files = list(set(index["weight_map"].values()))
@@ -336,11 +424,13 @@ def load_sharded_checkpoint(model, folder, strict=True):
             error_message += f"\nMissing key(s): {str_unexpected_keys}."
         raise RuntimeError(error_message)
 
+    loader = safe_load_file if load_safe else partial(torch.load, map_location="cpu")
+
     for shard_file in shard_files:
-        state_dict = torch.load(os.path.join(folder, shard_file))
+        state_dict = loader(os.path.join(folder, shard_file))
         model.load_state_dict(state_dict, strict=False)
 
-        # Make sure memory is fred before we load the next state dict.
+        # Make sure memory is freed before we load the next state dict.
         del state_dict
         gc.collect()
 
@@ -352,12 +442,26 @@ def load_state_dict(checkpoint_file: Union[str, os.PathLike]):
     """
     Reads a PyTorch checkpoint file, returning properly formatted errors if they arise.
     """
+    if checkpoint_file.endswith(".safetensors") and is_safetensors_available():
+        # Check format of the archive
+        with safe_open(checkpoint_file, framework="pt") as f:
+            metadata = f.metadata()
+        if metadata.get("format") not in ["pt", "tf", "flax"]:
+            raise OSError(
+                f"The safetensors archive passed at {checkpoint_file} does not contain the valid metadata. Make sure "
+                "you save your model with the `save_pretrained` method."
+            )
+        elif metadata["format"] != "pt":
+            raise NotImplementedError(
+                f"Conversion from a {metadata['format']} safetensors archive to PyTorch is not implemented yet."
+            )
+        return safe_load_file(checkpoint_file)
     try:
         return torch.load(checkpoint_file, map_location="cpu")
     except Exception as e:
         try:
             with open(checkpoint_file) as f:
-                if f.read().startswith("version"):
+                if f.read(7) == "version":
                     raise OSError(
                         "You seem to have cloned a repository without having git-lfs installed. Please install "
                         "git-lfs and run `git lfs install` followed by `git lfs pull` in the folder "
@@ -374,6 +478,17 @@ def load_state_dict(checkpoint_file: Union[str, os.PathLike]):
                 f"at '{checkpoint_file}'. "
                 "If you tried to load a PyTorch model from a TF 2.0 checkpoint, please set from_tf=True."
             )
+
+
+def set_initialized_submodules(model, state_dict_keys):
+    """
+    Sets the `_is_hf_initialized` flag in all submodules of a given model when all its weights are in the loaded state
+    dict.
+    """
+    for module_name, module in model.named_modules():
+        loaded_keys = [k.replace(f"{module_name}.", "") for k in state_dict_keys if k.startswith(f"{module_name}.")]
+        if len(set(module.state_dict().keys()) - set(loaded_keys)) == 0:
+            module._is_hf_initialized = True
 
 
 def _load_state_dict_into_model(model_to_load, state_dict, start_prefix):
@@ -402,26 +517,37 @@ def _load_state_dict_into_model(model_to_load, state_dict, start_prefix):
 
     # PyTorch's `_load_from_state_dict` does not copy parameters in a module's descendants
     # so we need to apply the function recursively.
-    def load(module: nn.Module, prefix=""):
+    def load(module: nn.Module, state_dict, prefix=""):
         local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
         args = (state_dict, prefix, local_metadata, True, [], [], error_msgs)
-        if is_deepspeed_zero3_enabled():
-            import deepspeed
+        # Parameters of module and children will start with prefix. We can exit early if there are none in this
+        # state_dict
+        if len([key for key in state_dict if key.startswith(prefix)]) > 0:
+            if is_deepspeed_zero3_enabled():
+                import deepspeed
 
-            # because zero3 puts placeholders in model params, this context
-            # manager gathers (unpartitions) the params of the current layer, then loads from
-            # the state dict and then re-partitions them again
-            with deepspeed.zero.GatheredParameters(list(module.parameters(recurse=False)), modifier_rank=0):
-                if torch.distributed.get_rank() == 0:
-                    module._load_from_state_dict(*args)
-        else:
-            module._load_from_state_dict(*args)
+                # In sharded models, each shard has only part of the full state_dict, so only gather
+                # parameters that are in the current state_dict.
+                named_parameters = dict(module.named_parameters(prefix=prefix[:-1], recurse=False))
+                params_to_gather = [named_parameters[k] for k in state_dict.keys() if k in named_parameters]
+                if len(params_to_gather) > 0:
+                    # because zero3 puts placeholders in model params, this context
+                    # manager gathers (unpartitions) the params of the current layer, then loads from
+                    # the state dict and then re-partitions them again
+                    with deepspeed.zero.GatheredParameters(params_to_gather, modifier_rank=0):
+                        if torch.distributed.get_rank() == 0:
+                            module._load_from_state_dict(*args)
+            else:
+                module._load_from_state_dict(*args)
 
         for name, child in module._modules.items():
             if child is not None:
-                load(child, prefix + name + ".")
+                load(child, state_dict, prefix + name + ".")
 
-    load(model_to_load, prefix=start_prefix)
+    load(model_to_load, state_dict, prefix=start_prefix)
+    # Delete `state_dict` so it could be collected by GC earlier. Note that `state_dict` is a copy of the argument, so
+    # it's safe to delete it.
+    del state_dict
 
     return error_msgs
 
@@ -458,9 +584,6 @@ def _move_model_to_meta(model, loaded_state_dict_keys, start_prefix):
 
     """
 
-    # meta device was added in pt=1.9
-    require_version_core("torch>=1.9")
-
     # dematerialize param storage for keys that are going to be replaced by state_dict, by
     # putting those on the meta device
     for k in loaded_state_dict_keys:
@@ -490,6 +613,9 @@ def _load_state_dict_into_meta_model(
     state_dict_folder=None,
     state_dict_index=None,
     dtype=None,
+    is_quantized=False,
+    is_safetensors=False,
+    keep_in_fp32_modules=None,
 ):
     """
     This is somewhat similar to `_load_state_dict_into_model`, but deals with a model that has some or all of its
@@ -507,6 +633,9 @@ def _load_state_dict_into_meta_model(
     # - handling error_msgs - mimicking the error handling in module._load_from_state_dict()
     # - Is there a situation where some keys aren't in `loaded_state_dict_keys` and in which case
     #   they won't get loaded.
+
+    if is_quantized:
+        from .utils.bitsandbytes import set_module_quantized_tensor_to_device
 
     error_msgs = []
 
@@ -533,9 +662,38 @@ def _load_state_dict_into_meta_model(
             param_name = param_name[len(start_prefix) :]
 
         module_name = param_name
-        # We convert floating dtypes to the `dtype` passed.
-        if dtype is not None and not str(param.dtype).startswith("torch.int"):
-            param = param.to(dtype)
+        set_module_kwargs = {}
+
+        # We convert floating dtypes to the `dtype` passed. We want to keep the buffers/params
+        # in int/uint/bool and not cast them.
+        if dtype is not None and torch.is_floating_point(param):
+            if (
+                keep_in_fp32_modules is not None
+                and any(module_to_keep_in_fp32 in param_name for module_to_keep_in_fp32 in keep_in_fp32_modules)
+                and dtype == torch.float16
+            ):
+                param = param.to(torch.float32)
+
+                # For backward compatibility with older versions of `accelerate`
+                # TODO: @sgugger replace this check with version check at the next `accelerate` release
+                if "dtype" in list(inspect.signature(set_module_tensor_to_device).parameters):
+                    set_module_kwargs["dtype"] = torch.float32
+            else:
+                param = param.to(dtype)
+
+        # For compatibility with PyTorch load_state_dict which converts state dict dtype to existing dtype in model
+        if dtype is None:
+            old_param = model
+            splits = param_name.split(".")
+            for split in splits:
+                old_param = getattr(old_param, split)
+                if old_param is None:
+                    break
+
+            if old_param is not None:
+                param = param.to(old_param.dtype)
+
+        set_module_kwargs["value"] = param
 
         if device_map is None:
             param_device = "cpu"
@@ -550,13 +708,34 @@ def _load_state_dict_into_meta_model(
             param_device = device_map[module_name]
 
         if param_device == "disk":
-            offload_index = offload_weight(param, param_name, offload_folder, offload_index)
+            if not is_safetensors:
+                offload_index = offload_weight(param, param_name, offload_folder, offload_index)
         elif param_device == "cpu" and state_dict_index is not None:
             state_dict_index = offload_weight(param, param_name, state_dict_folder, state_dict_index)
+        elif not is_quantized:
+            # For backward compatibility with older versions of `accelerate`
+            set_module_tensor_to_device(model, param_name, param_device, **set_module_kwargs)
         else:
-            set_module_tensor_to_device(model, param_name, param_device, value=param)
+            if param.dtype == torch.int8 and param_name.replace("weight", "SCB") in state_dict.keys():
+                fp16_statistics = state_dict[param_name.replace("weight", "SCB")]
+            else:
+                fp16_statistics = None
+
+            if "SCB" not in param_name:
+                set_module_quantized_tensor_to_device(
+                    model, param_name, param_device, value=param, fp16_statistics=fp16_statistics
+                )
 
     return error_msgs, offload_index, state_dict_index
+
+
+def _add_variant(weights_name: str, variant: Optional[str] = None) -> str:
+    if variant is not None:
+        splits = weights_name.split(".")
+        splits = splits[:-1] + [variant] + splits[-1:]
+        weights_name = ".".join(splits)
+
+    return weights_name
 
 
 class ModuleUtilsMixin:
@@ -612,7 +791,7 @@ class ModuleUtilsMixin:
             module.mem_rss_pre_forward = 0
 
     @property
-    def device(self) -> device:
+    def device(self) -> torch.device:
         """
         `torch.device`: The device on which the module is (assuming that all the module parameters are on the same
         device).
@@ -679,7 +858,7 @@ class ModuleUtilsMixin:
         return extended_attention_mask
 
     def get_extended_attention_mask(
-        self, attention_mask: Tensor, input_shape: Tuple[int], device: device = None, dtype: torch.float = None
+        self, attention_mask: Tensor, input_shape: Tuple[int], device: torch.device = None, dtype: torch.float = None
     ) -> Tensor:
         """
         Makes broadcastable attention and causal masks so that future and masked tokens are ignored.
@@ -723,7 +902,7 @@ class ModuleUtilsMixin:
 
         # Since attention_mask is 1.0 for positions we want to attend and 0.0 for
         # masked positions, this operation will create a tensor which is 0.0 for
-        # positions we want to attend and -10000.0 for masked positions.
+        # positions we want to attend and the dtype's smallest value for masked positions.
         # Since we are adding it to the raw scores before the softmax, this is
         # effectively the same as removing these entirely.
         extended_attention_mask = extended_attention_mask.to(dtype=dtype)  # fp16 compatibility
@@ -741,7 +920,7 @@ class ModuleUtilsMixin:
                 The mask indicating if we should keep the heads or not (1.0 for keep, 0.0 for discard).
             num_hidden_layers (`int`):
                 The number of hidden layers in the model.
-            is_attention_chunked: (`bool`, *optional*, defaults to `False`):
+            is_attention_chunked (`bool`, *optional*, defaults to `False`):
                 Whether or not the attentions scores are computed by chunks or not.
 
         Returns:
@@ -874,6 +1053,8 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
     main_input_name = "input_ids"
     _auto_class = None
     _no_split_modules = None
+    _skip_keys_device_placement = None
+    _keep_in_fp32_modules = None
 
     # a list of `re` patterns of `state_dict` keys that should be removed from the list of missing
     # keys we find (keys inside the model but not in the checkpoint) and avoid unnecessary warnings.
@@ -885,6 +1066,8 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
     # a list of `state_dict` keys to ignore when saving the model (useful for keys that aren't
     # trained, but which are either deterministic or tied variables)
     _keys_to_ignore_on_save = None
+    # a list of `state_dict` keys that are potentially tied to another key in the state_dict.
+    _tied_weights_keys = None
 
     is_parallelizable = False
     supports_gradient_checkpointing = False
@@ -915,6 +1098,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         self.config = config
         self.name_or_path = config.name_or_path
         self.warnings_issued = {}
+        self.generation_config = GenerationConfig.from_model_config(config) if self.can_generate() else None
 
     def post_init(self):
         """
@@ -997,6 +1181,36 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         """
         return getattr(self, self.base_model_prefix, self)
 
+    @classmethod
+    def can_generate(cls) -> bool:
+        """
+        Returns whether this model can generate sequences with `.generate()`.
+
+        Returns:
+            `bool`: Whether this model can generate sequences with `.generate()`.
+        """
+        # Detects whether `prepare_inputs_for_generation` has been overwritten, which is a requirement for generation
+        if "GenerationMixin" in str(cls.prepare_inputs_for_generation):
+            return False
+        return True
+
+    def enable_input_require_grads(self):
+        """
+        Enables the gradients for the input embeddings. This is useful for fine-tuning adapter weights while keeping
+        the model weights fixed.
+        """
+
+        def make_inputs_require_grads(module, input, output):
+            output.requires_grad_(True)
+
+        self._require_grads_hook = self.get_input_embeddings().register_forward_hook(make_inputs_require_grads)
+
+    def disable_input_require_grads(self):
+        """
+        Removes the `_require_grads_hook`.
+        """
+        self._require_grads_hook.remove()
+
     def get_input_embeddings(self) -> nn.Module:
         """
         Returns the model's input embeddings.
@@ -1036,7 +1250,16 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         """
         Initialize the weights. This method should be overridden by derived class.
         """
-        raise NotImplementedError(f"Make sure `_init_weights` is implemented for {self.__class__}")
+        pass
+
+    def _initialize_weights(self, module):
+        """
+        Initialize the weights if they are not already initialized.
+        """
+        if getattr(module, "_is_hf_initialized", False):
+            return
+        self._init_weights(module)
+        module._is_hf_initialized = True
 
     def tie_weights(self):
         """
@@ -1093,7 +1316,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                     len(encoder_modules) > 0
                 ), f"Encoder module {encoder_pointer} does not match decoder module {decoder_pointer}"
 
-                all_encoder_weights = set([module_name + "/" + sub_name for sub_name in encoder_modules.keys()])
+                all_encoder_weights = {module_name + "/" + sub_name for sub_name in encoder_modules.keys()}
                 encoder_layer_pos = 0
                 for name, module in decoder_modules.items():
                     if name.isdigit():
@@ -1210,7 +1433,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
 
                 Increasing the size will add newly initialized vectors at the end. Reducing the size will remove
                 vectors from the end. If not provided or `None`, just returns a pointer to the input tokens
-                ``torch.nn.Embedding``` module of the model without doing anything.
+                `torch.nn.Embedding` module of the model without doing anything.
 
         Return:
             `torch.nn.Embedding`: Pointer to the resized Embedding Module or the old Embedding Module if
@@ -1274,9 +1497,9 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
 
                 Increasing the size will add newly initialized vectors at the end. Reducing the size will remove
                 vectors from the end. If not provided or `None`, just returns a pointer to the input tokens
-                ``torch.nn.Linear``` module of the model without doing anything. transposed (`bool`, *optional*,
-                defaults to `False`): Whether `old_lm_head` is transposed or not. If True `old_lm_head.size()` is
-                `lm_head_dim, vocab_size` else `vocab_size, lm_head_dim`.
+                `torch.nn.Linear` module of the model without doing anything. transposed (`bool`, *optional*, defaults
+                to `False`): Whether `old_lm_head` is transposed or not. If True `old_lm_head.size()` is `lm_head_dim,
+                vocab_size` else `vocab_size, lm_head_dim`.
 
         Return:
             `torch.nn.Linear`: Pointer to the resized Linear Module or the old Linear Module if `new_num_tokens` is
@@ -1365,7 +1588,8 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
 
     def init_weights(self):
         """
-        If needed prunes and maybe initializes weights.
+        If needed prunes and maybe initializes weights. If using a custom `PreTrainedModel`, you need to implement any
+        initialization logic in `_init_weights`.
         """
         # Prune heads if needed
         if self.config.pruned_heads:
@@ -1373,7 +1597,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
 
         if _init_weights:
             # Initialize weights
-            self.apply(self._init_weights)
+            self.apply(self._initialize_weights)
 
             # Tie weights should be skipped when not initializing all weights
             # since from_pretrained(...) calls tie weights anyways
@@ -1435,11 +1659,13 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         save_function: Callable = torch.save,
         push_to_hub: bool = False,
         max_shard_size: Union[int, str] = "10GB",
+        safe_serialization: bool = False,
+        variant: Optional[str] = None,
         **kwargs,
     ):
         """
         Save a model and its configuration file to a directory, so that it can be re-loaded using the
-        `[`~PreTrainedModel.from_pretrained`]` class method.
+        [`~PreTrainedModel.from_pretrained`] class method.
 
         Arguments:
             save_directory (`str` or `os.PathLike`):
@@ -1456,16 +1682,9 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 The function to use to save the state dictionary. Useful on distributed training like TPUs when one
                 need to replace `torch.save` by another method.
             push_to_hub (`bool`, *optional*, defaults to `False`):
-                Whether or not to push your model to the Hugging Face model hub after saving it.
-
-                <Tip warning={true}>
-
-                Using `push_to_hub=True` will synchronize the repository you are pushing to with `save_directory`,
-                which requires `save_directory` to be a local clone of the repo you are pushing to if it's an existing
-                folder. Pass along `temp_dir=True` to use a temporary directory instead.
-
-                </Tip>
-
+                Whether or not to push your model to the Hugging Face model hub after saving it. You can specify the
+                repository you want to push to with `repo_id` (will default to the name of `save_directory` in your
+                namespace).
             max_shard_size (`int` or `str`, *optional*, defaults to `"10GB"`):
                 The maximum size for a checkpoint before being sharded. Checkpoints shard will then be each of size
                 lower than this size. If expressed as a string, needs to be digits followed by a unit (like `"5MB"`).
@@ -1477,24 +1696,46 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
 
                 </Tip>
 
+            safe_serialization (`bool`, *optional*, defaults to `False`):
+                Whether to save the model using `safetensors` or the traditional PyTorch way (that uses `pickle`).
+            variant (`str`, *optional*):
+                If specified, weights are saved in the format pytorch_model.<variant>.bin.
+
             kwargs:
                 Additional key word arguments passed along to the [`~utils.PushToHubMixin.push_to_hub`] method.
         """
+        # Checks if the model has been loaded in 8-bit
+        if getattr(self, "is_loaded_in_8bit", False) and getattr(self, "is_8bit_serializable", False):
+            warnings.warn(
+                "You are calling `save_pretrained` to a 8-bit converted model you may likely encounter unexepected"
+                " behaviors. If you want to save 8-bit models, make sure to have `bitsandbytes>0.37.2` installed.",
+                UserWarning,
+            )
+
+        if getattr(self, "is_loaded_in_4bit", False):
+            raise NotImplementedError(
+                "You are calling `save_pretrained` on a 4-bit converted model. This is currently not supported"
+            )
+
         if "save_config" in kwargs:
             warnings.warn(
                 "`save_config` is deprecated and will be removed in v5 of Transformers. Use `is_main_process` instead."
             )
             is_main_process = kwargs.pop("save_config")
+        if safe_serialization and not is_safetensors_available():
+            raise ImportError("`safe_serialization` requires the `safetensors library: `pip install safetensors`.")
 
         if os.path.isfile(save_directory):
             logger.error(f"Provided path ({save_directory}) should be a directory, not a file")
             return
 
+        os.makedirs(save_directory, exist_ok=True)
+
         if push_to_hub:
             commit_message = kwargs.pop("commit_message", None)
-            repo = self._create_or_get_repo(save_directory, **kwargs)
-
-        os.makedirs(save_directory, exist_ok=True)
+            repo_id = kwargs.pop("repo_id", save_directory.split(os.path.sep)[-1])
+            repo_id = self._create_repo(repo_id, **kwargs)
+            files_timestamps = self._get_files_timestamps(save_directory)
 
         # Only save the model itself if we are using distributed training
         model_to_save = unwrap_model(self)
@@ -1515,41 +1756,103 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         # Save the config
         if is_main_process:
             model_to_save.config.save_pretrained(save_directory)
+            if self.can_generate():
+                model_to_save.generation_config.save_pretrained(save_directory)
 
         # Save the model
         if state_dict is None:
             state_dict = model_to_save.state_dict()
+
+        # Translate state_dict from smp to hf if saving with smp >= 1.10
+        if IS_SAGEMAKER_MP_POST_1_10:
+            for smp_to_hf, _ in smp.state.module_manager.translate_functions:
+                state_dict = smp_to_hf(state_dict)
 
         # Handle the case where some state_dict keys shouldn't be saved
         if self._keys_to_ignore_on_save is not None:
             for ignore_key in self._keys_to_ignore_on_save:
                 if ignore_key in state_dict.keys():
                     del state_dict[ignore_key]
+        if safe_serialization:
+            # Safetensors does not allow tensor aliasing.
+            # We're going to remove aliases before saving
+            ptrs = collections.defaultdict(list)
+            for name, tensor in state_dict.items():
+                ptrs[id_tensor_storage(tensor)].append(name)
+
+            # These are all the pointers of shared tensors.
+            shared_ptrs = {ptr: names for ptr, names in ptrs.items() if len(names) > 1}
+            warn_names = set()
+            for names in shared_ptrs.values():
+                # Removing the keys which are declared as known duplicates on
+                # load. This allows to make sure the name which is kept is consistent.
+                if self._tied_weights_keys is not None:
+                    found = 0
+                    for name in sorted(names):
+                        matches_pattern = any(re.search(pat, name) for pat in self._tied_weights_keys)
+                        if matches_pattern and name in state_dict:
+                            found += 1
+                            if found < len(names):
+                                del state_dict[name]
+
+                # When not all duplicates have been cleaned, still remove those keys, but put a clear warning.
+                # If the link between tensors was done at runtime then `from_pretrained` will not get
+                # the key back leading to random tensor. A proper warning will be shown
+                # during reload (if applicable), but since the file is not necessarily compatible with
+                # the config, better show a proper warning.
+                found = 0
+                for name in names:
+                    if name in state_dict:
+                        found += 1
+                        if found > 1:
+                            del state_dict[name]
+                            warn_names.add(name)
+            if len(warn_names) > 0:
+                logger.warning_once(
+                    f"Removed shared tensor {warn_names} while saving. This should be OK, but check by verifying that you don't receive any warning while reloading",
+                )
 
         # Shard the model if it is too big.
-        shards, index = shard_checkpoint(state_dict, max_shard_size=max_shard_size)
+        weights_name = SAFE_WEIGHTS_NAME if safe_serialization else WEIGHTS_NAME
+        weights_name = _add_variant(weights_name, variant)
+
+        shards, index = shard_checkpoint(state_dict, max_shard_size=max_shard_size, weights_name=weights_name)
 
         # Clean the folder from a previous save
         for filename in os.listdir(save_directory):
             full_filename = os.path.join(save_directory, filename)
             # If we have a shard file that is not going to be replaced, we delete it, but only from the main process
             # in distributed settings to avoid race conditions.
+            weights_no_suffix = weights_name.replace(".bin", "").replace(".safetensors", "")
+
+            # make sure that file to be deleted matches format of sharded file, e.g. pytorch_model-00001-of-00005
+            filename_no_suffix = filename.replace(".bin", "").replace(".safetensors", "")
+            reg = re.compile(r"(.*?)-\d{5}-of-\d{5}")
+
             if (
-                filename.startswith(WEIGHTS_NAME[:-4])
+                filename.startswith(weights_no_suffix)
                 and os.path.isfile(full_filename)
                 and filename not in shards.keys()
                 and is_main_process
+                and reg.fullmatch(filename_no_suffix) is not None
             ):
                 os.remove(full_filename)
 
         # Save the model
         for shard_file, shard in shards.items():
-            save_function(shard, os.path.join(save_directory, shard_file))
+            if safe_serialization:
+                # At some point we will need to deal better with save_function (used for TPU and other distributed
+                # joyfulness), but for now this enough.
+                safe_save_file(shard, os.path.join(save_directory, shard_file), metadata={"format": "pt"})
+            else:
+                save_function(shard, os.path.join(save_directory, shard_file))
 
         if index is None:
-            logger.info(f"Model weights saved in {os.path.join(save_directory, WEIGHTS_NAME)}")
+            path_to_weights = os.path.join(save_directory, _add_variant(WEIGHTS_NAME, variant))
+            logger.info(f"Model weights saved in {path_to_weights}")
         else:
-            save_index_file = os.path.join(save_directory, WEIGHTS_INDEX_NAME)
+            save_index_file = SAFE_WEIGHTS_INDEX_NAME if safe_serialization else WEIGHTS_INDEX_NAME
+            save_index_file = os.path.join(save_directory, _add_variant(save_index_file, variant))
             # Save the index as well
             with open(save_index_file, "w", encoding="utf-8") as f:
                 content = json.dumps(index, indent=2, sort_keys=True) + "\n"
@@ -1561,11 +1864,77 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             )
 
         if push_to_hub:
-            url = self._push_to_hub(repo, commit_message=commit_message)
-            logger.info(f"Model pushed to the hub in this commit: {url}")
+            self._upload_modified_files(
+                save_directory,
+                repo_id,
+                files_timestamps,
+                commit_message=commit_message,
+                token=kwargs.get("use_auth_token"),
+            )
+
+    def get_memory_footprint(self, return_buffers=True):
+        r"""
+        Get the memory footprint of a model. This will return the memory footprint of the current model in bytes.
+        Useful to benchmark the memory footprint of the current model and design some tests. Solution inspired from the
+        PyTorch discussions: https://discuss.pytorch.org/t/gpu-memory-that-model-uses/56822/2
+
+        Arguments:
+            return_buffers (`bool`, *optional*, defaults to `True`):
+                Whether to return the size of the buffer tensors in the computation of the memory footprint. Buffers
+                are tensors that do not require gradients and not registered as parameters. E.g. mean and std in batch
+                norm layers. Please see: https://discuss.pytorch.org/t/what-pytorch-means-by-buffers/120266/2
+        """
+        mem = sum([param.nelement() * param.element_size() for param in self.parameters()])
+        if return_buffers:
+            mem_bufs = sum([buf.nelement() * buf.element_size() for buf in self.buffers()])
+            mem = mem + mem_bufs
+        return mem
+
+    def to(self, *args, **kwargs):
+        # Checks if the model has been loaded in 8-bit
+        if getattr(self, "is_quantized", False):
+            raise ValueError(
+                "`.to` is not supported for `4-bit` or `8-bit` models. Please use the model as it is, since the"
+                " model has already been set to the correct devices and casted to the correct `dtype`."
+            )
+        else:
+            return super().to(*args, **kwargs)
+
+    def half(self, *args):
+        # Checks if the model has been loaded in 8-bit
+        if getattr(self, "is_quantized", False):
+            raise ValueError(
+                "`.half()` is not supported for `4-bit` or `8-bit` models. Please use the model as it is, since the"
+                " model has already been casted to the correct `dtype`."
+            )
+        else:
+            return super().half(*args)
+
+    def float(self, *args):
+        # Checks if the model has been loaded in 8-bit
+        if getattr(self, "is_quantized", False):
+            raise ValueError(
+                "`.float()` is not supported for `4-bit` or `8-bit` models. Please use the model as it is, since the"
+                " model has already been casted to the correct `dtype`."
+            )
+        else:
+            return super().float(*args)
 
     @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path: Optional[Union[str, os.PathLike]], *model_args, **kwargs):
+    def from_pretrained(
+        cls,
+        pretrained_model_name_or_path: Optional[Union[str, os.PathLike]],
+        *model_args,
+        config: Optional[Union[PretrainedConfig, str, os.PathLike]] = None,
+        cache_dir: Optional[Union[str, os.PathLike]] = None,
+        ignore_mismatched_sizes: bool = False,
+        force_download: bool = False,
+        local_files_only: bool = False,
+        token: Optional[Union[str, bool]] = None,
+        revision: str = "main",
+        use_safetensors: bool = None,
+        **kwargs,
+    ):
         r"""
         Instantiate a pretrained pytorch model from a pre-trained model configuration.
 
@@ -1646,13 +2015,20 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 Whether ot not to also return a dictionary containing missing keys, unexpected keys and error messages.
             local_files_only(`bool`, *optional*, defaults to `False`):
                 Whether or not to only look at local files (i.e., do not try to download the model).
-            use_auth_token (`str` or *bool*, *optional*):
-                The token to use as HTTP bearer authorization for remote files. If `True`, will use the token generated
-                when running `transformers-cli login` (stored in `~/.huggingface`).
+            token (`str` or `bool`, *optional*):
+                The token to use as HTTP bearer authorization for remote files. If `True`, or not specified, will use
+                the token generated when running `huggingface-cli login` (stored in `~/.huggingface`).
             revision (`str`, *optional*, defaults to `"main"`):
                 The specific model version to use. It can be a branch name, a tag name, or a commit id, since we use a
                 git-based system for storing models and other artifacts on huggingface.co, so `revision` can be any
                 identifier allowed by git.
+
+                <Tip>
+
+                To test a pull request you made on the Hub, you can pass `revision="refs/pr/<pr_number>".
+
+                </Tip>
+
             mirror (`str`, *optional*):
                 Mirror source to accelerate downloads in China. If you are from China and have an accessibility
                 problem, you can set this option to resolve it. Note that we do not guarantee the timeliness or safety.
@@ -1674,22 +2050,64 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 Tries to not use more than 1x model size in CPU memory (including peak memory) while loading the model.
                 This is an experimental feature and a subject to change at any moment.
             torch_dtype (`str` or `torch.dtype`, *optional*):
-                Override the default `torch.dtype` and load the model under this dtype. If `"auto"` is passed the dtype
-                will be automatically derived from the model's weights.
-            device_map (`str` or `Dict[str, Union[int, str, torch.device]]`, *optional*):
+                Override the default `torch.dtype` and load the model under a specific `dtype`. The different options
+                are:
+
+                1. `torch.float16` or `torch.bfloat16` or `torch.float`: load in a specified
+                  `dtype`, ignoring the model's `config.torch_dtype` if one exists. If not specified
+                  - the model will get loaded in `torch.float` (fp32).
+
+                2. `"auto"` - A `torch_dtype` entry in the `config.json` file of the model will be
+                  attempted to be used. If this entry isn't found then next check the `dtype` of the first weight in
+                  the checkpoint that's of a floating point type and use that as `dtype`. This will load the model
+                  using the `dtype` it was saved in at the end of the training. It can't be used as an indicator of how
+                  the model was trained. Since it could be trained in one of half precision dtypes, but saved in fp32.
+
+                <Tip>
+
+                For some models the `dtype` they were trained in is unknown - you may try to check the model's paper or
+                reach out to the authors and ask them to add this information to the model's card and to insert the
+                `torch_dtype` entry in `config.json` on the hub.
+
+                </Tip>
+
+            device_map (`str` or `Dict[str, Union[int, str, torch.device]]` or `int` or `torch.device`, *optional*):
                 A map that specifies where each submodule should go. It doesn't need to be refined to each
                 parameter/buffer name, once a given module name is inside, every submodule of it will be sent to the
-                same device.
+                same device. If we only pass the device (*e.g.*, `"cpu"`, `"cuda:1"`, `"mps"`, or a GPU ordinal rank
+                like `1`) on which the model will be allocated, the device map will map the entire model to this
+                device. Passing `device_map = 0` means put the whole model on GPU 0.
 
-                To have Accelerate compute the most optimized `device_map` automatically, set `device_map="auto"`.
+                To have Accelerate compute the most optimized `device_map` automatically, set `device_map="auto"`. For
+                more information about each option see [designing a device
+                map](https://hf.co/docs/accelerate/main/en/usage_guides/big_modeling#designing-a-device-map).
             max_memory (`Dict`, *optional*):
                 A dictionary device identifier to maximum memory. Will default to the maximum memory available for each
                 GPU and the available CPU RAM if unset.
             offload_folder (`str` or `os.PathLike`, *optional*):
                 If the `device_map` contains any value `"disk"`, the folder where we will offload weights.
-            offload_state_dict (`bool`, *optional*, defaults to `False`):
+            offload_state_dict (`bool`, *optional*):
                 If `True`, will temporarily offload the CPU state dict to the hard drive to avoid getting out of CPU
-                RAM if the weight of the CPU state dict + the biggest shard of the checkpoint does not fit.
+                RAM if the weight of the CPU state dict + the biggest shard of the checkpoint does not fit. Defaults to
+                `True` when there is some disk offload.
+            load_in_8bit (`bool`, *optional*, defaults to `False`):
+                If `True`, will convert the loaded model into mixed-8bit quantized model. To use this feature please
+                install `bitsandbytes` compiled with your CUDA version by running `pip install -i
+                https://test.pypi.org/simple/ bitsandbytes-cudaXXX` where XXX is your CUDA version (e.g. 11.6 = 116).
+                Make also sure that you have enough GPU RAM to store half of the model size since the 8bit modules are
+                not compiled and adapted for CPUs.
+            quantization_config (`Dict`, *optional*):
+                A dictionary of configuration parameters for the `bitsandbytes` library and loading the model using
+                advanced features such as offloading in fp32 on CPU or on disk.
+            subfolder (`str`, *optional*, defaults to `""`):
+                In case the relevant files are located inside a subfolder of the model repo on huggingface.co, you can
+                specify the folder name here.
+            variant (`str`, *optional*):
+                If specified load weights from `variant` filename, *e.g.* pytorch_model.<variant>.bin. `variant` is
+                ignored when using `from_tf` or `from_flax`.
+            use_safetensors (`bool`, *optional*, defaults to `None`):
+                Whether or not to use `safetensors` checkpoints. Defaults to `None`. If not specified and `safetensors`
+                is not installed, it will be set to `False`.
 
             kwargs (remaining dictionary of keyword arguments, *optional*):
                 Can be used to update the configuration object (after it being loaded) and initiate the model (e.g.,
@@ -1704,12 +2122,6 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                       corresponds to a configuration attribute will be used to override said attribute with the
                       supplied `kwargs` value. Remaining keys that do not correspond to any configuration attribute
                       will be passed to the underlying model's `__init__` function.
-
-        <Tip>
-
-        Passing `use_auth_token=True`` is required when you want to use a private model.
-
-        </Tip>
 
         <Tip>
 
@@ -1753,20 +2165,15 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         Currently, it can't handle deepspeed ZeRO stage 3 and ignores loading errors
 
         """
-        config = kwargs.pop("config", None)
         state_dict = kwargs.pop("state_dict", None)
-        cache_dir = kwargs.pop("cache_dir", None)
         from_tf = kwargs.pop("from_tf", False)
         from_flax = kwargs.pop("from_flax", False)
-        ignore_mismatched_sizes = kwargs.pop("ignore_mismatched_sizes", False)
-        force_download = kwargs.pop("force_download", False)
         resume_download = kwargs.pop("resume_download", False)
         proxies = kwargs.pop("proxies", None)
         output_loading_info = kwargs.pop("output_loading_info", False)
-        local_files_only = kwargs.pop("local_files_only", False)
         use_auth_token = kwargs.pop("use_auth_token", None)
-        revision = kwargs.pop("revision", None)
-        mirror = kwargs.pop("mirror", None)
+        trust_remote_code = kwargs.pop("trust_remote_code", None)
+        _ = kwargs.pop("mirror", None)
         from_pipeline = kwargs.pop("_from_pipeline", None)
         from_auto_class = kwargs.pop("_from_auto", False)
         _fast_init = kwargs.pop("_fast_init", True)
@@ -1776,6 +2183,55 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         max_memory = kwargs.pop("max_memory", None)
         offload_folder = kwargs.pop("offload_folder", None)
         offload_state_dict = kwargs.pop("offload_state_dict", False)
+        load_in_8bit = kwargs.pop("load_in_8bit", False)
+        load_in_4bit = kwargs.pop("load_in_4bit", False)
+        quantization_config = kwargs.pop("quantization_config", None)
+        subfolder = kwargs.pop("subfolder", "")
+        commit_hash = kwargs.pop("_commit_hash", None)
+        variant = kwargs.pop("variant", None)
+
+        if use_auth_token is not None:
+            warnings.warn(
+                "The `use_auth_token` argument is deprecated and will be removed in v5 of Transformers.", FutureWarning
+            )
+            if token is not None:
+                raise ValueError(
+                    "`token` and `use_auth_token` are both specified. Please set only the argument `token`."
+                )
+            token = use_auth_token
+
+        if use_safetensors is None and not is_safetensors_available():
+            use_safetensors = False
+
+        if is_bitsandbytes_available():
+            is_8bit_serializable = version.parse(importlib.metadata.version("bitsandbytes")) > version.parse("0.37.2")
+        else:
+            is_8bit_serializable = False
+
+        if trust_remote_code is True:
+            logger.warning(
+                "The argument `trust_remote_code` is to be used with Auto classes. It has no effect here and is"
+                " ignored."
+            )
+
+        # change device_map into a map if we passed an int, a str or a torch.device
+        if isinstance(device_map, torch.device):
+            device_map = {"": device_map}
+        elif isinstance(device_map, str) and device_map not in ["auto", "balanced", "balanced_low_0", "sequential"]:
+            try:
+                device_map = {"": torch.device(device_map)}
+            except RuntimeError:
+                raise ValueError(
+                    "When passing device_map as a string, the value needs to be a device name (e.g. cpu, cuda:0) or "
+                    f"'auto', 'balanced', 'balanced_low_0', 'sequential' but found {device_map}."
+                )
+        elif isinstance(device_map, int):
+            if device_map < 0:
+                raise ValueError(
+                    "You can't pass device_map as a negative int. If you want to put the model on the cpu, pass device_map = 'cpu' "
+                )
+            else:
+                device_map = {"": device_map}
 
         if device_map is not None:
             if low_cpu_mem_usage is None:
@@ -1784,8 +2240,9 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 raise ValueError("Passing along a `device_map` requires `low_cpu_mem_usage=True`")
 
         if low_cpu_mem_usage:
-            # low_cpu_mem_usage requires PyTorch >= 1.9 to have the meta device.
-            require_version_core("torch>=1.9")
+            if device_map is not None:
+                # The max memory utils require PyTorch >= 1.10 to have torch.cuda.mem_get_info.
+                require_version_core("torch>=1.10")
 
             if is_deepspeed_zero3_enabled():
                 raise ValueError(
@@ -1794,6 +2251,63 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             elif not is_accelerate_available():
                 raise ImportError(
                     "Using `low_cpu_mem_usage=True` or a `device_map` requires Accelerate: `pip install accelerate`"
+                )
+
+        if quantization_config is None:
+            quantization_config, kwargs = BitsAndBytesConfig.from_dict(
+                config_dict={"load_in_8bit": load_in_8bit, "load_in_4bit": load_in_4bit},
+                return_unused_kwargs=True,
+                **kwargs,
+            )
+        elif quantization_config is not None:
+            load_in_8bit = quantization_config.load_in_8bit
+            load_in_4bit = quantization_config.load_in_4bit
+
+            quantization_config_kwargs = {
+                k: v for k, v in kwargs.items() if k in inspect.signature(BitsAndBytesConfig).parameters
+            }
+
+            if len(quantization_config_kwargs) > 0:
+                raise ValueError(
+                    "You can't pass `load_in_8bit` or any other `BitsAndBytesConfig` argument as a kwarg when passing "
+                    "`quantization_config` argument at the same time."
+                )
+
+        if load_in_8bit or load_in_4bit:
+            if not (is_accelerate_available() and is_bitsandbytes_available()):
+                raise ImportError(
+                    "Using `load_in_8bit=True` requires Accelerate: `pip install accelerate` and the latest version of"
+                    " bitsandbytes `pip install -i https://test.pypi.org/simple/ bitsandbytes` or"
+                    " pip install bitsandbytes` "
+                )
+
+            if torch_dtype is None:
+                # We force the `dtype` to be float16, this is a requirement from `bitsandbytes`
+                logger.info(
+                    f"Overriding torch_dtype={torch_dtype} with `torch_dtype=torch.float16` due to "
+                    "requirements of `bitsandbytes` to enable model loading in 8-bit or 4-bit. "
+                    "Pass your own torch_dtype to specify the dtype of the remaining non-linear layers or pass"
+                    " torch_dtype=torch.float16 to remove this warning."
+                )
+                torch_dtype = torch.float16
+
+            if device_map is None:
+                if torch.cuda.is_available():
+                    device_map = {"": torch.cuda.current_device()}
+                else:
+                    raise RuntimeError("No GPU found. A GPU is needed for quantization.")
+                logger.info(
+                    "The device_map was not initialized."
+                    "Setting device_map to {'':torch.cuda.current_device()}."
+                    "If you want to use the model for inference, please set device_map ='auto' "
+                )
+                if low_cpu_mem_usage is None:
+                    low_cpu_mem_usage = True
+
+            if from_tf or from_flax:
+                raise ValueError(
+                    "Converting into 4-bit or 8-bit weights from tf/flax weights is currently not supported, please make"
+                    " sure the weights are in PyTorch format."
                 )
 
         from_pt = not (from_tf | from_flax)
@@ -1817,14 +2331,63 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 resume_download=resume_download,
                 proxies=proxies,
                 local_files_only=local_files_only,
-                use_auth_token=use_auth_token,
+                token=token,
                 revision=revision,
+                subfolder=subfolder,
                 _from_auto=from_auto_class,
                 _from_pipeline=from_pipeline,
                 **kwargs,
             )
         else:
             model_kwargs = kwargs
+
+        if is_8bit_serializable and quantization_config is not None and load_in_8bit:
+            if hasattr(config, "quantization_config"):
+                logger.warning(
+                    "You passed `quantization_config` to `from_pretrained` but the model you're loading already has a"
+                    " `quantization_config` attribute. The `quantization_config` attribute will be overwritten with the"
+                    " one you passed to `from_pretrained`."
+                )
+            config.quantization_config = quantization_config
+        elif is_8bit_serializable and not load_in_8bit and hasattr(config, "quantization_config"):
+            quantization_config = config.quantization_config
+            if isinstance(quantization_config, dict):
+                quantization_config = BitsAndBytesConfig.from_dict(quantization_config, return_unused_kwargs=False)
+            elif isinstance(quantization_config, BitsAndBytesConfig):
+                pass
+            else:
+                raise ValueError(
+                    f"Invalid type for `quantization_config`: {type(quantization_config)}. Should be a `dict` or a"
+                    " `BitsAndBytesConfig` instance."
+                )
+
+            load_in_8bit = quantization_config.load_in_8bit
+
+            if load_in_8bit:
+                if torch_dtype is None:
+                    torch_dtype = torch.float16
+                if device_map is None:
+                    if torch.cuda.is_available():
+                        device_map = {"": torch.cuda.current_device()}
+                    else:
+                        raise RuntimeError("No GPU found. A GPU is needed for quantization.")
+                    logger.info(
+                        "The device_map was not initialized."
+                        "Setting device_map to {'':torch.cuda.current_device()}."
+                        "If you want to use the model for inference, please set device_map ='auto' "
+                    )
+                    if low_cpu_mem_usage is None:
+                        low_cpu_mem_usage = True
+
+        elif not is_8bit_serializable and not load_in_8bit and hasattr(config, "quantization_config"):
+            logger.warning(
+                "Detected the presence of a `quantization_config` attribute in the model's configuration but you don't have the correct"
+                " `bitsandbytes` version to support int8 serialization. Please install the latest version of `bitsandbytes` with "
+                " `pip install --upgrade bitsandbytes`."
+            )
+
+        if commit_hash is None:
+            commit_hash = getattr(config, "_commit_hash", None)
 
         # This variable will flag if we're loading a sharded checkpoint. In this case the archive file is just the
         # index of the files.
@@ -1833,176 +2396,218 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         # Load model
         loading_info = None
 
+        # Keep in fp32 modules
+        keep_in_fp32_modules = None
+        use_keep_in_fp32_modules = False
+
         if pretrained_model_name_or_path is not None:
             pretrained_model_name_or_path = str(pretrained_model_name_or_path)
-            if os.path.isdir(pretrained_model_name_or_path):
-                if from_tf and os.path.isfile(os.path.join(pretrained_model_name_or_path, TF_WEIGHTS_NAME + ".index")):
+            is_local = os.path.isdir(pretrained_model_name_or_path)
+            if is_local:
+                if from_tf and os.path.isfile(
+                    os.path.join(pretrained_model_name_or_path, subfolder, TF_WEIGHTS_NAME + ".index")
+                ):
                     # Load from a TF 1.0 checkpoint in priority if from_tf
-                    archive_file = os.path.join(pretrained_model_name_or_path, TF_WEIGHTS_NAME + ".index")
-                elif from_tf and os.path.isfile(os.path.join(pretrained_model_name_or_path, TF2_WEIGHTS_NAME)):
+                    archive_file = os.path.join(pretrained_model_name_or_path, subfolder, TF_WEIGHTS_NAME + ".index")
+                elif from_tf and os.path.isfile(
+                    os.path.join(pretrained_model_name_or_path, subfolder, TF2_WEIGHTS_NAME)
+                ):
                     # Load from a TF 2.0 checkpoint in priority if from_tf
-                    archive_file = os.path.join(pretrained_model_name_or_path, TF2_WEIGHTS_NAME)
-                elif from_flax and os.path.isfile(os.path.join(pretrained_model_name_or_path, FLAX_WEIGHTS_NAME)):
+                    archive_file = os.path.join(pretrained_model_name_or_path, subfolder, TF2_WEIGHTS_NAME)
+                elif from_flax and os.path.isfile(
+                    os.path.join(pretrained_model_name_or_path, subfolder, FLAX_WEIGHTS_NAME)
+                ):
                     # Load from a Flax checkpoint in priority if from_flax
-                    archive_file = os.path.join(pretrained_model_name_or_path, FLAX_WEIGHTS_NAME)
-                elif os.path.isfile(os.path.join(pretrained_model_name_or_path, WEIGHTS_NAME)):
+                    archive_file = os.path.join(pretrained_model_name_or_path, subfolder, FLAX_WEIGHTS_NAME)
+                elif use_safetensors is not False and os.path.isfile(
+                    os.path.join(pretrained_model_name_or_path, subfolder, _add_variant(SAFE_WEIGHTS_NAME, variant))
+                ):
+                    # Load from a safetensors checkpoint
+                    archive_file = os.path.join(
+                        pretrained_model_name_or_path, subfolder, _add_variant(SAFE_WEIGHTS_NAME, variant)
+                    )
+                elif use_safetensors is not False and os.path.isfile(
+                    os.path.join(
+                        pretrained_model_name_or_path, subfolder, _add_variant(SAFE_WEIGHTS_INDEX_NAME, variant)
+                    )
+                ):
+                    # Load from a sharded safetensors checkpoint
+                    archive_file = os.path.join(
+                        pretrained_model_name_or_path, subfolder, _add_variant(SAFE_WEIGHTS_INDEX_NAME, variant)
+                    )
+                    is_sharded = True
+                elif os.path.isfile(
+                    os.path.join(pretrained_model_name_or_path, subfolder, _add_variant(WEIGHTS_NAME, variant))
+                ):
                     # Load from a PyTorch checkpoint
-                    archive_file = os.path.join(pretrained_model_name_or_path, WEIGHTS_NAME)
-                elif os.path.isfile(os.path.join(pretrained_model_name_or_path, WEIGHTS_INDEX_NAME)):
+                    archive_file = os.path.join(
+                        pretrained_model_name_or_path, subfolder, _add_variant(WEIGHTS_NAME, variant)
+                    )
+                elif os.path.isfile(
+                    os.path.join(pretrained_model_name_or_path, subfolder, _add_variant(WEIGHTS_INDEX_NAME, variant))
+                ):
                     # Load from a sharded PyTorch checkpoint
-                    archive_file = os.path.join(pretrained_model_name_or_path, WEIGHTS_INDEX_NAME)
+                    archive_file = os.path.join(
+                        pretrained_model_name_or_path, subfolder, _add_variant(WEIGHTS_INDEX_NAME, variant)
+                    )
                     is_sharded = True
                 # At this stage we don't have a weight file so we will raise an error.
                 elif os.path.isfile(
-                    os.path.join(pretrained_model_name_or_path, TF_WEIGHTS_NAME + ".index")
-                ) or os.path.isfile(os.path.join(pretrained_model_name_or_path, TF2_WEIGHTS_NAME)):
+                    os.path.join(pretrained_model_name_or_path, subfolder, TF_WEIGHTS_NAME + ".index")
+                ) or os.path.isfile(os.path.join(pretrained_model_name_or_path, subfolder, TF2_WEIGHTS_NAME)):
                     raise EnvironmentError(
-                        f"Error no file named {WEIGHTS_NAME} found in directory {pretrained_model_name_or_path} but "
-                        "there is a file for TensorFlow weights. Use `from_tf=True` to load this model from those "
-                        "weights."
+                        f"Error no file named {_add_variant(WEIGHTS_NAME, variant)} found in directory"
+                        f" {pretrained_model_name_or_path} but there is a file for TensorFlow weights. Use"
+                        " `from_tf=True` to load this model from those weights."
                     )
-                elif os.path.isfile(os.path.join(pretrained_model_name_or_path, FLAX_WEIGHTS_NAME)):
+                elif os.path.isfile(os.path.join(pretrained_model_name_or_path, subfolder, FLAX_WEIGHTS_NAME)):
                     raise EnvironmentError(
-                        f"Error no file named {WEIGHTS_NAME} found in directory {pretrained_model_name_or_path} but "
-                        "there is a file for Flax weights. Use `from_flax=True` to load this model from those "
-                        "weights."
+                        f"Error no file named {_add_variant(WEIGHTS_NAME, variant)} found in directory"
+                        f" {pretrained_model_name_or_path} but there is a file for Flax weights. Use `from_flax=True`"
+                        " to load this model from those weights."
+                    )
+                elif use_safetensors:
+                    raise EnvironmentError(
+                        f"Error no file named {_add_variant(SAFE_WEIGHTS_NAME, variant)} found in directory"
+                        f" {pretrained_model_name_or_path}."
                     )
                 else:
                     raise EnvironmentError(
-                        f"Error no file named {WEIGHTS_NAME}, {TF2_WEIGHTS_NAME}, {TF_WEIGHTS_NAME + '.index'} or "
-                        f"{FLAX_WEIGHTS_NAME} found in directory {pretrained_model_name_or_path}."
+                        f"Error no file named {_add_variant(WEIGHTS_NAME, variant)}, {TF2_WEIGHTS_NAME},"
+                        f" {TF_WEIGHTS_NAME + '.index'} or {FLAX_WEIGHTS_NAME} found in directory"
+                        f" {pretrained_model_name_or_path}."
                     )
-            elif os.path.isfile(pretrained_model_name_or_path) or is_remote_url(pretrained_model_name_or_path):
+            elif os.path.isfile(os.path.join(subfolder, pretrained_model_name_or_path)):
                 archive_file = pretrained_model_name_or_path
-            elif os.path.isfile(pretrained_model_name_or_path + ".index"):
+                is_local = True
+            elif os.path.isfile(os.path.join(subfolder, pretrained_model_name_or_path + ".index")):
                 if not from_tf:
                     raise ValueError(
                         f"We found a TensorFlow checkpoint at {pretrained_model_name_or_path + '.index'}, please set "
                         "from_tf to True to load from this checkpoint."
                     )
-                archive_file = pretrained_model_name_or_path + ".index"
+                archive_file = os.path.join(subfolder, pretrained_model_name_or_path + ".index")
+                is_local = True
+            elif is_remote_url(pretrained_model_name_or_path):
+                filename = pretrained_model_name_or_path
+                resolved_archive_file = download_url(pretrained_model_name_or_path)
             else:
                 # set correct filename
                 if from_tf:
                     filename = TF2_WEIGHTS_NAME
                 elif from_flax:
                     filename = FLAX_WEIGHTS_NAME
+                elif use_safetensors is not False:
+                    filename = _add_variant(SAFE_WEIGHTS_NAME, variant)
                 else:
-                    filename = WEIGHTS_NAME
+                    filename = _add_variant(WEIGHTS_NAME, variant)
 
-                archive_file = hf_bucket_url(
-                    pretrained_model_name_or_path, filename=filename, revision=revision, mirror=mirror
-                )
+                try:
+                    # Load from URL or cache if already cached
+                    cached_file_kwargs = {
+                        "cache_dir": cache_dir,
+                        "force_download": force_download,
+                        "proxies": proxies,
+                        "resume_download": resume_download,
+                        "local_files_only": local_files_only,
+                        "use_auth_token": token,
+                        "user_agent": user_agent,
+                        "revision": revision,
+                        "subfolder": subfolder,
+                        "_raise_exceptions_for_missing_entries": False,
+                        "_commit_hash": commit_hash,
+                    }
+                    resolved_archive_file = cached_file(pretrained_model_name_or_path, filename, **cached_file_kwargs)
 
-            try:
-                # Load from URL or cache if already cached
-                resolved_archive_file = cached_path(
-                    archive_file,
-                    cache_dir=cache_dir,
-                    force_download=force_download,
-                    proxies=proxies,
-                    resume_download=resume_download,
-                    local_files_only=local_files_only,
-                    use_auth_token=use_auth_token,
-                    user_agent=user_agent,
-                )
-
-            except RepositoryNotFoundError:
-                raise EnvironmentError(
-                    f"{pretrained_model_name_or_path} is not a local folder and is not a valid model identifier "
-                    "listed on 'https://huggingface.co/models'\nIf this is a private repository, make sure to pass a "
-                    "token having permission to this repo with `use_auth_token` or log in with `huggingface-cli "
-                    "login` and pass `use_auth_token=True`."
-                )
-            except RevisionNotFoundError:
-                raise EnvironmentError(
-                    f"{revision} is not a valid git identifier (branch name, tag name or commit id) that exists for "
-                    "this model name. Check the model page at "
-                    f"'https://huggingface.co/{pretrained_model_name_or_path}' for available revisions."
-                )
-            except EntryNotFoundError:
-                if filename == WEIGHTS_NAME:
-                    try:
+                    # Since we set _raise_exceptions_for_missing_entries=False, we don't get an exception but a None
+                    # result when internet is up, the repo and revision exist, but the file does not.
+                    if resolved_archive_file is None and filename == _add_variant(SAFE_WEIGHTS_NAME, variant):
                         # Maybe the checkpoint is sharded, we try to grab the index name in this case.
-                        archive_file = hf_bucket_url(
+                        resolved_archive_file = cached_file(
                             pretrained_model_name_or_path,
-                            filename=WEIGHTS_INDEX_NAME,
-                            revision=revision,
-                            mirror=mirror,
+                            _add_variant(SAFE_WEIGHTS_INDEX_NAME, variant),
+                            **cached_file_kwargs,
                         )
-                        resolved_archive_file = cached_path(
-                            archive_file,
-                            cache_dir=cache_dir,
-                            force_download=force_download,
-                            proxies=proxies,
-                            resume_download=resume_download,
-                            local_files_only=local_files_only,
-                            use_auth_token=use_auth_token,
-                            user_agent=user_agent,
+                        if resolved_archive_file is not None:
+                            is_sharded = True
+                        elif use_safetensors:
+                            raise EnvironmentError(
+                                f" {_add_variant(SAFE_WEIGHTS_NAME, variant)} or {_add_variant(SAFE_WEIGHTS_INDEX_NAME, variant)} and thus cannot be loaded with `safetensors`. Please make sure that the model has been saved with `safe_serialization=True` or do not set `use_safetensors=True`."
+                            )
+                        else:
+                            # This repo has no safetensors file of any kind, we switch to PyTorch.
+                            filename = _add_variant(WEIGHTS_NAME, variant)
+                            resolved_archive_file = cached_file(
+                                pretrained_model_name_or_path, filename, **cached_file_kwargs
+                            )
+                    if resolved_archive_file is None and filename == _add_variant(WEIGHTS_NAME, variant):
+                        # Maybe the checkpoint is sharded, we try to grab the index name in this case.
+                        resolved_archive_file = cached_file(
+                            pretrained_model_name_or_path,
+                            _add_variant(WEIGHTS_INDEX_NAME, variant),
+                            **cached_file_kwargs,
                         )
-                        is_sharded = True
-                    except EntryNotFoundError:
+                        if resolved_archive_file is not None:
+                            is_sharded = True
+                    if resolved_archive_file is None:
                         # Otherwise, maybe there is a TF or Flax model file.  We try those to give a helpful error
                         # message.
                         has_file_kwargs = {
                             "revision": revision,
-                            "mirror": mirror,
                             "proxies": proxies,
-                            "use_auth_token": use_auth_token,
+                            "use_auth_token": token,
                         }
                         if has_file(pretrained_model_name_or_path, TF2_WEIGHTS_NAME, **has_file_kwargs):
                             raise EnvironmentError(
                                 f"{pretrained_model_name_or_path} does not appear to have a file named"
-                                f" {WEIGHTS_NAME} but there is a file for TensorFlow weights. Use `from_tf=True` to"
-                                " load this model from those weights."
+                                f" {_add_variant(WEIGHTS_NAME, variant)} but there is a file for TensorFlow weights."
+                                " Use `from_tf=True` to load this model from those weights."
                             )
                         elif has_file(pretrained_model_name_or_path, FLAX_WEIGHTS_NAME, **has_file_kwargs):
                             raise EnvironmentError(
                                 f"{pretrained_model_name_or_path} does not appear to have a file named"
-                                f" {WEIGHTS_NAME} but there is a file for Flax weights. Use `from_flax=True` to load"
-                                " this model from those weights."
+                                f" {_add_variant(WEIGHTS_NAME, variant)} but there is a file for Flax weights. Use"
+                                " `from_flax=True` to load this model from those weights."
+                            )
+                        elif variant is not None and has_file(
+                            pretrained_model_name_or_path, WEIGHTS_NAME, **has_file_kwargs
+                        ):
+                            raise EnvironmentError(
+                                f"{pretrained_model_name_or_path} does not appear to have a file named"
+                                f" {_add_variant(WEIGHTS_NAME, variant)} but there is a file without the variant"
+                                f" {variant}. Use `variant=None` to load this model from those weights."
                             )
                         else:
                             raise EnvironmentError(
-                                f"{pretrained_model_name_or_path} does not appear to have a file named {WEIGHTS_NAME},"
-                                f" {TF2_WEIGHTS_NAME}, {TF_WEIGHTS_NAME} or {FLAX_WEIGHTS_NAME}."
+                                f"{pretrained_model_name_or_path} does not appear to have a file named"
+                                f" {_add_variant(WEIGHTS_NAME, variant)}, {TF2_WEIGHTS_NAME}, {TF_WEIGHTS_NAME} or"
+                                f" {FLAX_WEIGHTS_NAME}."
                             )
-                else:
+                except EnvironmentError:
+                    # Raise any environment error raise by `cached_file`. It will have a helpful error message adapted
+                    # to the original exception.
+                    raise
+                except Exception:
+                    # For any other exception, we throw a generic error.
                     raise EnvironmentError(
-                        f"{pretrained_model_name_or_path} does not appear to have a file named {filename}."
+                        f"Can't load the model for '{pretrained_model_name_or_path}'. If you were trying to load it"
+                        " from 'https://huggingface.co/models', make sure you don't have a local directory with the"
+                        f" same name. Otherwise, make sure '{pretrained_model_name_or_path}' is the correct path to a"
+                        f" directory containing a file named {_add_variant(WEIGHTS_NAME, variant)},"
+                        f" {TF2_WEIGHTS_NAME}, {TF_WEIGHTS_NAME} or {FLAX_WEIGHTS_NAME}."
                     )
-            except HTTPError as err:
-                raise EnvironmentError(
-                    f"There was a specific connection error when trying to load {pretrained_model_name_or_path}:\n"
-                    f"{err}"
-                )
-            except ValueError:
-                raise EnvironmentError(
-                    f"We couldn't connect to '{HUGGINGFACE_CO_RESOLVE_ENDPOINT}' to load this model, couldn't find it"
-                    f" in the cached files and it looks like {pretrained_model_name_or_path} is not the path to a"
-                    f" directory containing a file named {WEIGHTS_NAME}, {TF2_WEIGHTS_NAME}, {TF_WEIGHTS_NAME} or"
-                    f" {FLAX_WEIGHTS_NAME}.\nCheckout your internet connection or see how to run the library in"
-                    " offline mode at 'https://huggingface.co/docs/transformers/installation#offline-mode'."
-                )
-            except EnvironmentError:
-                raise EnvironmentError(
-                    f"Can't load the model for '{pretrained_model_name_or_path}'. If you were trying to load it from "
-                    "'https://huggingface.co/models', make sure you don't have a local directory with the same name. "
-                    f"Otherwise, make sure '{pretrained_model_name_or_path}' is the correct path to a directory "
-                    f"containing a file named {WEIGHTS_NAME}, {TF2_WEIGHTS_NAME}, {TF_WEIGHTS_NAME} or "
-                    f"{FLAX_WEIGHTS_NAME}."
-                )
 
-            if resolved_archive_file == archive_file:
+            if is_local:
                 logger.info(f"loading weights file {archive_file}")
+                resolved_archive_file = archive_file
             else:
-                logger.info(f"loading weights file {archive_file} from cache at {resolved_archive_file}")
+                logger.info(f"loading weights file {filename} from cache at {resolved_archive_file}")
         else:
             resolved_archive_file = None
 
         # We'll need to download and cache each checkpoint shard if the checkpoint is sharded.
         if is_sharded:
-            # resolved_archive_file becomes a list of files that point to the different checkpoint shards in this case.
+            # rsolved_archive_file becomes a list of files that point to the different checkpoint shards in this case.
             resolved_archive_file, sharded_metadata = get_checkpoint_shard_files(
                 pretrained_model_name_or_path,
                 resolved_archive_file,
@@ -2011,10 +2616,11 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 proxies=proxies,
                 resume_download=resume_download,
                 local_files_only=local_files_only,
-                use_auth_token=use_auth_token,
+                use_auth_token=token,
                 user_agent=user_agent,
                 revision=revision,
-                mirror=mirror,
+                subfolder=subfolder,
+                _commit_hash=commit_hash,
             )
 
         # load pt weights early so that we know which dtype to init the model under
@@ -2029,28 +2635,53 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             #    weights entry that is of a floating type - we assume all floating dtype weights are of the same dtype
             # we also may have config.torch_dtype available, but we won't rely on it till v5
             dtype_orig = None
+
             if torch_dtype is not None:
                 if isinstance(torch_dtype, str):
                     if torch_dtype == "auto":
-                        if is_sharded and "dtype" in sharded_metadata:
-                            torch_dtype = sharded_metadata["dtype"]
-                        elif not is_sharded:
-                            torch_dtype = get_state_dict_dtype(state_dict)
+                        if hasattr(config, "torch_dtype") and config.torch_dtype is not None:
+                            torch_dtype = config.torch_dtype
+                            logger.info(f"Will use torch_dtype={torch_dtype} as defined in model's config object")
                         else:
-                            one_state_dict = load_state_dict(resolved_archive_file)
-                            torch_dtype = get_state_dict_dtype(one_state_dict)
-                            del one_state_dict  # free CPU memory
+                            if is_sharded and "dtype" in sharded_metadata:
+                                torch_dtype = sharded_metadata["dtype"]
+                            elif not is_sharded:
+                                torch_dtype = get_state_dict_dtype(state_dict)
+                            else:
+                                one_state_dict = load_state_dict(resolved_archive_file[0])
+                                torch_dtype = get_state_dict_dtype(one_state_dict)
+                                del one_state_dict  # free CPU memory
+                            logger.info(
+                                "Since the `torch_dtype` attribute can't be found in model's config object, "
+                                "will use torch_dtype={torch_dtype} as derived from model's weights"
+                            )
                     else:
                         raise ValueError(
-                            f"`torch_dtype` can be either a `torch.dtype` or `auto`, but received {torch_dtype}"
+                            f'`torch_dtype` can be either `torch.dtype` or `"auto"`, but received {torch_dtype}'
                         )
                 dtype_orig = cls._set_default_torch_dtype(torch_dtype)
+
+            # Check if `_keep_in_fp32_modules` is not None
+            use_keep_in_fp32_modules = (
+                (cls._keep_in_fp32_modules is not None)
+                and is_accelerate_available()
+                and (torch_dtype == torch.float16 or load_in_4bit or load_in_8bit)
+            )
+            if (
+                (cls._keep_in_fp32_modules is not None)
+                and not is_accelerate_available()
+                and torch_dtype == torch.float16
+            ):
+                logger.warning(
+                    "For stability purposes, it is recommended to have accelerate installed when using this model in"
+                    " torch.float16, please install it with `pip install accelerate`"
+                )
 
             if is_sharded:
                 loaded_state_dict_keys = sharded_metadata["all_checkpoint_keys"]
             else:
-                loaded_state_dict_keys = [k for k in state_dict.keys()]
-            if low_cpu_mem_usage:
+                loaded_state_dict_keys = list(state_dict.keys())
+            if low_cpu_mem_usage or use_keep_in_fp32_modules:
                 state_dict = None
 
         config.name_or_path = pretrained_model_name_or_path
@@ -2063,21 +2694,169 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
 
             logger.info("Detected DeepSpeed ZeRO-3: activating zero.init() for this model")
             init_contexts = [deepspeed.zero.Init(config_dict_or_path=deepspeed_config())] + init_contexts
-        elif low_cpu_mem_usage:
+        elif load_in_8bit or load_in_4bit or low_cpu_mem_usage:
             init_contexts.append(init_empty_weights())
 
         with ContextManagers(init_contexts):
             model = cls(config, *model_args, **model_kwargs)
 
-        if device_map == "auto":
+        # Check first if we are `from_pt`
+        if use_keep_in_fp32_modules:
+            low_cpu_mem_usage = True
+            keep_in_fp32_modules = model._keep_in_fp32_modules
+        else:
+            keep_in_fp32_modules = []
+
+        if load_in_8bit or load_in_4bit:
+            from .utils.bitsandbytes import get_keys_to_not_convert, replace_with_bnb_linear
+
+            llm_int8_skip_modules = quantization_config.llm_int8_skip_modules
+            load_in_8bit_fp32_cpu_offload = quantization_config.llm_int8_enable_fp32_cpu_offload
+
+            logger.info("Detected 8-bit loading: activating 8-bit loading for this model")
+
+            # We keep some modules such as the lm_head in their original dtype for numerical stability reasons
+            if llm_int8_skip_modules is None:
+                modules_to_not_convert = get_keys_to_not_convert(model)
+            else:
+                modules_to_not_convert = llm_int8_skip_modules
+
+            if not isinstance(modules_to_not_convert, list):
+                modules_to_not_convert = [modules_to_not_convert]
+
+            modules_to_not_convert.extend(keep_in_fp32_modules)
+
+            # Extend the modules to not convert to keys that are supposed to be offloaded to `cpu` or `disk`
+            if isinstance(device_map, dict) and len(device_map.keys()) > 1:
+                keys_on_cpu = [key for key, value in device_map.items() if value in ["disk", "cpu"]]
+
+                if len(keys_on_cpu) > 0 and not load_in_8bit_fp32_cpu_offload:
+                    raise ValueError(
+                        "If you want to offload some keys to `cpu` or `disk`, you need to set "
+                        "`llm_int8_enable_fp32_cpu_offload=True`. Note that these modules will not be "
+                        " converted to 8-bit but kept in 32-bit."
+                    )
+
+                modules_to_not_convert.extend(keys_on_cpu)
+
+            supports_4bit = version.parse(importlib.metadata.version("bitsandbytes")) >= version.parse("0.39.0")
+
+            if load_in_4bit and not supports_4bit:
+                raise ValueError(
+                    "You have a version of `bitsandbytes` that is not compatible with 4bit inference and training"
+                    " make sure you have the latest version of `bitsandbytes` installed"
+                )
+
+            model = replace_with_bnb_linear(
+                model, modules_to_not_convert=modules_to_not_convert, quantization_config=quantization_config
+            )
+            # training in 8-bit is only available in 0.37.0+
+            model._is_quantized_training_enabled = version.parse(
+                importlib.metadata.version("bitsandbytes")
+            ) >= version.parse("0.37.0")
+
+            model.config.quantization_config = quantization_config
+            model.is_8bit_serializable = is_8bit_serializable
+
+        if load_in_8bit and torch_dtype is None:
+            logger.warning(
+                "You are loading your model in 8bit but you did not specify a `torch_dtype` attribute."
+                "All non-linear modules will be loaded in full precision."
+                " If you want to load the other modules in other precision, please specify a `torch_dtype` attribute."
+            )
+
+        if isinstance(device_map, str):
+            special_dtypes = {}
+            if load_in_8bit or load_in_4bit:
+                special_dtypes.update(
+                    {
+                        name: torch_dtype
+                        for name, _ in model.named_parameters()
+                        if any(m in name for m in modules_to_not_convert)
+                    }
+                )
+
+            special_dtypes.update(
+                {
+                    name: torch.float32
+                    for name, _ in model.named_parameters()
+                    if any(m in name for m in keep_in_fp32_modules)
+                }
+            )
+
+            target_dtype = torch_dtype
+
+            if load_in_4bit:
+                if version.parse(importlib.metadata.version("accelerate")) > version.parse("0.19.0"):
+                    from accelerate.utils import CustomDtype
+
+                    target_dtype = CustomDtype.INT4
+                else:
+                    raise ValueError(
+                        "You are using `device_map='auto'` on a 4bit loaded version of the model. To automatically compute"
+                        " the appropriate device map, you should upgrade your `accelerate` library,"
+                        "`pip install --upgrade accelerate` or install it from source to support fp4 auto device map"
+                        "calculation. You may encounter unexpected behavior, or pass your own device map"
+                    )
+            elif load_in_8bit:
+                target_dtype = torch.int8
+
             if model._no_split_modules is None:
-                raise ValueError(f"{model.__class__.__name__} does not support `device_map='auto'` yet.")
+                raise ValueError(
+                    f"{model.__class__.__name__} does not support `device_map='{device_map}'`. To implement support, the model"
+                    "class needs to implement the `_no_split_modules` attribute."
+                )
             no_split_modules = model._no_split_modules
+            if device_map not in ["auto", "balanced", "balanced_low_0", "sequential"]:
+                raise ValueError(
+                    "If passing a string for `device_map`, please choose 'auto', 'balanced', 'balanced_low_0' or "
+                    "'sequential'."
+                )
+
+            kwargs = {"no_split_module_classes": no_split_modules}
+            if "special_dtypes" in inspect.signature(infer_auto_device_map).parameters:
+                kwargs["special_dtypes"] = special_dtypes
+            elif len(special_dtypes) > 0:
+                logger.warn(
+                    "This model has some weights that should be kept in higher precision, you need to upgrade "
+                    "`accelerate` to properly deal with them (`pip install --upgrade accelerate`)."
+                )
+            if device_map != "sequential":
+                max_memory = get_balanced_memory(
+                    model,
+                    dtype=target_dtype,
+                    low_zero=(device_map == "balanced_low_0"),
+                    max_memory=max_memory,
+                    **kwargs,
+                )
+            kwargs["max_memory"] = max_memory
             # Make sure tied weights are tied before creating the device map.
             model.tie_weights()
-            device_map = infer_auto_device_map(
-                model, no_split_module_classes=no_split_modules, dtype=torch_dtype, max_memory=max_memory
-            )
+            device_map = infer_auto_device_map(model, dtype=target_dtype, **kwargs)
+
+            if load_in_8bit or load_in_4bit:
+                # The LM head / tied weights or any last module can stay on disk / CPU
+                device_map_without_lm_head = {
+                    key: device_map[key] for key in device_map.keys() if key not in modules_to_not_convert
+                }
+                if "cpu" in device_map_without_lm_head.values() or "disk" in device_map_without_lm_head.values():
+                    raise ValueError(
+                        """
+                        Some modules are dispatched on the CPU or the disk. Make sure you have enough GPU RAM to fit
+                        the quantized model. If you want to dispatch the model on the CPU or the disk while keeping
+                        these modules in 32-bit, you need to set `load_in_8bit_fp32_cpu_offload=True` and pass a custom
+                        `device_map` to `from_pretrained`. Check
+                        https://huggingface.co/docs/transformers/main/en/main_classes/quantization#offload-between-cpu-and-gpu
+                        for more details.
+                        """
+                    )
+                del device_map_without_lm_head
+
+        elif device_map is not None:
+            model.tie_weights()
+            tied_params = find_tied_parameters(model)
+            # check if we don't have tied param in different devices
+            check_tied_parameters_on_same_device(tied_params, device_map)
 
         if from_tf:
             if resolved_archive_file.endswith(".index"):
@@ -2111,12 +2890,18 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 )
                 raise
         elif from_pt:
-
             # restore default dtype
             if dtype_orig is not None:
                 torch.set_default_dtype(dtype_orig)
 
-            model, missing_keys, unexpected_keys, mismatched_keys, error_msgs = cls._load_pretrained_model(
+            (
+                model,
+                missing_keys,
+                unexpected_keys,
+                mismatched_keys,
+                offload_index,
+                error_msgs,
+            ) = cls._load_pretrained_model(
                 model,
                 state_dict,
                 loaded_state_dict_keys,  # XXX: rename?
@@ -2130,7 +2915,13 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 offload_folder=offload_folder,
                 offload_state_dict=offload_state_dict,
                 dtype=torch_dtype,
+                is_quantized=(load_in_8bit or load_in_4bit),
+                keep_in_fp32_modules=keep_in_fp32_modules,
             )
+
+        model.is_loaded_in_4bit = load_in_4bit
+        model.is_loaded_in_8bit = load_in_8bit
+        model.is_quantized = load_in_8bit or load_in_4bit
 
         # make sure token embedding weights are still tied if needed
         model.tie_weights()
@@ -2138,9 +2929,35 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         # Set model in evaluation mode to deactivate DropOut modules by default
         model.eval()
 
+        # If it is a model with generation capabilities, attempt to load the generation config
+        if model.can_generate():
+            try:
+                model.generation_config = GenerationConfig.from_pretrained(
+                    pretrained_model_name_or_path,
+                    cache_dir=cache_dir,
+                    force_download=force_download,
+                    resume_download=resume_download,
+                    proxies=proxies,
+                    local_files_only=local_files_only,
+                    token=token,
+                    revision=revision,
+                    subfolder=subfolder,
+                    _from_auto=from_auto_class,
+                    _from_pipeline=from_pipeline,
+                    **kwargs,
+                )
+            except (OSError, TypeError):
+                logger.info(
+                    "Generation config file not found, using a generation config created from the model config."
+                )
+                pass
+
         # Dispatch model with hooks on all devices if necessary
         if device_map is not None:
-            dispatch_model(model, device_map=device_map, offload_dir=offload_folder)
+            kwargs = {"device_map": device_map, "offload_dir": offload_folder, "offload_index": offload_index}
+            if "skip_keys" in inspect.signature(dispatch_model).parameters:
+                kwargs["skip_keys"] = model._skip_keys_device_placement
+            dispatch_model(model, **kwargs)
 
         if output_loading_info:
             if loading_info is None:
@@ -2168,16 +2985,32 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         low_cpu_mem_usage=False,
         device_map=None,
         offload_folder=None,
-        offload_state_dict=False,
+        offload_state_dict=None,
         dtype=None,
+        is_quantized=False,
+        keep_in_fp32_modules=None,
     ):
+        is_safetensors = False
+        if is_quantized:
+            from .utils.bitsandbytes import set_module_quantized_tensor_to_device
+
         if device_map is not None and "disk" in device_map.values():
-            if offload_folder is None:
+            archive_file = (
+                resolved_archive_file[0] if isinstance(resolved_archive_file, (list, tuple)) else resolved_archive_file
+            )
+            is_safetensors = archive_file.endswith(".safetensors")
+            if offload_folder is None and not is_safetensors:
                 raise ValueError(
                     "The current `device_map` had weights offloaded to the disk. Please provide an `offload_folder`"
-                    " for them."
+                    " for them. Alternatively, make sure you have `safetensors` installed if the model you are using"
+                    " offers the weights in this format."
                 )
-            os.makedirs(offload_folder, exist_ok=True)
+            if offload_folder is not None:
+                os.makedirs(offload_folder, exist_ok=True)
+            if offload_state_dict is None:
+                offload_state_dict = True
+
+        is_sharded_safetensors = is_safetensors and sharded_metadata is not None
         # Retrieve missing & unexpected_keys
         model_state_dict = model.state_dict()
         expected_keys = list(model_state_dict.keys())
@@ -2206,13 +3039,40 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         add_prefix_to_model = has_prefix_module and not expects_prefix_module
 
         if remove_prefix_from_model:
-            expected_keys_not_prefixed = [s for s in expected_keys if not s.startswith(prefix)]
-            expected_keys = [".".join(s.split(".")[1:]) if s.startswith(prefix) else s for s in expected_keys]
+            _prefix = f"{prefix}."
+            expected_keys_not_prefixed = [s for s in expected_keys if not s.startswith(_prefix)]
+            expected_keys = [s[len(_prefix) :] if s.startswith(_prefix) else s for s in expected_keys]
         elif add_prefix_to_model:
             expected_keys = [".".join([prefix, s]) for s in expected_keys]
 
         missing_keys = list(set(expected_keys) - set(loaded_keys))
-        unexpected_keys = list(set(loaded_keys) - set(expected_keys))
+        unexpected_keys = set(loaded_keys) - set(expected_keys)
+        # Remove nonpersistent buffers from unexpected keys: they are not in the state dict but will be in the model
+        # buffers
+        model_buffers = {n for n, _ in model.named_buffers()}
+        if remove_prefix_from_model:
+            model_buffers = {key[len(_prefix) :] if key.startswith(_prefix) else key for key in model_buffers}
+        elif add_prefix_to_model:
+            model_buffers = {".".join([prefix, key]) for key in model_buffers}
+        unexpected_keys = list(unexpected_keys - model_buffers)
+
+        model.tie_weights()
+        ptrs = collections.defaultdict(list)
+        for name, tensor in model.state_dict().items():
+            id_tensor = id_tensor_storage(tensor) if tensor.device != torch.device("meta") else id(tensor)
+            ptrs[id_tensor].append(name)
+
+        # These are all the pointers of shared tensors.
+        tied_params = [names for _, names in ptrs.items() if len(names) > 1]
+
+        for group in tied_params:
+            if remove_prefix_from_model:
+                group = [key[len(_prefix) :] if key.startswith(_prefix) else key for key in group]
+            elif add_prefix_to_model:
+                group = [".".join([prefix, key]) for key in group]
+            missing_in_group = [k for k in missing_keys if k in group]
+            if len(missing_in_group) > 0 and len(missing_in_group) < len(group):
+                missing_keys = [k for k in missing_keys if k not in missing_in_group]
 
         # Some models may have keys that are not in the state by design, removing them before needlessly warning
         # the user.
@@ -2228,19 +3088,48 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         # This is not ideal in terms of memory, but if we don't do that not, we can't initialize them in the next step
         if low_cpu_mem_usage:
             for key in missing_keys:
-                if key.startswith(prefix):
+                if key in list(model_state_dict.keys()):
+                    key = key
+                elif f"{prefix}.{key}" in list(model_state_dict.keys()):
+                    key = f"{prefix}.{key}"
+                elif key.startswith(prefix) and ".".join(key.split(".")[1:]) in list(model_state_dict.keys()):
                     key = ".".join(key.split(".")[1:])
                 param = model_state_dict[key]
+
+                # upcast in fp32 if any
+                target_dtype = dtype
+                if (
+                    keep_in_fp32_modules is not None
+                    and dtype == torch.float16
+                    and any(module_to_keep_in_fp32 in key for module_to_keep_in_fp32 in keep_in_fp32_modules)
+                ):
+                    target_dtype = torch.float32
+
                 if param.device == torch.device("meta"):
-                    set_module_tensor_to_device(model, key, "cpu", torch.empty(*param.size()))
+                    if not (is_quantized):
+                        set_module_tensor_to_device(model, key, "cpu", torch.empty(*param.size(), dtype=target_dtype))
+                    else:
+                        set_module_quantized_tensor_to_device(
+                            model, key, "cpu", torch.empty(*param.size(), dtype=target_dtype)
+                        )
 
         # retrieve unintialized modules and initialize before maybe overriding that with the pretrained weights.
         if _fast_init:
-            uninitialized_modules = model.retrieve_modules_from_names(
-                missing_keys, add_prefix=add_prefix_to_model, remove_prefix=remove_prefix_from_model
-            )
-            for module in uninitialized_modules:
-                model._init_weights(module)
+            if remove_prefix_from_model:
+                _loaded_keys = [f"{prefix}.{k}" for k in loaded_keys]
+            elif add_prefix_to_model:
+                _loaded_keys = [k[len(prefix) + 1 :] for k in loaded_keys]
+            else:
+                _loaded_keys = loaded_keys
+            set_initialized_submodules(model, _loaded_keys)
+            # This will only initialize submodules that are not marked as initialized by the line above.
+            model.apply(model._initialize_weights)
+
+        # Set some modules to fp32 if any
+        if keep_in_fp32_modules is not None:
+            for name, param in model.named_parameters():
+                if any(module_to_keep_in_fp32 in name for module_to_keep_in_fp32 in keep_in_fp32_modules):
+                    param = param.to(torch.float32)
 
         # Make sure we are able to load base models as well as derived models (with heads)
         start_prefix = ""
@@ -2249,7 +3138,8 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             start_prefix = cls.base_model_prefix + "."
         if len(cls.base_model_prefix) > 0 and hasattr(model, cls.base_model_prefix) and not has_prefix_module:
             model_to_load = getattr(model, cls.base_model_prefix)
-            if any(key in expected_keys_not_prefixed for key in loaded_keys):
+            base_model_expected_keys = list(model_to_load.state_dict().keys())
+            if any(key in expected_keys_not_prefixed and key not in base_model_expected_keys for key in loaded_keys):
                 raise ValueError(
                     "The state dictionary of the model you are trying to load is corrupted. Are you sure it was "
                     "properly saved?"
@@ -2286,6 +3176,29 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                         del state_dict[checkpoint_key]
             return mismatched_keys
 
+        if resolved_archive_file is not None:
+            folder = os.path.sep.join(resolved_archive_file[0].split(os.path.sep)[:-1])
+        else:
+            folder = None
+        if device_map is not None and is_safetensors:
+            param_device_map = expand_device_map(device_map, original_loaded_keys)
+
+            str_dtype = str(dtype).replace("torch.", "") if dtype is not None else "float32"
+            if sharded_metadata is None:
+                archive_file = (
+                    resolved_archive_file[0]
+                    if isinstance(resolved_archive_file, (list, tuple))
+                    else resolved_archive_file
+                )
+                weight_map = {p: archive_file for p in original_loaded_keys}
+            else:
+                weight_map = {p: os.path.join(folder, f) for p, f in sharded_metadata["weight_map"].items()}
+            offload_index = {
+                p: {"safetensors_file": f, "weight_name": p, "dtype": str_dtype}
+                for p, f in weight_map.items()
+                if param_device_map[p] == "disk"
+            }
+
         if state_dict is not None:
             # Whole checkpoint
             mismatched_keys = _find_mismatched_keys(
@@ -2297,6 +3210,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 ignore_mismatched_sizes,
             )
             error_msgs = _load_state_dict_into_model(model_to_load, state_dict, start_prefix)
+            offload_index = None
         else:
             # Sharded checkpoint or whole but low_cpu_mem_usage==True
 
@@ -2306,7 +3220,8 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
 
             error_msgs = []
             mismatched_keys = []
-            offload_index = {} if device_map is not None and "disk" in device_map.values() else None
+            if not is_safetensors:
+                offload_index = {} if device_map is not None and "disk" in device_map.values() else None
             if offload_state_dict:
                 state_dict_folder = tempfile.mkdtemp()
                 state_dict_index = {}
@@ -2314,7 +3229,18 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 state_dict_folder = None
                 state_dict_index = None
 
+            if is_sharded_safetensors:
+                disk_only_shard_files = get_disk_only_shard_files(device_map, sharded_metadata=sharded_metadata)
+                disk_only_shard_files = [os.path.join(folder, f) for f in disk_only_shard_files]
+            else:
+                disk_only_shard_files = []
+
+            if len(resolved_archive_file) > 1:
+                resolved_archive_file = logging.tqdm(resolved_archive_file, desc="Loading checkpoint shards")
             for shard_file in resolved_archive_file:
+                # Skip the load for shards that only contain disk-offloaded weights when using safetensors for the offload.
+                if shard_file in disk_only_shard_files:
+                    continue
                 state_dict = load_state_dict(shard_file)
 
                 # Mistmatched keys contains tuples key/shape1/shape2 of weights in the checkpoint that have a shape not
@@ -2341,6 +3267,9 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                         state_dict_folder=state_dict_folder,
                         state_dict_index=state_dict_index,
                         dtype=dtype,
+                        is_quantized=is_quantized,
+                        is_safetensors=is_safetensors,
+                        keep_in_fp32_modules=keep_in_fp32_modules,
                     )
                     error_msgs += new_error_msgs
                 else:
@@ -2354,13 +3283,16 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 if model != model_to_load:
                     # We need to add the prefix of the base model
                     prefix = cls.base_model_prefix
-                    for weight_name in offload_index:
-                        shutil.move(
-                            os.path.join(offload_folder, f"{weight_name}.dat"),
-                            os.path.join(offload_folder, f"{prefix}.{weight_name}.dat"),
-                        )
+                    if not is_safetensors:
+                        for weight_name in offload_index:
+                            shutil.move(
+                                os.path.join(offload_folder, f"{weight_name}.dat"),
+                                os.path.join(offload_folder, f"{prefix}.{weight_name}.dat"),
+                            )
                     offload_index = {f"{prefix}.{key}": value for key, value in offload_index.items()}
-                save_offload_index(offload_index, offload_folder)
+                if not is_safetensors:
+                    save_offload_index(offload_index, offload_folder)
+                    offload_index = None
 
             if offload_state_dict:
                 # Load back temporarily offloaded state dict
@@ -2375,8 +3307,14 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 )
             raise RuntimeError(f"Error(s) in loading state_dict for {model.__class__.__name__}:\n\t{error_msg}")
 
+        if is_quantized:
+            unexpected_keys = [elem for elem in unexpected_keys if "SCB" not in elem]
+            missing_keys = [elem for elem in missing_keys if "SCB" not in elem]
+
         if len(unexpected_keys) > 0:
-            logger.warning(
+            archs = [] if model.config.architectures is None else model.config.architectures
+            warner = logger.warn if model.__class__.__name__ in archs else logger.info
+            warner(
                 f"Some weights of the model checkpoint at {pretrained_model_name_or_path} were not used when"
                 f" initializing {model.__class__.__name__}: {unexpected_keys}\n- This IS expected if you are"
                 f" initializing {model.__class__.__name__} from the checkpoint of a model trained on another task or"
@@ -2414,20 +3352,23 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 " to use it for predictions and inference."
             )
 
-        return model, missing_keys, unexpected_keys, mismatched_keys, error_msgs
+        return model, missing_keys, unexpected_keys, mismatched_keys, offload_index, error_msgs
 
     def retrieve_modules_from_names(self, names, add_prefix=False, remove_prefix=False):
-        module_keys = set([".".join(key.split(".")[:-1]) for key in names])
+        module_keys = {".".join(key.split(".")[:-1]) for key in names}
 
         # torch.nn.ParameterList is a special case where two parameter keywords
         # are appended to the module name, *e.g.* bert.special_embeddings.0
-        module_keys = module_keys.union(set([".".join(key.split(".")[:-2]) for key in names if key[-1].isdigit()]))
+        module_keys = module_keys.union(
+            {".".join(key.split(".")[:-2]) for key in names if len(key) > 0 and key[-1].isdigit()}
+        )
 
         retrieved_modules = []
         # retrieve all modules that has at least one missing weight name
         for name, module in self.named_modules():
             if remove_prefix:
-                name = ".".join(name.split(".")[1:]) if name.startswith(self.base_model_prefix) else name
+                _prefix = f"{self.base_model_prefix}."
+                name = name[len(_prefix) :] if name.startswith(_prefix) else name
             elif add_prefix:
                 name = ".".join([self.base_model_prefix, name]) if len(name) > 0 else self.base_model_prefix
 
@@ -2486,109 +3427,92 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
 
         cls._auto_class = auto_class
 
-    def push_to_hub(
-        self,
-        repo_path_or_name: Optional[str] = None,
-        repo_url: Optional[str] = None,
-        use_temp_dir: bool = False,
-        commit_message: str = "add model",
-        organization: Optional[str] = None,
-        private: Optional[bool] = None,
-        use_auth_token: Optional[Union[bool, str]] = None,
-        max_shard_size: Union[int, str] = "10GB",
-        **model_card_kwargs
-    ) -> str:
+    def to_bettertransformer(self) -> "PreTrainedModel":
         """
-        Upload the model files to the 🤗 Model Hub while synchronizing a local clone of the repo in `repo_path_or_name`.
+        Converts the model to use [PyTorch's native attention
+        implementation](https://pytorch.org/docs/stable/generated/torch.nn.MultiheadAttention.html), integrated to
+        Transformers through [Optimum library](https://huggingface.co/docs/optimum/bettertransformer/overview). Only a
+        subset of all Transformers models are supported.
 
-        Parameters:
-            repo_path_or_name (`str`, *optional*):
-                Can either be a repository name for your model in the Hub or a path to a local folder (in which case
-                the repository will have the name of that local folder). If not specified, will default to the name
-                given by `repo_url` and a local directory with that name will be created.
-            repo_url (`str`, *optional*):
-                Specify this in case you want to push to an existing repository in the hub. If unspecified, a new
-                repository will be created in your namespace (unless you specify an `organization`) with `repo_name`.
-            use_temp_dir (`bool`, *optional*, defaults to `False`):
-                Whether or not to clone the distant repo in a temporary directory or in `repo_path_or_name` inside the
-                current working directory. This will slow things down if you are making changes in an existing repo
-                since you will need to clone the repo before every push.
-            commit_message (`str`, *optional*, defaults to `"add model"`):
-                Message to commit while pushing.
-            organization (`str`, *optional*):
-                Organization in which you want to push your {object} (you must be a member of this organization).
-            private (`bool`, *optional*):
-                Whether or not the repository created should be private (requires a paying subscription).
-            use_auth_token (`bool` or `str`, *optional*):
-                The token to use as HTTP bearer authorization for remote files. If `True`, will use the token generated
-                when running `transformers-cli login` (stored in `~/.huggingface`). Will default to `True` if
-                `repo_url` is not specified.
-            max_shard_size (`int` or `str`, *optional*, defaults to `"10GB"`):
-                The maximum size for a checkpoint before being sharded. Checkpoints shard will then be each of size
-                lower than this size. If expressed as a string, needs to be digits followed by a unit (like `"5MB"`).
-
-                <Tip warning={true}>
-
-                If a single weight of the model is bigger than `max_shard_size`, it will be in its own checkpoint shard
-                which will be bigger than `max_shard_size`.
-
-                </Tip>
+        PyTorch's attention fastpath allows to speed up inference through kernel fusions and the use of [nested
+        tensors](https://pytorch.org/docs/stable/nested.html). Detailed benchmarks can be found in [this blog
+        post](https://medium.com/pytorch/bettertransformer-out-of-the-box-performance-for-huggingface-transformers-3fbe27d50ab2).
 
         Returns:
-            `str`: The url of the commit of your {object} in the given repository.
-
-        Examples:
-
-        ```python
-        from transformers import AutoModel
-
-        model = AutoModel.from_pretrained("bert-base-cased")
-
-        # Push the model to your namespace with the name "my-finetuned-bert" and have a local clone in the
-        # *my-finetuned-bert* folder.
-        model.push_to_hub("my-finetuned-bert")
-
-        # Push the model to your namespace with the name "my-finetuned-bert" with no local clone.
-        model.push_to_hub("my-finetuned-bert", use_temp_dir=True)
-
-        # Push the model to an organization with the name "my-finetuned-bert" and have a local clone in the
-        # *my-finetuned-bert* folder.
-        model.push_to_hub("my-finetuned-bert", organization="huggingface")
-
-        # Make a change to an existing repo that has been cloned locally in *my-finetuned-bert*.
-        model.push_to_hub("my-finetuned-bert", repo_url="https://huggingface.co/sgugger/my-finetuned-bert")
-        ```
+            [`PreTrainedModel`]: The model converted to BetterTransformer.
         """
-        if use_temp_dir:
-            # Make sure we use the right `repo_name` for the `repo_url` before replacing it.
-            if repo_url is None:
-                if use_auth_token is None:
-                    use_auth_token = True
-                repo_name = Path(repo_path_or_name).name
-                repo_url = self._get_repo_url_from_name(
-                    repo_name, organization=organization, private=private, use_auth_token=use_auth_token
+        if not is_optimum_available():
+            raise ImportError("The package `optimum` is required to use Better Transformer.")
+
+        from optimum.version import __version__ as optimum_version
+
+        if version.parse(optimum_version) < version.parse("1.7.0"):
+            raise ImportError(
+                f"Please install optimum>=1.7.0 to use Better Transformer. The version {optimum_version} was found."
+            )
+
+        from optimum.bettertransformer import BetterTransformer
+
+        return BetterTransformer.transform(self)
+
+    def reverse_bettertransformer(self):
+        """
+        Reverts the transformation from [`~PreTrainedModel.to_bettertransformer`] so that the original modeling is
+        used, for example in order to save the model.
+
+        Returns:
+            [`PreTrainedModel`]: The model converted back to the original modeling.
+        """
+        if not is_optimum_available():
+            raise ImportError("The package `optimum` is required to use Better Transformer.")
+
+        from optimum.version import __version__ as optimum_version
+
+        if version.parse(optimum_version) < version.parse("1.7.0"):
+            raise ImportError(
+                f"Please install optimum>=1.7.0 to use Better Transformer. The version {optimum_version} was found."
+            )
+
+        from optimum.bettertransformer import BetterTransformer
+
+        return BetterTransformer.reverse(self)
+
+    def warn_if_padding_and_no_attention_mask(self, input_ids, attention_mask):
+        """
+        Shows a one-time warning if the input_ids appear to contain padding and no attention mask was given.
+        """
+        if (attention_mask is not None) or (self.config.pad_token_id is None):
+            return
+
+        # Check only the first and last input IDs to reduce overhead.
+        if self.config.pad_token_id in input_ids[:, [-1, 0]]:
+            warn_string = (
+                "We strongly recommend passing in an `attention_mask` since your input_ids may be padded. See "
+                "https://huggingface.co/docs/transformers/troubleshooting"
+                "#incorrect-output-when-padding-tokens-arent-masked."
+            )
+
+            # If the pad token is equal to either BOS, EOS, or SEP, we do not know whether the user should use an
+            # attention_mask or not. In this case, we should still show a warning because this is a rare case.
+            if (
+                (self.config.bos_token_id is not None and self.config.bos_token_id == self.config.pad_token_id)
+                or (self.config.eos_token_id is not None and self.config.eos_token_id == self.config.pad_token_id)
+                or (self.config.sep_token_id is not None and self.config.sep_token_id == self.config.pad_token_id)
+            ):
+                warn_string += (
+                    f"\nYou may ignore this warning if your `pad_token_id` ({self.config.pad_token_id}) is identical "
+                    f"to the `bos_token_id` ({self.config.bos_token_id}), `eos_token_id` ({self.config.eos_token_id}), "
+                    f"or the `sep_token_id` ({self.config.sep_token_id}), and your input is not padded."
                 )
-            repo_path_or_name = tempfile.mkdtemp()
 
-        # Create or clone the repo. If the repo is already cloned, this just retrieves the path to the repo.
-        repo = self._create_or_get_repo(
-            repo_path_or_name=repo_path_or_name,
-            repo_url=repo_url,
-            organization=organization,
-            private=private,
-            use_auth_token=use_auth_token,
-        )
-        # Save the files in the cloned repo
-        self.save_pretrained(repo_path_or_name, max_shard_size=max_shard_size)
+            logger.warning_once(warn_string)
 
-        # Commit and push!
-        url = self._push_to_hub(repo, commit_message=commit_message)
 
-        # Clean up! Clean up! Everybody everywhere!
-        if use_temp_dir:
-            shutil.rmtree(repo_path_or_name)
-
-        return url
+PreTrainedModel.push_to_hub = copy_func(PreTrainedModel.push_to_hub)
+if PreTrainedModel.push_to_hub.__doc__ is not None:
+    PreTrainedModel.push_to_hub.__doc__ = PreTrainedModel.push_to_hub.__doc__.format(
+        object="model", object_class="AutoModel", object_files="model file"
+    )
 
 
 class PoolerStartLogits(nn.Module):
@@ -3022,3 +3946,26 @@ def unwrap_model(model: nn.Module) -> nn.Module:
         return unwrap_model(model.module)
     else:
         return model
+
+
+def expand_device_map(device_map, param_names):
+    """
+    Expand a device map to return the correspondance parameter name to device.
+    """
+    new_device_map = {}
+    for module, device in device_map.items():
+        new_device_map.update({p: device for p in param_names if p == module or p.startswith(f"{module}.")})
+    return new_device_map
+
+
+def get_disk_only_shard_files(device_map, sharded_metadata):
+    """
+    Returns the list of shard files containing only weights offloaded to disk.
+    """
+    files_content = collections.defaultdict(list)
+    for weight_name, filename in sharded_metadata["weight_map"].items():
+        while len(weight_name) > 0 and weight_name not in device_map:
+            weight_name = ".".join(weight_name.split(".")[:-1])
+        files_content[filename].append(device_map[weight_name])
+
+    return [fname for fname, devices in files_content.items() if set(devices) == {"disk"}]

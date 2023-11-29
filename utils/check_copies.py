@@ -15,12 +15,13 @@
 
 import argparse
 import glob
-import importlib.util
 import os
 import re
 
 import black
 from doc_builder.style_doc import style_docstrings_in_code
+
+from transformers.utils import direct_transformers_import
 
 
 # All paths are set with the intent you should run this script from the root of the repo with the command
@@ -66,20 +67,39 @@ LOCALIZED_READMES = {
         "start_prompt": "🤗 Transformers는 다음 모델들을 제공합니다",
         "end_prompt": "1. 새로운 모델을 올리고 싶나요?",
         "format_model_list": (
+            "**[{title}]({model_link})** ({paper_affiliations} 에서 제공)은 {paper_authors}.{supplements}의"
+            " {paper_title_link}논문과 함께 발표했습니다."
+        ),
+    },
+    "README_es.md": {
+        "start_prompt": "🤗 Transformers actualmente proporciona las siguientes arquitecturas",
+        "end_prompt": "1. ¿Quieres aportar un nuevo modelo?",
+        "format_model_list": (
             "**[{title}]({model_link})** (from {paper_affiliations}) released with the paper {paper_title_link} by"
             " {paper_authors}.{supplements}"
+        ),
+    },
+    "README_ja.md": {
+        "start_prompt": "🤗Transformersは現在、以下のアーキテクチャを提供しています",
+        "end_prompt": "1. 新しいモデルを投稿したいですか？",
+        "format_model_list": (
+            "**[{title}]({model_link})** ({paper_affiliations} から) {paper_authors}.{supplements} から公開された研究論文"
+            " {paper_title_link}"
+        ),
+    },
+    "README_hd.md": {
+        "start_prompt": "🤗 ट्रांसफॉर्मर वर्तमान में निम्नलिखित आर्किटेक्चर का समर्थन करते हैं",
+        "end_prompt": "1. एक नए मॉडल में योगदान देना चाहते हैं?",
+        "format_model_list": (
+            "**[{title}]({model_link})** ({paper_affiliations} से) {paper_authors}.{supplements} द्वारा"
+            "अनुसंधान पत्र {paper_title_link} के साथ जारी किया गया"
         ),
     },
 }
 
 
 # This is to make sure the transformers module imported is the one in the repo.
-spec = importlib.util.spec_from_file_location(
-    "transformers",
-    os.path.join(TRANSFORMERS_PATH, "__init__.py"),
-    submodule_search_locations=[TRANSFORMERS_PATH],
-)
-transformers_module = spec.loader.load_module()
+transformers_module = direct_transformers_import(TRANSFORMERS_PATH)
 
 
 def _should_continue(line, indent):
@@ -133,6 +153,7 @@ def find_code_in_transformers(object_name):
 
 _re_copy_warning = re.compile(r"^(\s*)#\s*Copied from\s+transformers\.(\S+\.\S+)\s*($|\S.*$)")
 _re_replace_pattern = re.compile(r"^\s*(\S+)->(\S+)(\s+.*|$)")
+_re_fill_pattern = re.compile(r"<FILL\s+[^>]*>")
 
 
 def get_indent(code):
@@ -152,7 +173,7 @@ def blackify(code):
     has_indent = len(get_indent(code)) > 0
     if has_indent:
         code = f"class Bla:\n{code}"
-    mode = black.Mode(target_versions={black.TargetVersion.PY35}, line_length=119, preview=True)
+    mode = black.Mode(target_versions={black.TargetVersion.PY37}, line_length=119)
     result = black.format_str(code, mode=mode)
     result, _ = style_docstrings_in_code(result)
     return result[len("class Bla:\n") :] if has_indent else result
@@ -219,7 +240,12 @@ def is_copy_consistent(filename, overwrite=False):
 
         # Test for a diff and act accordingly.
         if observed_code != theoretical_code:
-            diffs.append([object_name, start_index])
+            diff_index = start_index + 1
+            for observed_line, theoretical_line in zip(observed_code.split("\n"), theoretical_code.split("\n")):
+                if observed_line != theoretical_line:
+                    break
+                diff_index += 1
+            diffs.append([object_name, diff_index])
             if overwrite:
                 lines = lines[:start_index] + [theoretical_code] + lines[line_index:]
                 line_index = start_index + 1
@@ -336,7 +362,7 @@ def convert_to_localized_md(model_list, localized_model_list, format_str):
     model_keys = [re.search(r"\*\*\[([^\]]*)", line).groups()[0] for line in model_list.strip().split("\n")]
 
     # We exclude keys in localized README not in the main one.
-    readmes_match = not any([k not in model_keys for k in localized_model_index])
+    readmes_match = not any(k not in model_keys for k in localized_model_index)
     localized_model_index = {k: v for k, v in localized_model_index.items() if k in model_keys}
 
     for model in model_list.strip().split("\n"):
@@ -346,6 +372,11 @@ def convert_to_localized_md(model_list, localized_model_list, format_str):
             # Add an anchor white space behind a model description string for regex.
             # If metadata cannot be captured, the English version will be directly copied.
             localized_model_index[title] = _re_capture_meta.sub(_rep, model + " ")
+        elif _re_fill_pattern.search(localized_model_index[title]) is not None:
+            update = _re_capture_meta.sub(_rep, model + " ")
+            if update != localized_model_index[title]:
+                readmes_match = False
+                localized_model_index[title] = update
         else:
             # Synchronize link
             localized_model_index[title] = _re_capture_title_link.sub(
@@ -354,7 +385,7 @@ def convert_to_localized_md(model_list, localized_model_list, format_str):
 
     sorted_index = sorted(localized_model_index.items(), key=lambda x: x[0].lower())
 
-    return readmes_match, "\n".join(map(lambda x: x[1], sorted_index)) + "\n"
+    return readmes_match, "\n".join((x[1] for x in sorted_index)) + "\n"
 
 
 def convert_readme_to_index(model_list):
@@ -409,7 +440,7 @@ def check_model_list_copy(overwrite=False, max_per_line=119):
 
     # If the introduction or the conclusion of the list change, the prompts may need to be updated.
     index_list, start_index, end_index, lines = _find_text_in_file(
-        filename=os.path.join(PATH_TO_DOCS, "index.mdx"),
+        filename=os.path.join(PATH_TO_DOCS, "index.md"),
         start_prompt="<!--This list is updated automatically from the README",
         end_prompt="### Supported frameworks",
     )
@@ -433,11 +464,11 @@ def check_model_list_copy(overwrite=False, max_per_line=119):
     converted_md_list = convert_readme_to_index(md_list)
     if converted_md_list != index_list:
         if overwrite:
-            with open(os.path.join(PATH_TO_DOCS, "index.mdx"), "w", encoding="utf-8", newline="\n") as f:
+            with open(os.path.join(PATH_TO_DOCS, "index.md"), "w", encoding="utf-8", newline="\n") as f:
                 f.writelines(lines[:start_index] + [converted_md_list] + lines[end_index:])
         else:
             raise ValueError(
-                "The model list in the README changed and the list in `index.mdx` has not been updated. Run "
+                "The model list in the README changed and the list in `index.md` has not been updated. Run "
                 "`make fix-copies` to fix this."
             )
 
@@ -465,10 +496,13 @@ SPECIAL_MODEL_NAMES = {
     "Data2VecAudio": "Data2Vec",
     "Data2VecText": "Data2Vec",
     "Data2VecVision": "Data2Vec",
+    "DonutSwin": "Swin Transformer",
     "Marian": "MarianMT",
+    "MaskFormerSwin": "Swin Transformer",
     "OpenAI GPT-2": "GPT-2",
     "OpenAI GPT": "GPT",
     "Perceiver": "Perceiver IO",
+    "SAM": "Segment Anything",
     "ViT": "Vision Transformer (ViT)",
 }
 
@@ -483,14 +517,15 @@ MODELS_NOT_IN_README = [
     "Speech Encoder decoder",
     "Speech2Text",
     "Speech2Text2",
+    "TimmBackbone",
     "Vision Encoder decoder",
     "VisionTextDualEncoder",
 ]
 
 
 README_TEMPLATE = (
-    "1. **[{model_name}](https://huggingface.co/docs/transformers/model_doc/{model_type})** (from <FILL INSTITUTION>) "
-    "released with the paper [<FILL PAPER TITLE>](<FILL ARKIV LINK>) by <FILL AUTHORS>."
+    "1. **[{model_name}](https://huggingface.co/docs/main/transformers/model_doc/{model_type})** (from "
+    "<FILL INSTITUTION>) released with the paper [<FILL PAPER TITLE>](<FILL ARKIV LINK>) by <FILL AUTHORS>."
 )
 
 

@@ -15,9 +15,11 @@
 """ TF 2.0 CLIP model."""
 
 
+from __future__ import annotations
+
 import math
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Optional, Tuple, Union
 
 import numpy as np
 import tensorflow as tf
@@ -27,14 +29,13 @@ from ...modeling_tf_outputs import TFBaseModelOutput, TFBaseModelOutputWithPooli
 
 # Public API
 from ...modeling_tf_utils import (
-    DUMMY_INPUTS,
     TFModelInputType,
     TFPreTrainedModel,
     get_initializer,
     keras_serializable,
     unpack_inputs,
 )
-from ...tf_utils import shape_list, stable_softmax
+from ...tf_utils import check_embeddings_within_bounds, shape_list, stable_softmax
 from ...utils import (
     ModelOutput,
     add_start_docstrings,
@@ -111,7 +112,7 @@ class TFCLIPOutput(ModelOutput):
             The output of the [`TFCLIPVisionModel`].
     """
 
-    loss: Optional[tf.Tensor] = None
+    loss: tf.Tensor | None = None
     logits_per_image: tf.Tensor = None
     logits_per_text: tf.Tensor = None
     text_embeds: tf.Tensor = None
@@ -150,8 +151,7 @@ class TFCLIPVisionEmbeddings(tf.keras.layers.Layer):
             name="patch_embedding",
         )
 
-    def build(self, input_shape: tf.TensorShape):
-
+    def build(self, input_shape: tf.TensorShape = None):
         factor = self.config.initializer_factor
 
         self.class_embedding = self.add_weight(
@@ -201,15 +201,13 @@ class TFCLIPTextEmbeddings(tf.keras.layers.Layer):
         super().__init__(**kwargs)
 
         self.embed_dim = config.hidden_size
-        self.vocab_size = config.vocab_size
 
         self.config = config
 
-    def build(self, input_shape: tf.TensorShape):
-
+    def build(self, input_shape: tf.TensorShape = None):
         with tf.name_scope("token_embedding"):
             self.weight = self.add_weight(
-                shape=(self.vocab_size, self.embed_dim),
+                shape=(self.config.vocab_size, self.embed_dim),
                 initializer=get_initializer(self.config.initializer_factor * self.config.initializer_range),
                 trainable=True,
                 name="weight",
@@ -241,6 +239,7 @@ class TFCLIPTextEmbeddings(tf.keras.layers.Layer):
             raise ValueError("You have to specify either input_ids or inputs_embeds")
 
         if inputs_embeds is None:
+            check_embeddings_within_bounds(input_ids, self.config.vocab_size)
             inputs_embeds = tf.gather(params=self.weight, indices=input_ids)
 
         input_shape = shape_list(inputs_embeds)[:-1]
@@ -372,7 +371,6 @@ class TFCLIPMLP(tf.keras.layers.Layer):
         )
 
     def call(self, hidden_states: tf.Tensor) -> tf.Tensor:
-
         hidden_states = self.fc1(inputs=hidden_states)
         hidden_states = self.activation_fn(hidden_states)
         hidden_states = self.fc2(inputs=hidden_states)
@@ -589,9 +587,9 @@ class TFCLIPTextMainLayer(tf.keras.layers.Layer):
     @unpack_inputs
     def call(
         self,
-        input_ids: Optional[TFModelInputType] = None,
-        attention_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        position_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        input_ids: TFModelInputType | None = None,
+        attention_mask: np.ndarray | tf.Tensor | None = None,
+        position_ids: np.ndarray | tf.Tensor | None = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -635,7 +633,6 @@ class TFCLIPVisionTransformer(tf.keras.layers.Layer):
         return_dict: bool,
         training: bool = False,
     ) -> Union[TFBaseModelOutputWithPooling, Tuple[tf.Tensor]]:
-
         embedding_output = self.embeddings(pixel_values=pixel_values)
         embedding_output = self.pre_layernorm(inputs=embedding_output)
 
@@ -679,13 +676,12 @@ class TFCLIPVisionMainLayer(tf.keras.layers.Layer):
     @unpack_inputs
     def call(
         self,
-        pixel_values: Optional[TFModelInputType] = None,
+        pixel_values: TFModelInputType | None = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         training: bool = False,
     ) -> Union[TFBaseModelOutputWithPooling, Tuple[tf.Tensor]]:
-
         if pixel_values is None:
             raise ValueError("You have to specify pixel_values")
 
@@ -743,8 +739,7 @@ class TFCLIPMainLayer(tf.keras.layers.Layer):
             name="text_projection",
         )
 
-    def build(self, input_shape: tf.TensorShape):
-
+    def build(self, input_shape: tf.TensorShape = None):
         self.logit_scale = self.add_weight(
             shape=(1,),
             initializer=tf.keras.initializers.Constant(self.config.logit_scale_init_value),
@@ -757,15 +752,14 @@ class TFCLIPMainLayer(tf.keras.layers.Layer):
     @unpack_inputs
     def get_text_features(
         self,
-        input_ids: Optional[TFModelInputType] = None,
-        attention_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        position_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        input_ids: TFModelInputType | None = None,
+        attention_mask: np.ndarray | tf.Tensor | None = None,
+        position_ids: np.ndarray | tf.Tensor | None = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         training: bool = False,
     ) -> tf.Tensor:
-
         if input_ids is None:
             raise ValueError("You have to specify either input_ids")
 
@@ -792,7 +786,7 @@ class TFCLIPMainLayer(tf.keras.layers.Layer):
     @unpack_inputs
     def get_image_features(
         self,
-        pixel_values: Optional[TFModelInputType] = None,
+        pixel_values: TFModelInputType | None = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -817,17 +811,16 @@ class TFCLIPMainLayer(tf.keras.layers.Layer):
     @unpack_inputs
     def call(
         self,
-        input_ids: Optional[TFModelInputType] = None,
-        pixel_values: Optional[TFModelInputType] = None,
-        attention_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        position_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        input_ids: TFModelInputType | None = None,
+        pixel_values: TFModelInputType | None = None,
+        attention_mask: np.ndarray | tf.Tensor | None = None,
+        position_ids: np.ndarray | tf.Tensor | None = None,
         return_loss: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         training: bool = False,
     ) -> Union[TFCLIPOutput, Tuple[tf.Tensor]]:
-
         if input_ids is None:
             raise ValueError("You have to specify either input_ids")
         if pixel_values is None:
@@ -874,6 +867,7 @@ class TFCLIPMainLayer(tf.keras.layers.Layer):
         loss = None
         if return_loss:
             loss = clip_loss(logits_per_text)
+            loss = tf.reshape(loss, (1,))
 
         if not return_dict:
             output = (logits_per_image, logits_per_text, text_embeds, image_embeds, text_outputs, vision_outputs)
@@ -898,6 +892,8 @@ class TFCLIPPreTrainedModel(TFPreTrainedModel):
 
     config_class = CLIPConfig
     base_model_prefix = "clip"
+    _keys_to_ignore_on_load_missing = [r"position_ids"]
+    _keys_to_ignore_on_load_unexpected = [r"position_ids"]
 
 
 CLIP_START_DOCSTRING = r"""
@@ -912,22 +908,27 @@ CLIP_START_DOCSTRING = r"""
 
     <Tip>
 
-    TF 2.0 models accepts two formats as inputs:
+    TensorFlow models and layers in `transformers` accept two formats as input:
 
     - having all inputs as keyword arguments (like PyTorch models), or
-    - having all inputs as a list, tuple or dict in the first positional arguments.
+    - having all inputs as a list, tuple or dict in the first positional argument.
 
-    This second option is useful when using [`tf.keras.Model.fit`] method which currently requires having all the
-    tensors in the first argument of the model call function: `model(inputs)`.
-
-    If you choose this second option, there are three possibilities you can use to gather all the input Tensors in the
-    first positional argument :
+    The reason the second format is supported is that Keras methods prefer this format when passing inputs to models
+    and layers. Because of this support, when using methods like `model.fit()` things should "just work" for you - just
+    pass your inputs and labels in any format that `model.fit()` supports! If, however, you want to use the second
+    format outside of Keras methods like `fit()` and `predict()`, such as when creating your own layers or models with
+    the Keras `Functional` API, there are three possibilities you can use to gather all the input Tensors in the first
+    positional argument:
 
     - a single Tensor with `input_ids` only and nothing else: `model(input_ids)`
     - a list of varying length with one or several input Tensors IN THE ORDER given in the docstring:
-      `model([input_ids, attention_mask])` or `model([input_ids, attention_mask, token_type_ids])`
+    `model([input_ids, attention_mask])` or `model([input_ids, attention_mask, token_type_ids])`
     - a dictionary with one or several input Tensors associated to the input names given in the docstring:
-      `model({"input_ids": input_ids, "token_type_ids": token_type_ids})`
+    `model({"input_ids": input_ids, "token_type_ids": token_type_ids})`
+
+    Note that when creating models and layers with
+    [subclassing](https://keras.io/guides/making_new_layers_and_models_via_subclassing/) then you don't need to worry
+    about any of this, as you can just pass inputs like you would to any other Python function!
 
     </Tip>
 
@@ -977,8 +978,8 @@ CLIP_TEXT_INPUTS_DOCSTRING = r"""
 CLIP_VISION_INPUTS_DOCSTRING = r"""
     Args:
         pixel_values (`np.ndarray`, `tf.Tensor`, `List[tf.Tensor]` ``Dict[str, tf.Tensor]` or `Dict[str, np.ndarray]` and each example must have the shape `(batch_size, num_channels, height, width)`):
-            Pixel values. Pixel values can be obtained using [`CLIPFeatureExtractor`]. See
-            [`CLIPFeatureExtractor.__call__`] for details. output_attentions (`bool`, *optional*): Whether or not to
+            Pixel values. Pixel values can be obtained using [`AutoImageProcessor`]. See
+            [`CLIPImageProcessor.__call__`] for details. output_attentions (`bool`, *optional*): Whether or not to
             return the attentions tensors of all attention layers. See `attentions` under returned tensors for more
             detail. This argument can be used only in eager mode, in graph mode the value in the config will be used
             instead.
@@ -1004,8 +1005,8 @@ CLIP_INPUTS_DOCSTRING = r"""
 
             [What are input IDs?](../glossary#input-ids)
         pixel_values (`np.ndarray`, `tf.Tensor`, `List[tf.Tensor]` `Dict[str, tf.Tensor]` or `Dict[str, np.ndarray]` and each example must have the shape `(batch_size, num_channels, height, width)`):
-            Pixel values. Pixel values can be obtained using [`CLIPFeatureExtractor`]. See
-            [`CLIPFeatureExtractor.__call__`] for details.
+            Pixel values. Pixel values can be obtained using [`AutoImageProcessor`]. See
+            [`CLIPImageProcessor.__call__`] for details.
         attention_mask (`np.ndarray` or `tf.Tensor` of shape `({0})`, *optional*):
             Mask to avoid performing attention on padding token indices. Mask values selected in `[0, 1]`:
 
@@ -1050,9 +1051,9 @@ class TFCLIPTextModel(TFCLIPPreTrainedModel):
     @replace_return_docstrings(output_type=TFBaseModelOutputWithPooling, config_class=CLIPTextConfig)
     def call(
         self,
-        input_ids: Optional[TFModelInputType] = None,
-        attention_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        position_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        input_ids: TFModelInputType | None = None,
+        attention_mask: np.ndarray | tf.Tensor | None = None,
+        position_ids: np.ndarray | tf.Tensor | None = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -1064,10 +1065,10 @@ class TFCLIPTextModel(TFCLIPPreTrainedModel):
         Examples:
 
         ```python
-        >>> from transformers import CLIPTokenizer, TFCLIPTextModel
+        >>> from transformers import AutoTokenizer, TFCLIPTextModel
 
         >>> model = TFCLIPTextModel.from_pretrained("openai/clip-vit-base-patch32")
-        >>> tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch32")
+        >>> tokenizer = AutoTokenizer.from_pretrained("openai/clip-vit-base-patch32")
 
         >>> inputs = tokenizer(["a photo of a cat", "a photo of a dog"], padding=True, return_tensors="tf")
 
@@ -1088,29 +1089,6 @@ class TFCLIPTextModel(TFCLIPPreTrainedModel):
 
         return outputs
 
-    @tf.function(
-        input_signature=[
-            {
-                "input_ids": tf.TensorSpec((None, None), tf.int32, name="input_ids"),
-                "attention_mask": tf.TensorSpec((None, None), tf.int32, name="attention_mask"),
-            }
-        ]
-    )
-    def serving(self, inputs: Dict[str, tf.Tensor]) -> TFBaseModelOutputWithPooling:
-        output = self.call(inputs)
-        return self.serving_output(output)
-
-    def serving_output(self, output: TFBaseModelOutputWithPooling) -> TFBaseModelOutputWithPooling:
-        hs = tf.convert_to_tensor(output.hidden_states) if self.config.output_hidden_states else None
-        attns = tf.convert_to_tensor(output.attentions) if self.config.output_attentions else None
-
-        return TFBaseModelOutputWithPooling(
-            last_hidden_state=output.last_hidden_state,
-            pooler_output=output.pooler_output,
-            hidden_states=hs,
-            attentions=attns,
-        )
-
 
 class TFCLIPVisionModel(TFCLIPPreTrainedModel):
     config_class = CLIPVisionConfig
@@ -1121,44 +1099,12 @@ class TFCLIPVisionModel(TFCLIPPreTrainedModel):
 
         self.clip = TFCLIPVisionMainLayer(config, name="clip")
 
-    @property
-    def dummy_inputs(self) -> Dict[str, tf.Tensor]:
-        """
-        Dummy inputs to build the network.
-
-        Returns:
-            `Dict[str, tf.Tensor]`: The dummy inputs.
-        """
-        VISION_DUMMY_INPUTS = tf.random.uniform(
-            shape=(len(DUMMY_INPUTS), 3, self.config.image_size, self.config.image_size), dtype=tf.float32
-        )
-        return {"pixel_values": VISION_DUMMY_INPUTS}
-
-    @tf.function(
-        input_signature=[
-            {
-                "pixel_values": tf.TensorSpec((None, None, None, None), tf.float32, name="pixel_values"),
-            }
-        ]
-    )
-    def serving(self, inputs: Dict[str, tf.Tensor]) -> TFBaseModelOutputWithPooling:
-        """
-        Method used for serving the model.
-
-        Args:
-            inputs (`Dict[str, tf.Tensor]`):
-                The input of the saved model as a dictionary of tensors.
-        """
-        output = self.call(inputs)
-
-        return self.serving_output(output)
-
     @unpack_inputs
     @add_start_docstrings_to_model_forward(CLIP_VISION_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=TFBaseModelOutputWithPooling, config_class=CLIPVisionConfig)
     def call(
         self,
-        pixel_values: Optional[TFModelInputType] = None,
+        pixel_values: TFModelInputType | None = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -1172,10 +1118,10 @@ class TFCLIPVisionModel(TFCLIPPreTrainedModel):
         ```python
         >>> from PIL import Image
         >>> import requests
-        >>> from transformers import CLIPProcessor, TFCLIPVisionModel
+        >>> from transformers import AutoProcessor, TFCLIPVisionModel
 
         >>> model = TFCLIPVisionModel.from_pretrained("openai/clip-vit-base-patch32")
-        >>> processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+        >>> processor = AutoProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
         >>> url = "http://images.cocodataset.org/val2017/000000039769.jpg"
         >>> image = Image.open(requests.get(url, stream=True).raw)
@@ -1197,17 +1143,6 @@ class TFCLIPVisionModel(TFCLIPPreTrainedModel):
 
         return outputs
 
-    def serving_output(self, output: TFBaseModelOutputWithPooling) -> TFBaseModelOutputWithPooling:
-        hs = tf.convert_to_tensor(output.hidden_states) if self.config.output_hidden_states else None
-        attns = tf.convert_to_tensor(output.attentions) if self.config.output_attentions else None
-
-        return TFBaseModelOutputWithPooling(
-            last_hidden_state=output.last_hidden_state,
-            pooler_output=output.pooler_output,
-            hidden_states=hs,
-            attentions=attns,
-        )
-
 
 @add_start_docstrings(CLIP_START_DOCSTRING)
 class TFCLIPModel(TFCLIPPreTrainedModel):
@@ -1218,51 +1153,13 @@ class TFCLIPModel(TFCLIPPreTrainedModel):
 
         self.clip = TFCLIPMainLayer(config, name="clip")
 
-    @property
-    def dummy_inputs(self) -> Dict[str, tf.Tensor]:
-        """
-        Dummy inputs to build the network.
-
-        Returns:
-            `Dict[str, tf.Tensor]`: The dummy inputs.
-        """
-        VISION_DUMMY_INPUTS = tf.random.uniform(
-            shape=(len(DUMMY_INPUTS), 3, self.config.vision_config.image_size, self.config.vision_config.image_size),
-            dtype=tf.float32,
-        )
-        return {
-            "input_ids": tf.constant(DUMMY_INPUTS, dtype=tf.int32),
-            "pixel_values": VISION_DUMMY_INPUTS,
-        }
-
-    @tf.function(
-        input_signature=[
-            {
-                "input_ids": tf.TensorSpec((None, None), tf.int32, name="input_ids"),
-                "pixel_values": tf.TensorSpec((None, None, None, None), tf.float32, name="pixel_values"),
-                "attention_mask": tf.TensorSpec((None, None), tf.int32, name="attention_mask"),
-            }
-        ]
-    )
-    def serving(self, inputs: Dict[str, tf.Tensor]) -> TFCLIPOutput:
-        """
-        Method used for serving the model.
-
-        Args:
-            inputs (`Dict[str, tf.Tensor]`):
-                The input of the saved model as a dictionary of tensors.
-        """
-        output = self.call(inputs)
-
-        return self.serving_output(output)
-
     @unpack_inputs
     @add_start_docstrings_to_model_forward(CLIP_TEXT_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     def get_text_features(
         self,
-        input_ids: Optional[TFModelInputType] = None,
-        attention_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        position_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        input_ids: TFModelInputType | None = None,
+        attention_mask: np.ndarray | tf.Tensor | None = None,
+        position_ids: np.ndarray | tf.Tensor | None = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -1276,10 +1173,10 @@ class TFCLIPModel(TFCLIPPreTrainedModel):
         Examples:
 
         ```python
-        >>> from transformers import CLIPTokenizer, TFCLIPModel
+        >>> from transformers import AutoTokenizer, TFCLIPModel
 
         >>> model = TFCLIPModel.from_pretrained("openai/clip-vit-base-patch32")
-        >>> tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch32")
+        >>> tokenizer = AutoTokenizer.from_pretrained("openai/clip-vit-base-patch32")
 
         >>> inputs = tokenizer(["a photo of a cat", "a photo of a dog"], padding=True, return_tensors="tf")
         >>> text_features = model.get_text_features(**inputs)
@@ -1300,7 +1197,7 @@ class TFCLIPModel(TFCLIPPreTrainedModel):
     @add_start_docstrings_to_model_forward(CLIP_VISION_INPUTS_DOCSTRING)
     def get_image_features(
         self,
-        pixel_values: Optional[TFModelInputType] = None,
+        pixel_values: TFModelInputType | None = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -1316,10 +1213,10 @@ class TFCLIPModel(TFCLIPPreTrainedModel):
         ```python
         >>> from PIL import Image
         >>> import requests
-        >>> from transformers import CLIPProcessor, TFCLIPModel
+        >>> from transformers import AutoProcessor, TFCLIPModel
 
         >>> model = TFCLIPModel.from_pretrained("openai/clip-vit-base-patch32")
-        >>> processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+        >>> processor = AutoProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
         >>> url = "http://images.cocodataset.org/val2017/000000039769.jpg"
         >>> image = Image.open(requests.get(url, stream=True).raw)
@@ -1343,10 +1240,10 @@ class TFCLIPModel(TFCLIPPreTrainedModel):
     @replace_return_docstrings(output_type=TFCLIPOutput, config_class=CLIPConfig)
     def call(
         self,
-        input_ids: Optional[TFModelInputType] = None,
-        pixel_values: Optional[TFModelInputType] = None,
-        attention_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        position_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        input_ids: TFModelInputType | None = None,
+        pixel_values: TFModelInputType | None = None,
+        attention_mask: np.ndarray | tf.Tensor | None = None,
+        position_ids: np.ndarray | tf.Tensor | None = None,
         return_loss: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -1362,10 +1259,10 @@ class TFCLIPModel(TFCLIPPreTrainedModel):
         >>> import tensorflow as tf
         >>> from PIL import Image
         >>> import requests
-        >>> from transformers import CLIPProcessor, TFCLIPModel
+        >>> from transformers import AutoProcessor, TFCLIPModel
 
         >>> model = TFCLIPModel.from_pretrained("openai/clip-vit-base-patch32")
-        >>> processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+        >>> processor = AutoProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
         >>> url = "http://images.cocodataset.org/val2017/000000039769.jpg"
         >>> image = Image.open(requests.get(url, stream=True).raw)

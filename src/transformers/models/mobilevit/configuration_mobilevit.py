@@ -136,7 +136,7 @@ class MobileViTConfig(PretrainedConfig):
         atrous_rates=[6, 12, 18],
         aspp_dropout_prob=0.1,
         semantic_loss_ignore_index=255,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(**kwargs)
 
@@ -166,12 +166,11 @@ class MobileViTConfig(PretrainedConfig):
 
 
 class MobileViTOnnxConfig(OnnxConfig):
-
     torch_onnx_minimum_version = version.parse("1.11")
 
     @property
     def inputs(self) -> Mapping[str, Mapping[int, str]]:
-        return OrderedDict([("pixel_values", {0: "batch"})])
+        return OrderedDict([("pixel_values", {0: "batch", 1: "num_channels", 2: "height", 3: "width"})])
 
     @property
     def outputs(self) -> Mapping[str, Mapping[int, str]]:

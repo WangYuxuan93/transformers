@@ -17,7 +17,6 @@
 import json
 import os
 import random
-from contextlib import contextmanager
 from functools import lru_cache
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -61,12 +60,6 @@ class TapexTruncationStrategy(ExplicitEnum):
     """
 
     DROP_ROWS_TO_FIT = "drop_rows_to_fit"
-
-
-class TokenizerStrategy(ExplicitEnum):
-
-    TOKENIZE_SOURCE = "tokenize_source"
-    TOKENIZE_TARGET = "tokenize_target"
 
 
 TAPEX_ENCODE_PLUS_ADDITIONAL_KWARGS_DOCSTRING = r"""
@@ -113,7 +106,7 @@ TAPEX_ENCODE_PLUS_ADDITIONAL_KWARGS_DOCSTRING = r"""
                 argument defines the number of overlapping tokens.
             pad_to_multiple_of (`int`, *optional*):
                 If set will pad the sequence to a multiple of the provided value. This is especially useful to enable
-                the use of Tensor Cores on NVIDIA hardware with compute capability >= 7.5 (Volta).
+                the use of Tensor Cores on NVIDIA hardware with compute capability `>= 7.5` (Volta).
             return_tensors (`str` or [`~file_utils.TensorType`], *optional*):
                 If set, will return tensors instead of list of python integers. Acceptable values are:
 
@@ -291,7 +284,7 @@ class TapexTokenizer(PreTrainedTokenizer):
         mask_token="<mask>",
         add_prefix_space=False,
         max_cell_length=15,
-        **kwargs
+        **kwargs,
     ):
         bos_token = AddedToken(bos_token, lstrip=False, rstrip=False) if isinstance(bos_token, str) else bos_token
         eos_token = AddedToken(eos_token, lstrip=False, rstrip=False) if isinstance(eos_token, str) else eos_token
@@ -341,9 +334,6 @@ class TapexTokenizer(PreTrainedTokenizer):
         self.max_cell_length = max_cell_length
         self.table_linearize = IndexedRowTableLinearize()
 
-        # property to decide using which call function
-        self.current_tokenizer = TokenizerStrategy.TOKENIZE_SOURCE
-
     def build_inputs_with_special_tokens(
         self, token_ids_0: List[int], token_ids_1: Optional[List[int]] = None
     ) -> List[int]:
@@ -352,6 +342,7 @@ class TapexTokenizer(PreTrainedTokenizer):
         adding special tokens. A TAPEX sequence has the following format:
         - single sequence: `<s> X </s>`
         - pair of sequences: `<s> A </s></s> B </s>`
+
         Args:
             token_ids_0 (`List[int]`):
                 List of IDs to which the special tokens will be added.
@@ -528,7 +519,7 @@ class TapexTokenizer(PreTrainedTokenizer):
         answer: Union[str, List[str]] = None,
         add_special_tokens: bool = True,
         padding: Union[bool, str, PaddingStrategy] = False,
-        truncation: Union[bool, str, TruncationStrategy] = False,
+        truncation: Union[bool, str, TruncationStrategy] = None,
         max_length: Optional[int] = None,
         stride: int = 0,
         pad_to_multiple_of: Optional[int] = None,
@@ -540,7 +531,7 @@ class TapexTokenizer(PreTrainedTokenizer):
         return_offsets_mapping: bool = False,
         return_length: bool = False,
         verbose: bool = True,
-        **kwargs
+        **kwargs,
     ) -> BatchEncoding:
         """
         Main method to tokenize and prepare for the model one or several table-sequence pair(s).
@@ -555,9 +546,7 @@ class TapexTokenizer(PreTrainedTokenizer):
                 Optionally, the corresponding answer to the questions as supervision.
         """
 
-        if self.current_tokenizer == TokenizerStrategy.TOKENIZE_SOURCE:
-            if table is None:
-                raise ValueError("Please ensure that the table is not empty if you use TAPEX to encode source.")
+        if table is not None:
             return self.source_call_func(
                 table=table,
                 query=query,
@@ -578,9 +567,7 @@ class TapexTokenizer(PreTrainedTokenizer):
                 verbose=verbose,
                 **kwargs,
             )
-        else:
-            if answer is None:
-                raise ValueError("Please ensure that the answer is not empty if you use TAPEX to encode target.")
+        elif answer is not None:
             return self.target_call_func(
                 answer=answer,
                 add_special_tokens=add_special_tokens,
@@ -599,6 +586,8 @@ class TapexTokenizer(PreTrainedTokenizer):
                 verbose=verbose,
                 **kwargs,
             )
+        else:
+            raise ValueError("You need to provide either a `table` or an `answer`.")
 
     def source_call_func(
         self,
@@ -607,7 +596,7 @@ class TapexTokenizer(PreTrainedTokenizer):
         answer: Union[str, List[str]] = None,
         add_special_tokens: bool = True,
         padding: Union[bool, str, PaddingStrategy] = False,
-        truncation: Union[bool, str, TruncationStrategy] = False,
+        truncation: Union[bool, str, TruncationStrategy] = None,
         max_length: Optional[int] = None,
         stride: int = 0,
         pad_to_multiple_of: Optional[int] = None,
@@ -619,7 +608,7 @@ class TapexTokenizer(PreTrainedTokenizer):
         return_offsets_mapping: bool = False,
         return_length: bool = False,
         verbose: bool = True,
-        **kwargs
+        **kwargs,
     ) -> BatchEncoding:
         # Input type checking for clearer error
         valid_table = False
@@ -695,7 +684,7 @@ class TapexTokenizer(PreTrainedTokenizer):
         answer: List[str] = None,
         add_special_tokens: bool = True,
         padding: Union[bool, str, PaddingStrategy] = False,
-        truncation: Union[bool, str] = False,
+        truncation: Union[bool, str] = None,
         max_length: Optional[int] = None,
         pad_to_multiple_of: Optional[int] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
@@ -706,7 +695,7 @@ class TapexTokenizer(PreTrainedTokenizer):
         return_offsets_mapping: bool = False,
         return_length: bool = False,
         verbose: bool = True,
-        **kwargs
+        **kwargs,
     ) -> BatchEncoding:
         """
         <Tip warning={true}>
@@ -764,9 +753,8 @@ class TapexTokenizer(PreTrainedTokenizer):
         return_offsets_mapping: bool = False,
         return_length: bool = False,
         verbose: bool = True,
-        **kwargs
+        **kwargs,
     ) -> BatchEncoding:
-
         if return_offsets_mapping:
             raise NotImplementedError(
                 "return_offset_mapping is not available when using Python tokenizers. "
@@ -883,10 +871,10 @@ class TapexTokenizer(PreTrainedTokenizer):
         answer: Optional[str] = None,
         add_special_tokens: bool = True,
         padding: Union[bool, str, PaddingStrategy] = False,
-        truncation: Union[bool, str, TruncationStrategy, TapexTruncationStrategy] = False,
+        truncation: Union[bool, str, TruncationStrategy, TapexTruncationStrategy] = None,
         max_length: Optional[int] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
-        **kwargs
+        **kwargs,
     ) -> List[int]:
         """
         Prepare a table, a string and possible answer for the model. This method does not return token type IDs,
@@ -915,7 +903,7 @@ class TapexTokenizer(PreTrainedTokenizer):
         answer: Optional[str] = None,
         add_special_tokens: bool = True,
         padding: Union[bool, str, PaddingStrategy] = False,
-        truncation: Union[bool, str] = False,
+        truncation: Union[bool, str] = None,
         max_length: Optional[int] = None,
         pad_to_multiple_of: Optional[int] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
@@ -925,7 +913,7 @@ class TapexTokenizer(PreTrainedTokenizer):
         return_offsets_mapping: bool = False,
         return_length: bool = False,
         verbose: bool = True,
-        **kwargs
+        **kwargs,
     ) -> BatchEncoding:
         # Backward compatibility for 'truncation_strategy', 'pad_to_max_length'
         padding_strategy, truncation_strategy, max_length, kwargs = self._get_padding_truncation_strategies(
@@ -975,7 +963,7 @@ class TapexTokenizer(PreTrainedTokenizer):
         return_offsets_mapping: bool = False,
         return_length: bool = False,
         verbose: bool = True,
-        **kwargs
+        **kwargs,
     ) -> BatchEncoding:
         if return_offsets_mapping:
             raise NotImplementedError(
@@ -1019,7 +1007,7 @@ class TapexTokenizer(PreTrainedTokenizer):
         answer: Union[str, List[str]],
         add_special_tokens: bool = True,
         padding: Union[bool, str, PaddingStrategy] = False,
-        truncation: Union[bool, str, TruncationStrategy] = False,
+        truncation: Union[bool, str, TruncationStrategy] = None,
         max_length: Optional[int] = None,
         stride: int = 0,
         pad_to_multiple_of: Optional[int] = None,
@@ -1031,7 +1019,7 @@ class TapexTokenizer(PreTrainedTokenizer):
         return_offsets_mapping: bool = False,
         return_length: bool = False,
         verbose: bool = True,
-        **kwargs
+        **kwargs,
     ) -> BatchEncoding:
         """
         The method tokenizes and prepares the answer label for the model.
@@ -1084,7 +1072,7 @@ class TapexTokenizer(PreTrainedTokenizer):
         answer: List[str],
         add_special_tokens: bool = True,
         padding: Union[bool, str, PaddingStrategy] = False,
-        truncation: Union[bool, str] = False,
+        truncation: Union[bool, str] = None,
         max_length: Optional[int] = None,
         pad_to_multiple_of: Optional[int] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
@@ -1095,7 +1083,7 @@ class TapexTokenizer(PreTrainedTokenizer):
         return_offsets_mapping: bool = False,
         return_length: bool = False,
         verbose: bool = True,
-        **kwargs
+        **kwargs,
     ) -> BatchEncoding:
         """
         Prepare answer strings for the model.
@@ -1149,12 +1137,10 @@ class TapexTokenizer(PreTrainedTokenizer):
         return_offsets_mapping: bool = False,
         return_length: bool = False,
         verbose: bool = True,
-        **kwargs
+        **kwargs,
     ) -> BatchEncoding:
-
         batch_outputs = {}
         for text in answer:
-
             if self.do_lower_case:
                 text = text.lower()
 
@@ -1199,10 +1185,10 @@ class TapexTokenizer(PreTrainedTokenizer):
         answer: str,
         add_special_tokens: bool = True,
         padding: Union[bool, str, PaddingStrategy] = False,
-        truncation: Union[bool, str, TruncationStrategy, TapexTruncationStrategy] = False,
+        truncation: Union[bool, str, TruncationStrategy, TapexTruncationStrategy] = None,
         max_length: Optional[int] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
-        **kwargs
+        **kwargs,
     ) -> List[int]:
         """
         Prepare the answer string for the model. This method does not return token type IDs, attention masks, etc.
@@ -1230,7 +1216,7 @@ class TapexTokenizer(PreTrainedTokenizer):
         answer: str,
         add_special_tokens: bool = True,
         padding: Union[bool, str, PaddingStrategy] = False,
-        truncation: Union[bool, str] = False,
+        truncation: Union[bool, str] = None,
         max_length: Optional[int] = None,
         pad_to_multiple_of: Optional[int] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
@@ -1240,7 +1226,7 @@ class TapexTokenizer(PreTrainedTokenizer):
         return_offsets_mapping: bool = False,
         return_length: bool = False,
         verbose: bool = True,
-        **kwargs
+        **kwargs,
     ) -> BatchEncoding:
         """
         Prepare a answer string for the model.
@@ -1293,7 +1279,7 @@ class TapexTokenizer(PreTrainedTokenizer):
         return_offsets_mapping: bool = False,
         return_length: bool = False,
         verbose: bool = True,
-        **kwargs
+        **kwargs,
     ) -> BatchEncoding:
         if return_offsets_mapping:
             raise NotImplementedError(
@@ -1329,17 +1315,6 @@ class TapexTokenizer(PreTrainedTokenizer):
             return_length=return_length,
             verbose=verbose,
         )
-
-    @contextmanager
-    def as_target_tokenizer(self):
-        """
-        Temporarily sets the tokenizer for encoding the targets. Useful for tokenizer associated to
-        sequence-to-sequence models that need a slightly different processing for the labels.
-        """
-        self.current_tokenizer = TokenizerStrategy.TOKENIZE_TARGET
-        yield
-        # restore the call function
-        self.current_tokenizer = TokenizerStrategy.TOKENIZE_SOURCE
 
     def prepare_table_query(
         self,
@@ -1421,7 +1396,6 @@ class TapexTokenizer(PreTrainedTokenizer):
     ):
         """
         Args:
-
         table_content:
             {"header": xxx, "rows": xxx, "id" (Optionally): xxx}
 
@@ -1479,16 +1453,16 @@ class TapexTokenizer(PreTrainedTokenizer):
         truncated_unrelated_indices = []
         related_indices = []
         if answer is None or len(answer) == 0:
-            answer_set = set([])
+            answer_set = set()
         else:
-            answer_set = set([ans_ex.lower() for ans_ex in answer])
+            answer_set = {ans_ex.lower() for ans_ex in answer}
         # add question key words into answer set
         if question is not None:
             answer_set.update(question.split())
         question_set = set(question.strip("?!.,").split(" "))
         row_max_len = len(table_content["rows"])
         for _row_idx, row in enumerate(table_content["rows"]):
-            lower_row = set([str(cell).lower() for cell in row])
+            lower_row = {str(cell).lower() for cell in row}
             if len(lower_row & answer_set) == 0 and len(lower_row & question_set) == 0:
                 truncated_unrelated_indices.append(_row_idx)
             else:

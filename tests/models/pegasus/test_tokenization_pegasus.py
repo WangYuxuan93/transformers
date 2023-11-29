@@ -27,7 +27,6 @@ SAMPLE_VOCAB = get_tests_dir("fixtures/test_sentencepiece_no_bos.model")
 @require_sentencepiece
 @require_tokenizers
 class PegasusTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
-
     tokenizer_class = PegasusTokenizer
     rust_tokenizer_class = PegasusTokenizerFast
     test_rust_tokenizer = True
@@ -109,10 +108,9 @@ class PegasusTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
         src_texts = ["This is going to be way too long." * 150, "short example"]
         tgt_texts = ["not super long but more than 5 tokens", "tiny"]
         batch = self._large_tokenizer(src_texts, padding=True, truncation=True, return_tensors="pt")
-        with self._large_tokenizer.as_target_tokenizer():
-            targets = self._large_tokenizer(
-                tgt_texts, max_length=5, padding=True, truncation=True, return_tensors="pt"
-            )
+        targets = self._large_tokenizer(
+            text_target=tgt_texts, max_length=5, padding=True, truncation=True, return_tensors="pt"
+        )
 
         assert batch.input_ids.shape == (2, 1024)
         assert batch.attention_mask.shape == (2, 1024)
@@ -135,7 +133,6 @@ class PegasusTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
 @require_sentencepiece
 @require_tokenizers
 class BigBirdPegasusTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
-
     tokenizer_class = PegasusTokenizer
     rust_tokenizer_class = PegasusTokenizerFast
     test_rust_tokenizer = True
@@ -174,10 +171,9 @@ class BigBirdPegasusTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
         src_texts = ["This is going to be way too long." * 1000, "short example"]
         tgt_texts = ["not super long but more than 5 tokens", "tiny"]
         batch = self._large_tokenizer(src_texts, padding=True, truncation=True, return_tensors="pt")
-        with self._large_tokenizer.as_target_tokenizer():
-            targets = self._large_tokenizer(
-                tgt_texts, max_length=5, padding=True, truncation=True, return_tensors="pt"
-            )
+        targets = self._large_tokenizer(
+            text_target=tgt_texts, max_length=5, padding=True, truncation=True, return_tensors="pt"
+        )
 
         assert batch.input_ids.shape == (2, 4096)
         assert batch.attention_mask.shape == (2, 4096)

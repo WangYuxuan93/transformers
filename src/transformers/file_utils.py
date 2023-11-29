@@ -1,7 +1,3 @@
-# flake8: noqa
-# There's no way to ignore "F401 '...' imported but unused" warnings in this
-# module, but to preserve other warnings. So, don't check this module at all.
-
 # Copyright 2020 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -69,22 +65,18 @@ from .utils import (
     add_end_docstrings,
     add_start_docstrings,
     add_start_docstrings_to_model_forward,
-    cached_path,
     cached_property,
     copy_func,
     default_cache_path,
     define_sagemaker_information,
-    filename_to_url,
     get_cached_models,
     get_file_from_repo,
-    get_from_cache,
     get_full_repo_name,
-    get_list_of_files,
+    get_torch_version,
     has_file,
-    hf_bucket_url,
-    http_get,
     http_user_agent,
     is_apex_available,
+    is_bs4_available,
     is_coloredlogs_available,
     is_datasets_available,
     is_detectron2_available,
@@ -94,7 +86,6 @@ from .utils import (
     is_in_notebook,
     is_ipex_available,
     is_librosa_available,
-    is_local_clone,
     is_offline_mode,
     is_onnx_available,
     is_pandas_available,
@@ -105,11 +96,9 @@ from .utils import (
     is_pyctcdecode_available,
     is_pytesseract_available,
     is_pytorch_quantization_available,
-    is_remote_url,
     is_rjieba_available,
     is_sagemaker_dp_enabled,
     is_sagemaker_mp_enabled,
-    is_scatter_available,
     is_scipy_available,
     is_sentencepiece_available,
     is_sklearn_available,
@@ -127,7 +116,7 @@ from .utils import (
     is_torch_cuda_available,
     is_torch_fx_available,
     is_torch_fx_proxy,
-    is_torch_onnx_dict_inputs_support_available,
+    is_torch_mps_available,
     is_torch_tf32_available,
     is_torch_tpu_available,
     is_torchaudio_available,
@@ -135,11 +124,7 @@ from .utils import (
     is_vision_available,
     replace_return_docstrings,
     requires_backends,
-    tf_required,
     to_numpy,
     to_py_obj,
     torch_only_method,
-    torch_required,
-    torch_version,
-    url_to_filename,
 )

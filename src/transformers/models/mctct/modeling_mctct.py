@@ -16,12 +16,10 @@
 
 
 import math
-import random
-from typing import Optional
+from typing import Optional, Tuple, Union
 
 import torch
 import torch.utils.checkpoint
-from packaging import version
 from torch import nn
 
 from ...activations import ACT2FN
@@ -43,7 +41,6 @@ logger = logging.get_logger(__name__)
 _HIDDEN_STATES_START_POSITION = 1
 
 _CONFIG_FOR_DOC = "MCTCTConfig"
-_PROCESSOR_FOR_DOC = "MCTCTProcessor"
 
 # Base docstring
 _CHECKPOINT_FOR_DOC = "speechbrain/m-ctc-t-large"
@@ -152,13 +149,14 @@ class MCTCTEmbeddings(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
-        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
-        if version.parse(torch.__version__) > version.parse("1.6.0"):
-            self.register_buffer(
-                "token_type_ids",
-                torch.zeros(self.position_ids.size(), dtype=torch.long, device=self.position_ids.device),
-                persistent=False,
-            )
+        self.register_buffer(
+            "position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)), persistent=False
+        )
+        self.register_buffer(
+            "token_type_ids",
+            torch.zeros(self.position_ids.size(), dtype=torch.long, device=self.position_ids.device),
+            persistent=False,
+        )
 
     def forward(
         self, input_features=None, token_type_ids=None, position_ids=None, inputs_embeds=None, past_key_values_length=0
@@ -447,7 +445,6 @@ class MCTCTPreTrainedModel(PreTrainedModel):
     config_class = MCTCTConfig
     base_model_prefix = "mctct"
     main_input_name = "input_features"
-    _keys_to_ignore_on_load_missing = ["position_ids"]
     supports_gradient_checkpointing = True
 
     def _init_weights(self, module):
@@ -568,13 +565,13 @@ class MCTCTEncoder(MCTCTPreTrainedModel):
 
     def forward(
         self,
-        input_features,
-        attention_mask,
-        head_mask,
-        output_attentions=False,
-        output_hidden_states=False,
-        return_dict=True,
-    ):
+        input_features: torch.Tensor,
+        attention_mask: torch.Tensor,
+        head_mask: torch.Tensor,
+        output_attentions: bool = False,
+        output_hidden_states: bool = False,
+        return_dict: bool = True,
+    ) -> Union[Tuple, BaseModelOutput]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -613,7 +610,7 @@ class MCTCTEncoder(MCTCTPreTrainedModel):
                 encoder_states = encoder_states + (hidden_states,)
 
             # add LayerDrop (see https://arxiv.org/abs/1909.11556 for description)
-            dropout_probability = random.uniform(0, 1)
+            dropout_probability = torch.rand([])
 
             skip_the_layer = True if self.training and (dropout_probability < self.config.layerdrop) else False
             if not skip_the_layer or deepspeed_zero3_is_enabled:
@@ -673,7 +670,6 @@ class MCTCTModel(MCTCTPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(MCTCT_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
-        processor_class=_PROCESSOR_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=BaseModelOutput,
         config_class=_CONFIG_FOR_DOC,
@@ -682,13 +678,13 @@ class MCTCTModel(MCTCTPreTrainedModel):
     )
     def forward(
         self,
-        input_features,
-        attention_mask=None,
-        head_mask=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-    ):
+        input_features: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        head_mask: Optional[torch.Tensor] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ) -> Union[Tuple, BaseModelOutput]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -744,7 +740,6 @@ class MCTCTForCTC(MCTCTPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(MCTCT_INPUTS_DOCSTRING)
     @add_code_sample_docstrings(
-        processor_class=_PROCESSOR_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=CausalLMOutput,
         config_class=_CONFIG_FOR_DOC,
@@ -753,14 +748,14 @@ class MCTCTForCTC(MCTCTPreTrainedModel):
     )
     def forward(
         self,
-        input_features,
-        attention_mask=None,
-        head_mask=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-        labels=None,
-    ):
+        input_features: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        head_mask: Optional[torch.Tensor] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+        labels: Optional[torch.LongTensor] = None,
+    ) -> Union[Tuple, CausalLMOutput]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size, target_length)`, *optional*):
             Labels for connectionist temporal classification. Note that `target_length` has to be smaller or equal to
@@ -785,7 +780,6 @@ class MCTCTForCTC(MCTCTPreTrainedModel):
 
         loss = None
         if labels is not None:
-
             if labels.max() >= self.config.vocab_size:
                 raise ValueError(f"Label values must be <= vocab_size: {self.config.vocab_size}")
 

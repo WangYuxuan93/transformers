@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 import unittest
 
 from transformers import T5Config, is_tf_available
@@ -21,6 +23,7 @@ from transformers.utils import cached_property
 
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_tf_common import TFModelTesterMixin, ids_tensor, random_attention_mask
+from ...test_pipeline_mixin import PipelineTesterMixin
 
 
 if is_tf_available():
@@ -43,7 +46,7 @@ class TFT5ModelTester:
         self.vocab_size = 99
         self.n_positions = 14
         self.hidden_size = 32
-        self.num_hidden_layers = 5
+        self.num_hidden_layers = 2
         self.num_attention_heads = 4
         self.d_ff = 37
         self.relative_attention_num_buckets = 8
@@ -239,11 +242,21 @@ class TFT5ModelTester:
 
 
 @require_tf
-class TFT5ModelTest(TFModelTesterMixin, unittest.TestCase):
-
+class TFT5ModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
     is_encoder_decoder = True
     all_model_classes = (TFT5Model, TFT5ForConditionalGeneration) if is_tf_available() else ()
     all_generative_model_classes = (TFT5ForConditionalGeneration,) if is_tf_available() else ()
+    pipeline_model_mapping = (
+        {
+            "conversational": TFT5ForConditionalGeneration,
+            "feature-extraction": TFT5Model,
+            "summarization": TFT5ForConditionalGeneration,
+            "text2text-generation": TFT5ForConditionalGeneration,
+            "translation": TFT5ForConditionalGeneration,
+        }
+        if is_tf_available()
+        else {}
+    )
     test_onnx = False
 
     def setUp(self):
@@ -287,28 +300,6 @@ class TFT5ModelTest(TFModelTesterMixin, unittest.TestCase):
 
         self.model_tester.create_and_check_t5_decoder_model_past_large_inputs(*config_and_inputs)
 
-    def test_model_common_attributes(self):
-        config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
-
-        for model_class in self.all_model_classes:
-            model = model_class(config)
-            assert isinstance(model.get_input_embeddings(), tf.keras.layers.Layer)
-
-            if model_class in self.all_generative_model_classes:
-                x = model.get_output_embeddings()
-                assert isinstance(x, tf.keras.layers.Layer)
-                name = model.get_bias()
-                assert name is None
-            else:
-                x = model.get_output_embeddings()
-                assert x is None
-                name = model.get_bias()
-                assert name is None
-
-    def test_saved_model_creation(self):
-        # This test is too long (>30sec) and makes fail the CI
-        pass
-
     @slow
     def test_model_from_pretrained(self):
         model = TFT5Model.from_pretrained("t5-small")
@@ -317,20 +308,6 @@ class TFT5ModelTest(TFModelTesterMixin, unittest.TestCase):
     def test_generate_with_headmasking(self):
         # TODO: Fix head-masking according to PyTorch T5 model
         pass
-
-    @slow
-    def test_resize_embeddings(self):
-        model = TFT5ForConditionalGeneration.from_pretrained("t5-small")
-        original_vocab_size = model.get_input_embeddings().weight.shape[0]
-        # the vocab size is defined in the model config
-        self.assertEqual(original_vocab_size, model.config.vocab_size)
-
-        tokenizer = T5Tokenizer.from_pretrained("t5-small")
-        tokenizer.add_special_tokens({"bos_token": "", "eos_token": ""})
-        model._resize_token_embeddings(len(tokenizer))
-        # the vocab size is now resized to the length of the tokenizer, which is different from the original size
-        self.assertEqual(model.get_input_embeddings().weight.shape[0], len(tokenizer))
-        self.assertNotEqual(model.get_input_embeddings().weight.shape[0], original_vocab_size)
 
     # This test is run in `TFT5EncoderOnlyModelTest`, where the main layer has the same inputs as the model
     @unittest.skip(reason="The inputs of the Main Layer are different.")
@@ -348,7 +325,7 @@ class TFT5EncoderOnlyModelTester:
         # For common tests
         use_attention_mask=True,
         hidden_size=32,
-        num_hidden_layers=5,
+        num_hidden_layers=2,
         num_attention_heads=4,
         d_ff=37,
         relative_attention_num_buckets=8,
@@ -360,7 +337,6 @@ class TFT5EncoderOnlyModelTester:
         pad_token_id=0,
         scope=None,
     ):
-
         self.parent = parent
         self.batch_size = batch_size
         self.encoder_seq_length = encoder_seq_length
@@ -659,9 +635,9 @@ class TFT5ModelIntegrationTests(unittest.TestCase):
         labels = tokenizer("Hi I am", return_tensors="tf").input_ids
 
         loss = model(input_ids, labels=labels).loss
-        mtf_score = -tf.math.reduce_sum(loss).numpy()
+        mtf_score = -tf.math.reduce_mean(loss).numpy()
 
-        EXPECTED_SCORE = -19.0845
+        EXPECTED_SCORE = -4.771147
         self.assertTrue(abs(mtf_score - EXPECTED_SCORE) < 1e-4)
 
     @slow
@@ -685,9 +661,9 @@ class TFT5ModelIntegrationTests(unittest.TestCase):
         labels = tokenizer("Hi I am", return_tensors="tf").input_ids
 
         loss = model(input_ids, labels=labels).loss
-        mtf_score = -tf.math.reduce_sum(loss).numpy()
+        mtf_score = -tf.math.reduce_mean(loss).numpy()
 
-        EXPECTED_SCORE = -59.0293
+        EXPECTED_SCORE = -14.757326
         self.assertTrue(abs(mtf_score - EXPECTED_SCORE) < 1e-4)
 
     @slow
@@ -709,9 +685,9 @@ class TFT5ModelIntegrationTests(unittest.TestCase):
         labels = tokenizer("Hi I am", return_tensors="tf").input_ids
 
         loss = model(input_ids, labels=labels).loss
-        mtf_score = -tf.math.reduce_sum(loss).numpy()
+        mtf_score = -tf.math.reduce_mean(loss).numpy()
 
-        EXPECTED_SCORE = -60.7397
+        EXPECTED_SCORE = -7.592465
         self.assertTrue(abs(mtf_score - EXPECTED_SCORE) < 1e-4)
 
     @slow

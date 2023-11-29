@@ -28,6 +28,7 @@ from transformers.utils import cached_property, is_torch_available, is_vision_av
 
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ModelTesterMixin, floats_tensor, ids_tensor
+from ...test_pipeline_mixin import PipelineTesterMixin
 
 
 if is_torch_available():
@@ -41,7 +42,7 @@ if is_torch_available():
 if is_vision_available():
     from PIL import Image
 
-    from transformers import ViTFeatureExtractor
+    from transformers import ViTImageProcessor
 
 
 class ViTMAEModelTester:
@@ -153,13 +154,14 @@ class ViTMAEModelTester:
 
 
 @require_torch
-class ViTMAEModelTest(ModelTesterMixin, unittest.TestCase):
+class ViTMAEModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
     """
     Here we also overwrite some of the tests of test_modeling_common.py, as ViTMAE does not use input_ids, inputs_embeds,
     attention_mask and seq_length.
     """
 
     all_model_classes = (ViTMAEModel, ViTMAEForPreTraining) if is_torch_available() else ()
+    pipeline_model_mapping = {"feature-extraction": ViTMAEModel} if is_torch_available() else {}
 
     test_pruning = False
     test_torchscript = False
@@ -209,7 +211,6 @@ class ViTMAEModelTest(ModelTesterMixin, unittest.TestCase):
     # overwrite from common since ViTMAEForPretraining has random masking, we need to fix the noise
     # to generate masks during test
     def check_pt_tf_models(self, tf_model, pt_model, pt_inputs_dict):
-
         # make masks reproducible
         np.random.seed(2)
 
@@ -224,7 +225,6 @@ class ViTMAEModelTest(ModelTesterMixin, unittest.TestCase):
         super().check_pt_tf_models(tf_model, pt_model, pt_inputs_dict)
 
     def test_save_load(self):
-
         config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
 
         for model_class in self.all_model_classes:
@@ -296,8 +296,8 @@ def prepare_img():
 @require_vision
 class ViTMAEModelIntegrationTest(unittest.TestCase):
     @cached_property
-    def default_feature_extractor(self):
-        return ViTFeatureExtractor.from_pretrained("facebook/vit-mae-base") if is_vision_available() else None
+    def default_image_processor(self):
+        return ViTImageProcessor.from_pretrained("facebook/vit-mae-base") if is_vision_available() else None
 
     @slow
     def test_inference_for_pretraining(self):
@@ -306,9 +306,9 @@ class ViTMAEModelIntegrationTest(unittest.TestCase):
 
         model = ViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base").to(torch_device)
 
-        feature_extractor = self.default_feature_extractor
+        image_processor = self.default_image_processor
         image = prepare_img()
-        inputs = feature_extractor(images=image, return_tensors="pt").to(torch_device)
+        inputs = image_processor(images=image, return_tensors="pt").to(torch_device)
 
         # prepare a noise vector that will be also used for testing the TF model
         # (this way we can ensure that the PT and TF models operate on the same inputs)

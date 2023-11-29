@@ -24,6 +24,7 @@ from transformers.utils import cached_property, is_torch_available, is_vision_av
 
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ModelTesterMixin, floats_tensor, ids_tensor
+from ...test_pipeline_mixin import PipelineTesterMixin
 
 
 if is_torch_available():
@@ -36,7 +37,7 @@ if is_torch_available():
 if is_vision_available():
     from PIL import Image
 
-    from transformers import MobileViTFeatureExtractor
+    from transformers import MobileViTImageProcessor
 
 
 class MobileViTConfigTester(ConfigTester):
@@ -173,7 +174,7 @@ class MobileViTModelTester:
 
 
 @require_torch
-class MobileViTModelTest(ModelTesterMixin, unittest.TestCase):
+class MobileViTModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
     """
     Here we also overwrite some of the tests of test_modeling_common.py, as MobileViT does not use input_ids, inputs_embeds,
     attention_mask and seq_length.
@@ -183,6 +184,15 @@ class MobileViTModelTest(ModelTesterMixin, unittest.TestCase):
         (MobileViTModel, MobileViTForImageClassification, MobileViTForSemanticSegmentation)
         if is_torch_available()
         else ()
+    )
+    pipeline_model_mapping = (
+        {
+            "feature-extraction": MobileViTModel,
+            "image-classification": MobileViTForImageClassification,
+            "image-segmentation": MobileViTForSemanticSegmentation,
+        }
+        if is_torch_available()
+        else {}
     )
 
     test_pruning = False
@@ -288,16 +298,16 @@ def prepare_img():
 @require_vision
 class MobileViTModelIntegrationTest(unittest.TestCase):
     @cached_property
-    def default_feature_extractor(self):
-        return MobileViTFeatureExtractor.from_pretrained("apple/mobilevit-xx-small") if is_vision_available() else None
+    def default_image_processor(self):
+        return MobileViTImageProcessor.from_pretrained("apple/mobilevit-xx-small") if is_vision_available() else None
 
     @slow
     def test_inference_image_classification_head(self):
         model = MobileViTForImageClassification.from_pretrained("apple/mobilevit-xx-small").to(torch_device)
 
-        feature_extractor = self.default_feature_extractor
+        image_processor = self.default_image_processor
         image = prepare_img()
-        inputs = feature_extractor(images=image, return_tensors="pt").to(torch_device)
+        inputs = image_processor(images=image, return_tensors="pt").to(torch_device)
 
         # forward pass
         with torch.no_grad():
@@ -316,10 +326,10 @@ class MobileViTModelIntegrationTest(unittest.TestCase):
         model = MobileViTForSemanticSegmentation.from_pretrained("apple/deeplabv3-mobilevit-xx-small")
         model = model.to(torch_device)
 
-        feature_extractor = MobileViTFeatureExtractor.from_pretrained("apple/deeplabv3-mobilevit-xx-small")
+        image_processor = MobileViTImageProcessor.from_pretrained("apple/deeplabv3-mobilevit-xx-small")
 
         image = prepare_img()
-        inputs = feature_extractor(images=image, return_tensors="pt").to(torch_device)
+        inputs = image_processor(images=image, return_tensors="pt").to(torch_device)
 
         # forward pass
         with torch.no_grad():
@@ -340,3 +350,27 @@ class MobileViTModelIntegrationTest(unittest.TestCase):
         )
 
         self.assertTrue(torch.allclose(logits[0, :3, :3, :3], expected_slice, atol=1e-4))
+
+    @slow
+    def test_post_processing_semantic_segmentation(self):
+        model = MobileViTForSemanticSegmentation.from_pretrained("apple/deeplabv3-mobilevit-xx-small")
+        model = model.to(torch_device)
+
+        image_processor = MobileViTImageProcessor.from_pretrained("apple/deeplabv3-mobilevit-xx-small")
+
+        image = prepare_img()
+        inputs = image_processor(images=image, return_tensors="pt").to(torch_device)
+
+        # forward pass
+        with torch.no_grad():
+            outputs = model(**inputs)
+
+        outputs.logits = outputs.logits.detach().cpu()
+
+        segmentation = image_processor.post_process_semantic_segmentation(outputs=outputs, target_sizes=[(50, 60)])
+        expected_shape = torch.Size((50, 60))
+        self.assertEqual(segmentation[0].shape, expected_shape)
+
+        segmentation = image_processor.post_process_semantic_segmentation(outputs=outputs)
+        expected_shape = torch.Size((32, 32))
+        self.assertEqual(segmentation[0].shape, expected_shape)

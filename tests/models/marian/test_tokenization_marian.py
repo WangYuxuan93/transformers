@@ -45,7 +45,6 @@ else:
 
 @require_sentencepiece
 class MarianTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
-
     tokenizer_class = MarianTokenizer
     test_rust_tokenizer = False
     test_sentencepiece = True
@@ -145,9 +144,8 @@ class MarianTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
         src_ids = tokenizer(source_text).input_ids
         self.assertListEqual(src_ids, expected_src_ids)
 
-        with tokenizer.as_target_tokenizer():
-            target_ids = tokenizer(target_text).input_ids
-            self.assertListEqual(target_ids, expected_target_ids)
+        target_ids = tokenizer(text_target=target_text).input_ids
+        self.assertListEqual(target_ids, expected_target_ids)
 
         decoded = tokenizer.decode(target_ids, skip_special_tokens=True)
         self.assertEqual(decoded, target_text)

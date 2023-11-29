@@ -20,9 +20,10 @@ from transformers import NezhaConfig, is_torch_available
 from transformers.models.auto import get_values
 from transformers.testing_utils import require_torch, require_torch_gpu, slow, torch_device
 
-from ...generation.test_generation_utils import GenerationTesterMixin
+from ...generation.test_utils import GenerationTesterMixin
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ModelTesterMixin, floats_tensor, ids_tensor, random_attention_mask
+from ...test_pipeline_mixin import PipelineTesterMixin
 
 
 if is_torch_available():
@@ -60,7 +61,8 @@ class NezhaModelTester:
         hidden_act="gelu",
         hidden_dropout_prob=0.1,
         attention_probs_dropout_prob=0.1,
-        max_position_embeddings=512,
+        max_position_embeddings=128,
+        max_relative_position=32,
         type_vocab_size=16,
         type_sequence_label_size=2,
         initializer_range=0.02,
@@ -314,8 +316,7 @@ class NezhaModelTester:
 
 
 @require_torch
-class NezhaModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase):
-
+class NezhaModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixin, unittest.TestCase):
     all_model_classes = (
         (
             NezhaModel,
@@ -329,6 +330,18 @@ class NezhaModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase)
         )
         if is_torch_available()
         else ()
+    )
+    pipeline_model_mapping = (
+        {
+            "feature-extraction": NezhaModel,
+            "fill-mask": NezhaForMaskedLM,
+            "question-answering": NezhaForQuestionAnswering,
+            "text-classification": NezhaForSequenceClassification,
+            "token-classification": NezhaForTokenClassification,
+            "zero-shot": NezhaForSequenceClassification,
+        }
+        if is_torch_available()
+        else {}
     )
     fx_compatible = True
 
@@ -428,7 +441,6 @@ class NezhaModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase)
     def test_torchscript_device_change(self):
         config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
         for model_class in self.all_model_classes:
-
             # NezhaForMultipleChoice behaves incorrectly in JIT environments.
             if model_class == NezhaForMultipleChoice:
                 return

@@ -25,6 +25,7 @@ from transformers.testing_utils import require_soundfile, require_torch, slow, t
 
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ModelTesterMixin, _config_zero_init, floats_tensor, ids_tensor
+from ...test_pipeline_mixin import PipelineTesterMixin
 
 
 if is_torch_available():
@@ -261,8 +262,11 @@ class MCTCTModelTester:
 
 
 @require_torch
-class MCTCTModelTest(ModelTesterMixin, unittest.TestCase):
+class MCTCTModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
     all_model_classes = (MCTCTForCTC, MCTCTModel) if is_torch_available() else ()
+    pipeline_model_mapping = (
+        {"automatic-speech-recognition": MCTCTForCTC, "feature-extraction": MCTCTModel} if is_torch_available() else {}
+    )
     test_pruning = False
     test_headmasking = False
     test_torchscript = False
@@ -382,7 +386,7 @@ class MCTCTModelTest(ModelTesterMixin, unittest.TestCase):
                     "objective.weight",
                 ]
                 if param.requires_grad:
-                    if any([x in name for x in uniform_init_parms]):
+                    if any(x in name for x in uniform_init_parms):
                         self.assertTrue(
                             -1.0 <= ((param.data.mean() * 1e9).round() / 1e9).item() <= 1.0,
                             msg=f"Parameter {name} of model {model_class} seems not properly initialized",
@@ -529,7 +533,7 @@ class MCTCTRobustModelTest(ModelTesterMixin, unittest.TestCase):
                     "objective.weight",
                 ]
                 if param.requires_grad:
-                    if any([x in name for x in uniform_init_parms]):
+                    if any(x in name for x in uniform_init_parms):
                         self.assertTrue(
                             -1.0 <= ((param.data.mean() * 1e9).round() / 1e9).item() <= 1.0,
                             msg=f"Parameter {name} of model {model_class} seems not properly initialized",

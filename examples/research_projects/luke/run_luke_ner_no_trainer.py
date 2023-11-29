@@ -27,14 +27,14 @@ from pathlib import Path
 
 import datasets
 import torch
+from accelerate import Accelerator, DistributedDataParallelKwargs
 from datasets import ClassLabel, load_dataset, load_metric
+from huggingface_hub import Repository
+from luke_utils import DataCollatorForLukeTokenClassification, is_punctuation, padding_tensor
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 import transformers
-from accelerate import Accelerator, DistributedDataParallelKwargs
-from huggingface_hub import Repository
-from luke_utils import DataCollatorForLukeTokenClassification, is_punctuation, padding_tensor
 from transformers import (
     AdamW,
     LukeConfig,
@@ -610,7 +610,7 @@ def main():
             predicted_sequence = [label_list[0]] * len(true_tags)
 
             for _, span, label in sorted(predictions, key=lambda o: o[0], reverse=True):
-                if all([o == label_list[0] for o in predicted_sequence[span[0] : span[1]]]):
+                if all(o == label_list[0] for o in predicted_sequence[span[0] : span[1]]):
                     predicted_sequence[span[0]] = label
                     if span[1] - span[0] > 1:
                         predicted_sequence[span[0] + 1 : span[1]] = [label] * (span[1] - span[0] - 1)

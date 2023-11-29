@@ -23,6 +23,7 @@ from random import randint
 from typing import Optional
 
 import datasets
+import evaluate
 import numpy as np
 from datasets import DatasetDict, load_dataset
 
@@ -44,7 +45,7 @@ from transformers.utils.versions import require_version
 logger = logging.getLogger(__name__)
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
-check_min_version("4.21.0.dev0")
+check_min_version("4.31.0.dev0")
 
 require_version("datasets>=1.14.0", "To fix: pip install -r examples/pytorch/audio-classification/requirements.txt")
 
@@ -155,7 +156,7 @@ class ModelArguments:
         default=False,
         metadata={
             "help": (
-                "Will use the token generated when running `transformers-cli login` (necessary to use this script "
+                "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
                 "with private models)."
             )
         },
@@ -207,6 +208,10 @@ def main():
         datefmt="%m/%d/%Y %H:%M:%S",
         handlers=[logging.StreamHandler(sys.stdout)],
     )
+
+    if training_args.should_log:
+        # The default of training_args.log_level is passive, so we set log level at info here to have that default.
+        transformers.utils.logging.set_verbosity_info()
 
     log_level = training_args.get_process_log_level()
     logger.setLevel(log_level)
@@ -284,38 +289,41 @@ def main():
         data_args.audio_column_name, datasets.features.Audio(sampling_rate=feature_extractor.sampling_rate)
     )
 
+    model_input_name = feature_extractor.model_input_names[0]
+
     def train_transforms(batch):
         """Apply train_transforms across a batch."""
-        output_batch = {"input_values": []}
+        subsampled_wavs = []
         for audio in batch[data_args.audio_column_name]:
             wav = random_subsample(
                 audio["array"], max_length=data_args.max_length_seconds, sample_rate=feature_extractor.sampling_rate
             )
-            output_batch["input_values"].append(wav)
-        output_batch["labels"] = [label for label in batch[data_args.label_column_name]]
+            subsampled_wavs.append(wav)
+        inputs = feature_extractor(subsampled_wavs, sampling_rate=feature_extractor.sampling_rate)
+        output_batch = {model_input_name: inputs.get(model_input_name)}
+        output_batch["labels"] = list(batch[data_args.label_column_name])
 
         return output_batch
 
     def val_transforms(batch):
         """Apply val_transforms across a batch."""
-        output_batch = {"input_values": []}
-        for audio in batch[data_args.audio_column_name]:
-            wav = audio["array"]
-            output_batch["input_values"].append(wav)
-        output_batch["labels"] = [label for label in batch[data_args.label_column_name]]
+        wavs = [audio["array"] for audio in batch[data_args.audio_column_name]]
+        inputs = feature_extractor(wavs, sampling_rate=feature_extractor.sampling_rate)
+        output_batch = {model_input_name: inputs.get(model_input_name)}
+        output_batch["labels"] = list(batch[data_args.label_column_name])
 
         return output_batch
 
     # Prepare label mappings.
     # We'll include these in the model's config to get human readable labels in the Inference API.
     labels = raw_datasets["train"].features[data_args.label_column_name].names
-    label2id, id2label = dict(), dict()
+    label2id, id2label = {}, {}
     for i, label in enumerate(labels):
         label2id[label] = str(i)
         id2label[str(i)] = label
 
     # Load the accuracy metric from the datasets package
-    metric = datasets.load_metric("accuracy")
+    metric = evaluate.load("accuracy")
 
     # Define our compute_metrics function. It takes an `EvalPrediction` object (a namedtuple with
     # `predictions` and `label_ids` fields) and has to return a dictionary string to float.

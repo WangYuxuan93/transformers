@@ -14,34 +14,23 @@
 # limitations under the License.
 
 import datetime
+import gc
 import math
-import os
-import pickle
-import tempfile
 import unittest
 
 from transformers import XGLMConfig, is_torch_available
-from transformers.testing_utils import require_torch, slow, torch_device
-from transformers.utils import is_torch_fx_available
+from transformers.testing_utils import require_torch, require_torch_gpu, slow, torch_device
 
-from ...generation.test_generation_utils import GenerationTesterMixin
+from ...generation.test_utils import GenerationTesterMixin
 from ...test_configuration_common import ConfigTester
-from ...test_modeling_common import (
-    ModelTesterMixin,
-    _config_zero_init,
-    floats_tensor,
-    ids_tensor,
-    random_attention_mask,
-)
+from ...test_modeling_common import ModelTesterMixin, floats_tensor, ids_tensor, random_attention_mask
+from ...test_pipeline_mixin import PipelineTesterMixin
 
 
 if is_torch_available():
     import torch
 
     from transformers import XGLM_PRETRAINED_MODEL_ARCHIVE_LIST, XGLMForCausalLM, XGLMModel, XGLMTokenizer
-
-if is_torch_fx_available():
-    from transformers.utils.fx import symbolic_trace
 
 
 class XGLMModelTester:
@@ -307,10 +296,12 @@ class XGLMModelTester:
 
 
 @require_torch
-class XGLMModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase):
-
+class XGLMModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixin, unittest.TestCase):
     all_model_classes = (XGLMModel, XGLMForCausalLM) if is_torch_available() else ()
     all_generative_model_classes = (XGLMForCausalLM,) if is_torch_available() else ()
+    pipeline_model_mapping = (
+        {"feature-extraction": XGLMModel, "text-generation": XGLMForCausalLM} if is_torch_available() else {}
+    )
     fx_compatible = True
     test_missing_keys = False
     test_pruning = False
@@ -350,152 +341,6 @@ class XGLMModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_xglm_weight_initialization(*config_and_inputs)
 
-    def _create_and_check_torch_fx_tracing(self, config, inputs_dict, output_loss=False):
-        if not is_torch_fx_available() or not self.fx_compatible:
-            return
-
-        configs_no_init = _config_zero_init(config)  # To be sure we have no Nan
-        configs_no_init.return_dict = False
-
-        for model_class in self.all_model_classes:
-            model = model_class(config=configs_no_init)
-            model.to(torch_device)
-            model.eval()
-            inputs = self._prepare_for_class(inputs_dict, model_class, return_labels=output_loss)
-
-            try:
-                if model.config.is_encoder_decoder:
-                    model.config.use_cache = False  # FSTM still requires this hack -> FSTM should probably be refactored similar to BART afterward
-                    labels = inputs.get("labels", None)
-                    input_names = [
-                        "input_ids",
-                        "attention_mask",
-                        "decoder_input_ids",
-                        "decoder_attention_mask",
-                        "input_features",
-                    ]
-                    if labels is not None:
-                        input_names.append("labels")
-
-                    filtered_inputs = {k: v for (k, v) in inputs.items() if k in input_names}
-                    input_names = list(filtered_inputs.keys())
-
-                    model_output = model(**filtered_inputs)
-
-                    traced_model = symbolic_trace(model, input_names)
-                    traced_output = traced_model(**filtered_inputs)
-                else:
-                    input_names = [
-                        "input_ids",
-                        "attention_mask",
-                        "token_type_ids",
-                        "pixel_values",
-                        "bbox",
-                        "input_features",
-                    ]
-
-                    labels = inputs.get("labels", None)
-                    start_positions = inputs.get("start_positions", None)
-                    end_positions = inputs.get("end_positions", None)
-                    if labels is not None:
-                        input_names.append("labels")
-                    if start_positions is not None:
-                        input_names.append("start_positions")
-                    if end_positions is not None:
-                        input_names.append("end_positions")
-
-                    filtered_inputs = {k: v for (k, v) in inputs.items() if k in input_names}
-                    input_names = list(filtered_inputs.keys())
-
-                    model_output = model(**filtered_inputs)
-
-                    traced_model = symbolic_trace(model, input_names)
-                    traced_output = traced_model(**filtered_inputs)
-
-            except RuntimeError as e:
-                self.fail(f"Couldn't trace module: {e}")
-
-            def flatten_output(output):
-                flatten = []
-                for x in output:
-                    if isinstance(x, (tuple, list)):
-                        flatten += flatten_output(x)
-                    elif not isinstance(x, torch.Tensor):
-                        continue
-                    else:
-                        flatten.append(x)
-                return flatten
-
-            model_output = flatten_output(model_output)
-            traced_output = flatten_output(traced_output)
-            num_outputs = len(model_output)
-
-            for i in range(num_outputs):
-                self.assertTrue(
-                    torch.allclose(model_output[i], traced_output[i]),
-                    f"traced {i}th output doesn't match model {i}th output for {model_class}",
-                )
-
-            # Test that the model can be serialized and restored properly
-            with tempfile.TemporaryDirectory() as tmp_dir_name:
-                pkl_file_name = os.path.join(tmp_dir_name, "model.pkl")
-                try:
-                    with open(pkl_file_name, "wb") as f:
-                        pickle.dump(traced_model, f)
-                    with open(pkl_file_name, "rb") as f:
-                        loaded = pickle.load(f)
-                except Exception as e:
-                    self.fail(f"Couldn't serialize / deserialize the traced model: {e}")
-
-                loaded_output = loaded(**filtered_inputs)
-                loaded_output = flatten_output(loaded_output)
-
-                for i in range(num_outputs):
-                    self.assertTrue(
-                        torch.allclose(model_output[i], loaded_output[i]),
-                        f"serialized model {i}th output doesn't match model {i}th output for {model_class}",
-                    )
-
-    @slow
-    def test_batch_generation(self):
-        model = XGLMForCausalLM.from_pretrained("facebook/xglm-564M")
-        model.to(torch_device)
-        tokenizer = XGLMTokenizer.from_pretrained("facebook/xglm-564M")
-
-        tokenizer.padding_side = "left"
-
-        # use different length sentences to test batching
-        sentences = [
-            "Hello, my dog is a little",
-            "Today, I",
-        ]
-
-        inputs = tokenizer(sentences, return_tensors="pt", padding=True)
-        input_ids = inputs["input_ids"].to(torch_device)
-
-        outputs = model.generate(
-            input_ids=input_ids,
-            attention_mask=inputs["attention_mask"].to(torch_device),
-        )
-
-        inputs_non_padded = tokenizer(sentences[0], return_tensors="pt").input_ids.to(torch_device)
-        output_non_padded = model.generate(input_ids=inputs_non_padded)
-
-        num_paddings = inputs_non_padded.shape[-1] - inputs["attention_mask"][-1].long().sum().cpu().item()
-        inputs_padded = tokenizer(sentences[1], return_tensors="pt").input_ids.to(torch_device)
-        output_padded = model.generate(input_ids=inputs_padded, max_length=model.config.max_length - num_paddings)
-
-        batch_out_sentence = tokenizer.batch_decode(outputs, skip_special_tokens=True)
-        non_padded_sentence = tokenizer.decode(output_non_padded[0], skip_special_tokens=True)
-        padded_sentence = tokenizer.decode(output_padded[0], skip_special_tokens=True)
-
-        expected_output_sentence = [
-            "Hello, my dog is a little bit of a shy one, but he is very friendly",
-            "Today, I am going to share with you a few of my favorite things",
-        ]
-        self.assertListEqual(expected_output_sentence, batch_out_sentence)
-        self.assertListEqual(expected_output_sentence, [non_padded_sentence, padded_sentence])
-
     @slow
     def test_model_from_pretrained(self):
         for model_name in XGLM_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
@@ -505,6 +350,12 @@ class XGLMModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase):
 
 @require_torch
 class XGLMModelLanguageGenerationTest(unittest.TestCase):
+    def tearDown(self):
+        super().tearDown()
+        # clean-up as much as possible GPU memory occupied by PyTorch
+        gc.collect()
+        torch.cuda.empty_cache()
+
     def _test_lm_generate_xglm_helper(
         self,
         gradient_checkpointing=False,
@@ -526,6 +377,49 @@ class XGLMModelLanguageGenerationTest(unittest.TestCase):
             self.assertListEqual(output_ids[0].tolist(), expected_output_ids)
 
     @slow
+    def test_batch_generation(self):
+        model = XGLMForCausalLM.from_pretrained("facebook/xglm-564M")
+        model.to(torch_device)
+        tokenizer = XGLMTokenizer.from_pretrained("facebook/xglm-564M")
+
+        tokenizer.padding_side = "left"
+
+        # use different length sentences to test batching
+        sentences = [
+            "This is an extremelly long sentence that only exists to test the ability of the model to cope with "
+            "left-padding, such as in batched generation. The output for the sequence below should be the same "
+            "regardless of whether left padding is applied or not. When",
+            "Hello, my dog is a little",
+        ]
+
+        inputs = tokenizer(sentences, return_tensors="pt", padding=True)
+        input_ids = inputs["input_ids"].to(torch_device)
+
+        outputs = model.generate(
+            input_ids=input_ids, attention_mask=inputs["attention_mask"].to(torch_device), max_new_tokens=12
+        )
+
+        inputs_non_padded = tokenizer(sentences[0], return_tensors="pt").input_ids.to(torch_device)
+        output_non_padded = model.generate(input_ids=inputs_non_padded, max_new_tokens=12)
+
+        inputs_padded = tokenizer(sentences[1], return_tensors="pt").input_ids.to(torch_device)
+        output_padded = model.generate(input_ids=inputs_padded, max_new_tokens=12)
+
+        batch_out_sentence = tokenizer.batch_decode(outputs, skip_special_tokens=True)
+        non_padded_sentence = tokenizer.decode(output_non_padded[0], skip_special_tokens=True)
+        padded_sentence = tokenizer.decode(output_padded[0], skip_special_tokens=True)
+
+        expected_output_sentence = [
+            "This is an extremelly long sentence that only exists to test the ability of the model to cope with "
+            "left-padding, such as in batched generation. The output for the sequence below should be the same "
+            "regardless of whether left padding is applied or not. When left padding is applied, the sequence will be "
+            "a single",
+            "Hello, my dog is a little bit of a shy one, but he is very friendly",
+        ]
+        self.assertListEqual(expected_output_sentence, batch_out_sentence)
+        self.assertListEqual(expected_output_sentence, [non_padded_sentence, padded_sentence])
+
+    @slow
     def test_lm_generate_xglm(self):
         self._test_lm_generate_xglm_helper()
 
@@ -544,8 +438,14 @@ class XGLMModelLanguageGenerationTest(unittest.TestCase):
         output_ids = model.generate(input_ids, do_sample=True, num_beams=1)
         output_str = tokenizer.decode(output_ids[0], skip_special_tokens=True)
 
-        EXPECTED_OUTPUT_STR = "Today is a nice day and the sun is shining. A nice day with warm rainy"
-        self.assertEqual(output_str, EXPECTED_OUTPUT_STR)
+        EXPECTED_OUTPUT_STRS = [
+            # TODO: remove this once we move to torch 2.0
+            # torch 1.13.1 + cu116
+            "Today is a nice day and the sun is shining. A nice day with warm rainy",
+            # torch 2.0 + cu117
+            "Today is a nice day and the water is still cold. We just stopped off for some fresh",
+        ]
+        self.assertIn(output_str, EXPECTED_OUTPUT_STRS)
 
     @slow
     def test_xglm_sample_max_time(self):
@@ -587,3 +487,22 @@ class XGLMModelLanguageGenerationTest(unittest.TestCase):
         model.generate(input_ids, do_sample=False, max_time=None, max_length=256)
         duration = datetime.datetime.now() - start
         self.assertGreater(duration, datetime.timedelta(seconds=1.25 * MAX_TIME))
+
+    @require_torch_gpu
+    def test_batched_nan_fp16(self):
+        model_name = "facebook/xglm-564M"
+        tokenizer = XGLMTokenizer.from_pretrained(model_name, use_fast=False, padding_side="left")
+
+        model = XGLMForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16, use_cache=True).cuda()
+        model = model.eval()
+
+        batch = tokenizer(["Who are you?", "Joe Biden is the president of"], padding=True, return_tensors="pt")
+
+        input_ids = batch["input_ids"].cuda()
+        attention_mask = batch["attention_mask"].cuda()
+
+        with torch.no_grad():
+            outputs = model(input_ids, attention_mask=attention_mask)
+            self.assertFalse(
+                torch.isnan(outputs.logits[0]).any().item()
+            )  # the first logits could contain NaNs if it fails

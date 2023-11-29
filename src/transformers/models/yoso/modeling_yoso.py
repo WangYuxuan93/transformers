@@ -16,12 +16,11 @@
 
 
 import math
-import os
+from pathlib import Path
 from typing import Optional, Tuple, Union
 
 import torch
 import torch.utils.checkpoint
-from packaging import version
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
@@ -44,7 +43,6 @@ logger = logging.get_logger(__name__)
 
 _CHECKPOINT_FOR_DOC = "uw-madison/yoso-4096"
 _CONFIG_FOR_DOC = "YosoConfig"
-_TOKENIZER_FOR_DOC = "AutoTokenizer"
 
 YOSO_PRETRAINED_MODEL_ARCHIVE_LIST = [
     "uw-madison/yoso-4096",
@@ -58,8 +56,8 @@ def load_cuda_kernels():
         from torch.utils.cpp_extension import load
 
         def append_root(files):
-            src_folder = os.path.dirname(os.path.realpath(__file__))
-            return [os.path.join(src_folder, file) for file in files]
+            src_folder = Path(__file__).resolve().parent.parent.parent / "kernels" / "yoso"
+            return [src_folder / file for file in files]
 
         src_files = append_root(
             ["fast_lsh_cumulation_torch.cpp", "fast_lsh_cumulation.cu", "fast_lsh_cumulation_cuda.cu"]
@@ -100,7 +98,6 @@ def normalize(input_tensors):
 
 
 def hashing(query, key, num_hash, hash_len):
-
     if len(query.size()) != 3:
         raise ValueError("Query has incorrect size.")
     if len(key.size()) != 3:
@@ -255,14 +252,15 @@ class YosoEmbeddings(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
-        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)) + 2)
+        self.register_buffer(
+            "position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)) + 2, persistent=False
+        )
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
-        if version.parse(torch.__version__) > version.parse("1.6.0"):
-            self.register_buffer(
-                "token_type_ids",
-                torch.zeros(self.position_ids.size(), dtype=torch.long, device=self.position_ids.device),
-                persistent=False,
-            )
+        self.register_buffer(
+            "token_type_ids",
+            torch.zeros(self.position_ids.size(), dtype=torch.long, device=self.position_ids.device),
+            persistent=False,
+        )
 
     def forward(self, input_ids=None, token_type_ids=None, position_ids=None, inputs_embeds=None):
         if input_ids is not None:
@@ -653,7 +651,6 @@ class YosoPreTrainedModel(PreTrainedModel):
     config_class = YosoConfig
     base_model_prefix = "yoso"
     supports_gradient_checkpointing = True
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
 
     def _init_weights(self, module):
         """Initialize the weights"""
@@ -768,7 +765,6 @@ class YosoModel(YosoPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(YOSO_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
-        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=BaseModelOutputWithCrossAttentions,
         config_class=_CONFIG_FOR_DOC,
@@ -854,6 +850,8 @@ class YosoModel(YosoPreTrainedModel):
 
 @add_start_docstrings("""YOSO Model with a `language modeling` head on top.""", YOSO_START_DOCSTRING)
 class YosoForMaskedLM(YosoPreTrainedModel):
+    _tied_weights_keys = ["cls.predictions.decoder.weight", "cls.predictions.decoder.bias"]
+
     def __init__(self, config):
         super().__init__(config)
 
@@ -871,7 +869,6 @@ class YosoForMaskedLM(YosoPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(YOSO_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
-        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=MaskedLMOutput,
         config_class=_CONFIG_FOR_DOC,
@@ -967,7 +964,6 @@ class YosoForSequenceClassification(YosoPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(YOSO_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
-        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=SequenceClassifierOutput,
         config_class=_CONFIG_FOR_DOC,
@@ -1060,7 +1056,6 @@ class YosoForMultipleChoice(YosoPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(YOSO_INPUTS_DOCSTRING.format("batch_size, num_choices, sequence_length"))
     @add_code_sample_docstrings(
-        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=MultipleChoiceModelOutput,
         config_class=_CONFIG_FOR_DOC,
@@ -1153,7 +1148,6 @@ class YosoForTokenClassification(YosoPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(YOSO_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
-        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=TokenClassifierOutput,
         config_class=_CONFIG_FOR_DOC,
@@ -1240,7 +1234,6 @@ class YosoForQuestionAnswering(YosoPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(YOSO_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
-        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=QuestionAnsweringModelOutput,
         config_class=_CONFIG_FOR_DOC,

@@ -19,12 +19,12 @@ import argparse
 import json
 from pathlib import Path
 
+import requests
 import torch
+from huggingface_hub import cached_download, hf_hub_url
 from PIL import Image
 
-import requests
-from huggingface_hub import cached_download, hf_hub_url
-from transformers import DPTConfig, DPTFeatureExtractor, DPTForDepthEstimation, DPTForSemanticSegmentation
+from transformers import DPTConfig, DPTForDepthEstimation, DPTForSemanticSegmentation, DPTImageProcessor
 from transformers.utils import logging
 
 
@@ -48,9 +48,9 @@ def get_dpt_config(checkpoint_url):
         config.use_batch_norm_in_fusion_residual = True
 
         config.num_labels = 150
-        repo_id = "datasets/huggingface/label-files"
+        repo_id = "huggingface/label-files"
         filename = "ade20k-id2label.json"
-        id2label = json.load(open(cached_download(hf_hub_url(repo_id, filename)), "r"))
+        id2label = json.load(open(cached_download(hf_hub_url(repo_id, filename, repo_type="dataset")), "r"))
         id2label = {int(k): v for k, v in id2label.items()}
         config.id2label = id2label
         config.label2id = {v: k for k, v in id2label.items()}
@@ -211,10 +211,10 @@ def convert_dpt_checkpoint(checkpoint_url, pytorch_dump_folder_path, push_to_hub
 
     # Check outputs on an image
     size = 480 if "ade" in checkpoint_url else 384
-    feature_extractor = DPTFeatureExtractor(size=size)
+    image_processor = DPTImageProcessor(size=size)
 
     image = prepare_img()
-    encoding = feature_extractor(image, return_tensors="pt")
+    encoding = image_processor(image, return_tensors="pt")
 
     # forward pass
     outputs = model(**encoding).logits if "ade" in checkpoint_url else model(**encoding).predicted_depth
@@ -233,8 +233,8 @@ def convert_dpt_checkpoint(checkpoint_url, pytorch_dump_folder_path, push_to_hub
     Path(pytorch_dump_folder_path).mkdir(exist_ok=True)
     print(f"Saving model to {pytorch_dump_folder_path}")
     model.save_pretrained(pytorch_dump_folder_path)
-    print(f"Saving feature extractor to {pytorch_dump_folder_path}")
-    feature_extractor.save_pretrained(pytorch_dump_folder_path)
+    print(f"Saving image processor to {pytorch_dump_folder_path}")
+    image_processor.save_pretrained(pytorch_dump_folder_path)
 
     if push_to_hub:
         print("Pushing model to hub...")
@@ -244,10 +244,10 @@ def convert_dpt_checkpoint(checkpoint_url, pytorch_dump_folder_path, push_to_hub
             commit_message="Add model",
             use_temp_dir=True,
         )
-        feature_extractor.push_to_hub(
+        image_processor.push_to_hub(
             repo_path_or_name=Path(pytorch_dump_folder_path, model_name),
             organization="nielsr",
-            commit_message="Add feature extractor",
+            commit_message="Add image processor",
             use_temp_dir=True,
         )
 
