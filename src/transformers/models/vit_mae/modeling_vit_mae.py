@@ -25,6 +25,7 @@ import numpy as np
 import torch
 import torch.utils.checkpoint
 from torch import nn
+from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
 from ...activations import ACT2FN
 from ...modeling_outputs import BaseModelOutput
@@ -38,7 +39,9 @@ from ...utils import (
     replace_return_docstrings,
 )
 from .configuration_vit_mae import ViTMAEConfig
-
+from ...modeling_outputs import (
+    SemanticSegmenterOutput,
+)
 
 logger = logging.get_logger(__name__)
 
@@ -1006,5 +1009,384 @@ class ViTMAEForPreTraining(ViTMAEPreTrainedModel):
             mask=mask,
             ids_restore=ids_restore,
             hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+        )
+
+
+
+class ViTMAEConvModule(nn.Module):
+    """
+    A convolutional block that bundles conv/norm/activation layers. This block simplifies the usage of convolution
+    layers, which are commonly used with a norm layer (e.g., BatchNorm) and activation layer (e.g., ReLU).
+
+    Based on OpenMMLab's implementation, found in https://github.com/open-mmlab/mmsegmentation.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: Union[int, Tuple[int, int]],
+        padding: Union[int, Tuple[int, int], str] = 0,
+        bias: bool = False,
+        dilation: Union[int, Tuple[int, int]] = 1,
+    ) -> None:
+        super().__init__()
+        self.conv = nn.Conv2d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            padding=padding,
+            bias=bias,
+            dilation=dilation,
+        )
+        self.bn = nn.BatchNorm2d(out_channels)
+        self.activation = nn.ReLU()
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        output = self.conv(input)
+        output = self.bn(output)
+        output = self.activation(output)
+
+        return output
+
+
+class ViTMAEPyramidPoolingBlock(nn.Module):
+    def __init__(self, pool_scale: int, in_channels: int, channels: int) -> None:
+        super().__init__()
+        self.layers = [
+            nn.AdaptiveAvgPool2d(pool_scale),
+            ViTMAEConvModule(in_channels, channels, kernel_size=1),
+        ]
+        for i, layer in enumerate(self.layers):
+            self.add_module(str(i), layer)
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        hidden_state = input
+        for layer in self.layers:
+            hidden_state = layer(hidden_state)
+        return hidden_state
+
+
+class ViTMAEPyramidPoolingModule(nn.Module):
+    """
+    Pyramid Pooling Module (PPM) used in PSPNet.
+
+    Args:
+        pool_scales (tuple[int]): Pooling scales used in Pooling Pyramid
+            Module.
+        in_channels (int): Input channels.
+        channels (int): Channels after modules, before conv_seg.
+        align_corners (bool): align_corners argument of F.interpolate.
+
+    Based on OpenMMLab's implementation, found in https://github.com/open-mmlab/mmsegmentation.
+    """
+
+    def __init__(self, pool_scales: Tuple[int, ...], in_channels: int, channels: int, align_corners: bool) -> None:
+        super().__init__()
+        self.pool_scales = pool_scales
+        self.align_corners = align_corners
+        self.in_channels = in_channels
+        self.channels = channels
+        self.blocks = []
+        for i, pool_scale in enumerate(pool_scales):
+            block = ViTMAEPyramidPoolingBlock(pool_scale=pool_scale, in_channels=in_channels, channels=channels)
+            self.blocks.append(block)
+            self.add_module(str(i), block)
+
+    def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
+        ppm_outs = []
+        for ppm in self.blocks:
+            ppm_out = ppm(x)
+            upsampled_ppm_out = nn.functional.interpolate(
+                ppm_out, size=x.size()[2:], mode="bilinear", align_corners=self.align_corners
+            )
+            ppm_outs.append(upsampled_ppm_out)
+        return ppm_outs
+
+
+class ViTMAEUperHead(nn.Module):
+    """
+    Unified Perceptual Parsing for Scene Understanding. This head is the implementation of
+    [UPerNet](https://arxiv.org/abs/1807.10221).
+
+    Based on OpenMMLab's implementation, found in https://github.com/open-mmlab/mmsegmentation.
+    """
+
+    def __init__(self, config: ViTMAEConfig) -> None:
+        super().__init__()
+
+        self.pool_scales = config.pool_scales  # e.g. (1, 2, 3, 6)
+        self.in_channels = [config.hidden_size] * 4  # e.g. [768, 768, 768, 768]
+        self.channels = config.hidden_size
+        self.align_corners = False
+        self.classifier = nn.Conv2d(self.channels, config.num_labels, kernel_size=1)
+
+        # PSP Module
+        self.psp_modules = ViTMAEPyramidPoolingModule(
+            self.pool_scales,
+            self.in_channels[-1],
+            self.channels,
+            align_corners=self.align_corners,
+        )
+        self.bottleneck = ViTMAEConvModule(
+            self.in_channels[-1] + len(self.pool_scales) * self.channels,
+            self.channels,
+            kernel_size=3,
+            padding=1,
+        )
+        # FPN Module
+        self.lateral_convs = nn.ModuleList()
+        self.fpn_convs = nn.ModuleList()
+        for in_channels in self.in_channels[:-1]:  # skip the top layer
+            l_conv = ViTMAEConvModule(in_channels, self.channels, kernel_size=1)
+            fpn_conv = ViTMAEConvModule(self.channels, self.channels, kernel_size=3, padding=1)
+            self.lateral_convs.append(l_conv)
+            self.fpn_convs.append(fpn_conv)
+
+        self.fpn_bottleneck = ViTMAEConvModule(
+            len(self.in_channels) * self.channels,
+            self.channels,
+            kernel_size=3,
+            padding=1,
+        )
+
+    def psp_forward(self, inputs):
+        x = inputs[-1]
+        psp_outs = [x]
+        psp_outs.extend(self.psp_modules(x))
+        psp_outs = torch.cat(psp_outs, dim=1)
+        output = self.bottleneck(psp_outs)
+
+        return output
+
+    def forward(self, encoder_hidden_states: torch.Tensor) -> torch.Tensor:
+        # build laterals
+        laterals = [lateral_conv(encoder_hidden_states[i]) for i, lateral_conv in enumerate(self.lateral_convs)]
+
+        laterals.append(self.psp_forward(encoder_hidden_states))
+
+        # build top-down path
+        used_backbone_levels = len(laterals)
+        for i in range(used_backbone_levels - 1, 0, -1):
+            prev_shape = laterals[i - 1].shape[2:]
+            laterals[i - 1] = laterals[i - 1] + nn.functional.interpolate(
+                laterals[i], size=prev_shape, mode="bilinear", align_corners=self.align_corners
+            )
+
+        # build outputs
+        fpn_outs = [self.fpn_convs[i](laterals[i]) for i in range(used_backbone_levels - 1)]
+        # append psp feature
+        fpn_outs.append(laterals[-1])
+
+        for i in range(used_backbone_levels - 1, 0, -1):
+            fpn_outs[i] = nn.functional.interpolate(
+                fpn_outs[i], size=fpn_outs[0].shape[2:], mode="bilinear", align_corners=self.align_corners
+            )
+        fpn_outs = torch.cat(fpn_outs, dim=1)
+        output = self.fpn_bottleneck(fpn_outs)
+        output = self.classifier(output)
+
+        return output
+
+
+class ViTMAEFCNHead(nn.Module):
+    """
+    Fully Convolution Networks for Semantic Segmentation. This head is implemented of
+    [FCNNet](https://arxiv.org/abs/1411.4038>).
+
+    Args:
+        config (ViTMAEConfig): Configuration.
+        in_channels
+        kernel_size (int): The kernel size for convs in the head. Default: 3.
+        dilation (int): The dilation rate for convs in the head. Default: 1.
+
+
+    Based on OpenMMLab's implementation, found in https://github.com/open-mmlab/mmsegmentation.
+    """
+
+    def __init__(
+        self, config: ViTMAEConfig, in_index: int = 2, kernel_size: int = 3, dilation: Union[int, Tuple[int, int]] = 1
+    ) -> None:
+        super().__init__()
+        self.in_channels = config.hidden_size
+        self.channels = config.auxiliary_channels
+        self.num_convs = config.auxiliary_num_convs
+        self.concat_input = config.auxiliary_concat_input
+        self.in_index = in_index
+
+        conv_padding = (kernel_size // 2) * dilation
+        convs = []
+        convs.append(
+            ViTMAEConvModule(
+                self.in_channels, self.channels, kernel_size=kernel_size, padding=conv_padding, dilation=dilation
+            )
+        )
+        for i in range(self.num_convs - 1):
+            convs.append(
+                ViTMAEConvModule(
+                    self.channels, self.channels, kernel_size=kernel_size, padding=conv_padding, dilation=dilation
+                )
+            )
+        if self.num_convs == 0:
+            self.convs = nn.Identity()
+        else:
+            self.convs = nn.Sequential(*convs)
+        if self.concat_input:
+            self.conv_cat = ViTMAEConvModule(
+                self.in_channels + self.channels, self.channels, kernel_size=kernel_size, padding=kernel_size // 2
+            )
+
+        self.classifier = nn.Conv2d(self.channels, config.num_labels, kernel_size=1)
+
+    def forward(self, encoder_hidden_states: torch.Tensor) -> torch.Tensor:
+        # just take the relevant feature maps
+        hidden_states = encoder_hidden_states[self.in_index]
+        output = self.convs(hidden_states)
+        if self.concat_input:
+            output = self.conv_cat(torch.cat([hidden_states, output], dim=1))
+        output = self.classifier(output)
+        return output
+
+
+class ViTMAEForSemanticSegmentation(ViTMAEPreTrainedModel):
+    def __init__(self, config: ViTMAEConfig) -> None:
+        super().__init__(config)
+
+        self.num_labels = config.num_labels
+        self.vit = ViTMAEModel(config, add_pooling_layer=False)
+
+        # FPNs
+        if len(self.config.out_indices) != 4:
+            raise ValueError(
+                "ViTMAEForSemanticSegmentation requires config.out_indices to be a list of 4 integers, "
+                "specifying which features to use from the backbone. One can use [3, 5, 7, 11] in case of "
+                "a base-sized architecture."
+            )
+        self.fpn1 = nn.Sequential(
+            nn.ConvTranspose2d(config.hidden_size, config.hidden_size, kernel_size=2, stride=2),
+            nn.BatchNorm2d(config.hidden_size),
+            nn.GELU(),
+            nn.ConvTranspose2d(config.hidden_size, config.hidden_size, kernel_size=2, stride=2),
+        )
+        self.fpn2 = nn.Sequential(
+            nn.ConvTranspose2d(config.hidden_size, config.hidden_size, kernel_size=2, stride=2),
+        )
+        self.fpn3 = nn.Identity()
+        self.fpn4 = nn.MaxPool2d(kernel_size=2, stride=2)
+
+        # Semantic segmentation head(s)
+        self.decode_head = ViTMAEUperHead(config)
+        self.auxiliary_head = ViTMAEFCNHead(config) if config.use_auxiliary_head else None
+
+        # Initialize weights and apply final processing
+        self.post_init()
+
+    def compute_loss(self, logits, auxiliary_logits, labels):
+        # upsample logits to the images' original size
+        upsampled_logits = nn.functional.interpolate(
+            logits, size=labels.shape[-2:], mode="bilinear", align_corners=False
+        )
+        if auxiliary_logits is not None:
+            upsampled_auxiliary_logits = nn.functional.interpolate(
+                auxiliary_logits, size=labels.shape[-2:], mode="bilinear", align_corners=False
+            )
+        # compute weighted loss
+        loss_fct = CrossEntropyLoss(ignore_index=self.config.semantic_loss_ignore_index)
+        main_loss = loss_fct(upsampled_logits, labels)
+        loss = main_loss
+        if auxiliary_logits is not None:
+            auxiliary_loss = loss_fct(upsampled_auxiliary_logits, labels)
+            loss += self.config.auxiliary_loss_weight * auxiliary_loss
+
+        return loss
+
+    def forward(
+        self,
+        pixel_values: Optional[torch.Tensor] = None,
+        head_mask: Optional[torch.Tensor] = None,
+        labels: Optional[torch.Tensor] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ) -> Union[tuple, SemanticSegmenterOutput]:
+        r"""
+        labels (`torch.LongTensor` of shape `(batch_size, height, width)`, *optional*):
+            Ground truth semantic segmentation maps for computing the loss. Indices should be in `[0, ...,
+            config.num_labels - 1]`. If `config.num_labels > 1`, a classification loss is computed (Cross-Entropy).
+
+        Returns:
+
+        Examples:
+
+        ```python
+        >>> from transformers import AutoImageProcessor, ViTMAEForSemanticSegmentation
+        >>> from PIL import Image
+        >>> import requests
+
+        >>> url = "http://images.cocodataset.org/val2017/000000039769.jpg"
+        >>> image = Image.open(requests.get(url, stream=True).raw)
+
+        >>> image_processor = AutoImageProcessor.from_pretrained("microsoft/beit-base-finetuned-ade-640-640")
+        >>> model = ViTMAEForSemanticSegmentation.from_pretrained("microsoft/beit-base-finetuned-ade-640-640")
+
+        >>> inputs = image_processor(images=image, return_tensors="pt")
+        >>> outputs = model(**inputs)
+        >>> # logits are of shape (batch_size, num_labels, height, width)
+        >>> logits = outputs.logits
+        ```"""
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        output_hidden_states = (
+            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        )
+
+        outputs = self.vit(
+            pixel_values,
+            head_mask=head_mask,
+            output_attentions=output_attentions,
+            output_hidden_states=True,  # we need the intermediate hidden states
+            return_dict=return_dict,
+        )
+
+        encoder_hidden_states = outputs.hidden_states if return_dict else outputs[1]
+
+        # only keep certain features, and reshape
+        # note that we do +1 as the encoder_hidden_states also includes the initial embeddings
+        features = [feature for idx, feature in enumerate(encoder_hidden_states) if idx + 1 in self.config.out_indices]
+        batch_size = pixel_values.shape[0]
+        patch_resolution = self.config.image_size // self.config.patch_size
+        features = [
+            x[:, 1:, :].permute(0, 2, 1).reshape(batch_size, -1, patch_resolution, patch_resolution) for x in features
+        ]
+
+        # apply FPNs
+        ops = [self.fpn1, self.fpn2, self.fpn3, self.fpn4]
+        for i in range(len(features)):
+            features[i] = ops[i](features[i])
+
+        logits = self.decode_head(features)
+
+        auxiliary_logits = None
+        if self.auxiliary_head is not None:
+            auxiliary_logits = self.auxiliary_head(features)
+
+        loss = None
+        if labels is not None:
+            if self.config.num_labels == 1:
+                raise ValueError("The number of labels should be greater than one")
+            else:
+                loss = self.compute_loss(logits, auxiliary_logits, labels)
+
+        if not return_dict:
+            if output_hidden_states:
+                output = (logits,) + outputs[1:]
+            else:
+                output = (logits,) + outputs[2:]
+            return ((loss,) + output) if loss is not None else output
+
+        return SemanticSegmenterOutput(
+            loss=loss,
+            logits=logits,
+            hidden_states=outputs.hidden_states if output_hidden_states else None,
             attentions=outputs.attentions,
         )
