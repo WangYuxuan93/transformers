@@ -15,7 +15,6 @@
 
 import argparse
 import copy
-import glob
 import os
 import random
 from dataclasses import dataclass
@@ -32,7 +31,8 @@ COMMON_ENV_VARIABLES = {
     "RUN_PT_TF_CROSS_TESTS": False,
     "RUN_PT_FLAX_CROSS_TESTS": False,
 }
-COMMON_PYTEST_OPTIONS = {"max-worker-restart": 0, "dist": "loadfile", "s": None}
+# Disable the use of {"s": None} as the output is way too long, causing the navigation on CircleCI impractical
+COMMON_PYTEST_OPTIONS = {"max-worker-restart": 0, "dist": "loadfile"}
 DEFAULT_DOCKER_IMAGE = [{"image": "cimg/python:3.8.12"}]
 
 
@@ -86,6 +86,11 @@ class CircleCIJob:
     def to_dict(self):
         env = COMMON_ENV_VARIABLES.copy()
         env.update(self.additional_env)
+
+        cache_branch_prefix = os.environ.get("CIRCLE_BRANCH", "pull")
+        if cache_branch_prefix != "main":
+            cache_branch_prefix = "pull"
+
         job = {
             "working_directory": self.working_directory,
             "docker": self.docker_image,
@@ -101,25 +106,32 @@ class CircleCIJob:
             {
                 "restore_cache": {
                     "keys": [
-                        f"v{self.cache_version}-{self.cache_name}-" + '{{ checksum "setup.py" }}',
-                        f"v{self.cache_version}-{self.cache_name}-",
+                        # check the fully-matched cache first
+                        f"v{self.cache_version}-{self.cache_name}-{cache_branch_prefix}-pip-" + '{{ checksum "setup.py" }}',
+                        # try the partially-matched cache from `main`
+                        f"v{self.cache_version}-{self.cache_name}-main-pip-",
+                        # try the general partially-matched cache
+                        f"v{self.cache_version}-{self.cache_name}-{cache_branch_prefix}-pip-",
                     ]
                 }
             },
             {
                 "restore_cache": {
                     "keys": [
-                        f"v{self.cache_version}-{self.cache_name}-" + '{{ checksum "setup.py" }}-site-packages',
-                        f"v{self.cache_version}-{self.cache_name}-site-packages",
+                        f"v{self.cache_version}-{self.cache_name}-{cache_branch_prefix}-site-packages-" + '{{ checksum "setup.py" }}',
+                        f"v{self.cache_version}-{self.cache_name}-main-site-packages-",
+                        f"v{self.cache_version}-{self.cache_name}-{cache_branch_prefix}-site-packages-",
                     ]
                 }
             },
         ]
         steps.extend([{"run": l} for l in self.install_steps])
+        steps.extend([{"run": 'pip install "fsspec>=2023.5.0,<2023.10.0"'}])
+        steps.extend([{"run": "pip install pytest-subtests"}])
         steps.append(
             {
                 "save_cache": {
-                    "key": f"v{self.cache_version}-{self.cache_name}-" + '{{ checksum "setup.py" }}',
+                    "key": f"v{self.cache_version}-{self.cache_name}-{cache_branch_prefix}-pip-" + '{{ checksum "setup.py" }}',
                     "paths": ["~/.cache/pip"],
                 }
             }
@@ -127,7 +139,7 @@ class CircleCIJob:
         steps.append(
             {
                 "save_cache": {
-                    "key": f"v{self.cache_version}-{self.cache_name}-" + '{{ checksum "setup.py" }}-site-packages',
+                    "key": f"v{self.cache_version}-{self.cache_name}-{cache_branch_prefix}-site-packages-" + '{{ checksum "setup.py" }}',
                     "paths": ["~/.pyenv/versions/"],
                 }
             }
@@ -140,10 +152,13 @@ class CircleCIJob:
         pytest_flags.append(
             f"--make-reports={self.name}" if "examples" in self.name else f"--make-reports=tests_{self.name}"
         )
+
+        steps.append({"run": {"name": "Create `test-results` directory", "command": "mkdir test-results"}})
+
         test_command = ""
         if self.command_timeout:
             test_command = f"timeout {self.command_timeout} "
-        test_command += f"python -m pytest -n {self.pytest_num_workers} " + " ".join(pytest_flags)
+        test_command += f"python -m pytest --junitxml=test-results/junit.xml -n {self.pytest_num_workers} " + " ".join(pytest_flags)
 
         if self.parallelism == 1:
             if self.tests_to_run is None:
@@ -212,18 +227,40 @@ class CircleCIJob:
             # failure.
             test_command = f"({test_command}) || true"
         else:
-            test_command += " | tee tests_output.txt"
+            test_command += " || true"
         steps.append({"run": {"name": "Run tests", "command": test_command}})
+
+        # Deal with errors
+        check_test_command = f'if [ -s reports/{self.job_name}/errors.txt ]; '
+        check_test_command += 'then echo "Some tests errored out!"; echo ""; '
+        check_test_command += f'cat reports/{self.job_name}/errors.txt; '
+        check_test_command += 'echo ""; echo ""; '
+
+        py_command = f'import os; fp = open("reports/{self.job_name}/summary_short.txt"); failed = os.linesep.join([x for x in fp.read().split(os.linesep) if x.startswith("ERROR ")]); fp.close(); fp = open("summary_short.txt", "w"); fp.write(failed); fp.close()'
+        check_test_command += f"$(python3 -c '{py_command}'); "
+        check_test_command += 'cat summary_short.txt; echo ""; exit -1; '
+
+        # Deeal with failed tests
+        check_test_command += f'elif [ -s reports/{self.job_name}/failures_short.txt ]; '
+        check_test_command += 'then echo "Some tests failed!"; echo ""; '
+        check_test_command += f'cat reports/{self.job_name}/failures_short.txt; '
+        check_test_command += 'echo ""; echo ""; '
+
+        py_command = f'import os; fp = open("reports/{self.job_name}/summary_short.txt"); failed = os.linesep.join([x for x in fp.read().split(os.linesep) if x.startswith("FAILED ")]); fp.close(); fp = open("summary_short.txt", "w"); fp.write(failed); fp.close()'
+        check_test_command += f"$(python3 -c '{py_command}'); "
+        check_test_command += 'cat summary_short.txt; echo ""; exit -1; '
+
+        check_test_command += f'elif [ -s reports/{self.job_name}/stats.txt ]; then echo "All tests pass!"; '
 
         # return code `124` means the previous (pytest run) step is timeout
         if self.name == "pr_documentation_tests":
-            checkout_doctest_command = 'if [ -s reports/tests_pr_documentation_tests/failures_short.txt ]; '
-            checkout_doctest_command += 'then echo "some test failed"; '
-            checkout_doctest_command += 'cat reports/tests_pr_documentation_tests/failures_short.txt; '
-            checkout_doctest_command += 'cat reports/tests_pr_documentation_tests/summary_short.txt; exit -1; '
-            checkout_doctest_command += 'elif [ -s reports/tests_pr_documentation_tests/stats.txt ]; then echo "All tests pass!"; '
-            checkout_doctest_command += 'elif [ -f 124.txt ]; then echo "doctest timeout!"; else echo "other fatal error)"; exit -1; fi;'
-            steps.append({"run": {"name": "Check doctest results", "command": checkout_doctest_command}})
+            check_test_command += 'elif [ -f 124.txt ]; then echo "doctest timeout!"; '
+
+        check_test_command += 'else echo "other fatal error"; echo ""; exit -1; fi;'
+
+        steps.append({"run": {"name": "Check test results", "command": check_test_command}})
+
+        steps.append({"store_test_results": {"path": "test-results"}})
 
         steps.append({"store_artifacts": {"path": "~/transformers/tests_output.txt"}})
         steps.append({"store_artifacts": {"path": "~/transformers/reports"}})
@@ -245,7 +282,7 @@ torch_and_tf_job = CircleCIJob(
         "pip install --upgrade --upgrade-strategy eager pip",
         "pip install -U --upgrade-strategy eager .[sklearn,tf-cpu,torch,testing,sentencepiece,torch-speech,vision]",
         "pip install -U --upgrade-strategy eager tensorflow_probability",
-        "pip install -U --upgrade-strategy eager git+https://github.com/huggingface/accelerate",
+        "pip install -U --upgrade-strategy eager -e git+https://github.com/huggingface/accelerate@main#egg=accelerate",
     ],
     marker="is_pt_tf_cross_test",
     pytest_options={"rA": None, "durations": 0},
@@ -259,7 +296,7 @@ torch_and_flax_job = CircleCIJob(
         "sudo apt-get -y update && sudo apt-get install -y libsndfile1-dev espeak-ng",
         "pip install -U --upgrade-strategy eager --upgrade pip",
         "pip install -U --upgrade-strategy eager .[sklearn,flax,torch,testing,sentencepiece,torch-speech,vision]",
-        "pip install -U --upgrade-strategy eager git+https://github.com/huggingface/accelerate",
+        "pip install -U --upgrade-strategy eager -e git+https://github.com/huggingface/accelerate@main#egg=accelerate",
     ],
     marker="is_pt_flax_cross_test",
     pytest_options={"rA": None, "durations": 0},
@@ -272,10 +309,10 @@ torch_job = CircleCIJob(
         "sudo apt-get -y update && sudo apt-get install -y libsndfile1-dev espeak-ng time",
         "pip install --upgrade --upgrade-strategy eager pip",
         "pip install -U --upgrade-strategy eager .[sklearn,torch,testing,sentencepiece,torch-speech,vision,timm]",
-        "pip install -U --upgrade-strategy eager git+https://github.com/huggingface/accelerate",
+        "pip install -U --upgrade-strategy eager -e git+https://github.com/huggingface/accelerate@main#egg=accelerate",
     ],
     parallelism=1,
-    pytest_num_workers=3,
+    pytest_num_workers=6,
 )
 
 
@@ -288,8 +325,6 @@ tf_job = CircleCIJob(
         "pip install -U --upgrade-strategy eager tensorflow_probability",
     ],
     parallelism=1,
-    pytest_num_workers=6,
-    pytest_options={"rA": None},
 )
 
 
@@ -301,7 +336,6 @@ flax_job = CircleCIJob(
         "pip install -U --upgrade-strategy eager .[flax,testing,sentencepiece,flax-speech,vision]",
     ],
     parallelism=1,
-    pytest_options={"rA": None},
 )
 
 
@@ -313,8 +347,8 @@ pipelines_torch_job = CircleCIJob(
         "pip install --upgrade --upgrade-strategy eager pip",
         "pip install -U --upgrade-strategy eager .[sklearn,torch,testing,sentencepiece,torch-speech,vision,timm,video]",
     ],
-    pytest_options={"rA": None},
     marker="is_pipeline_test",
+    pytest_num_workers=6,
 )
 
 
@@ -327,7 +361,6 @@ pipelines_tf_job = CircleCIJob(
         "pip install -U --upgrade-strategy eager .[sklearn,tf-cpu,testing,sentencepiece,vision]",
         "pip install -U --upgrade-strategy eager tensorflow_probability",
     ],
-    pytest_options={"rA": None},
     marker="is_pipeline_test",
 )
 
@@ -363,13 +396,16 @@ custom_tokenizers_job = CircleCIJob(
 
 examples_torch_job = CircleCIJob(
     "examples_torch",
+    additional_env={"OMP_NUM_THREADS": 8},
     cache_name="torch_examples",
     install_steps=[
         "sudo apt-get -y update && sudo apt-get install -y libsndfile1-dev espeak-ng",
         "pip install --upgrade --upgrade-strategy eager pip",
         "pip install -U --upgrade-strategy eager .[sklearn,torch,sentencepiece,testing,torch-speech]",
         "pip install -U --upgrade-strategy eager -r examples/pytorch/_tests_requirements.txt",
+        "pip install -U --upgrade-strategy eager -e git+https://github.com/huggingface/accelerate@main#egg=accelerate",
     ],
+    pytest_num_workers=1,
 )
 
 
@@ -398,12 +434,13 @@ examples_flax_job = CircleCIJob(
 
 hub_job = CircleCIJob(
     "hub",
+    additional_env={"HUGGINGFACE_CO_STAGING": True},
     install_steps=[
         "sudo apt-get -y update && sudo apt-get install git-lfs",
         'git config --global user.email "ci@dummy.com"',
         'git config --global user.name "ci"',
         "pip install --upgrade --upgrade-strategy eager pip",
-        "pip install -U --upgrade-strategy eager .[torch,sentencepiece,testing]",
+        "pip install -U --upgrade-strategy eager .[torch,sentencepiece,testing,vision]",
     ],
     marker="is_staging_test",
     pytest_num_workers=1,
@@ -433,14 +470,16 @@ exotic_models_job = CircleCIJob(
         "pip install -U --upgrade-strategy eager 'git+https://github.com/facebookresearch/detectron2.git'",
         "sudo apt install tesseract-ocr",
         "pip install -U --upgrade-strategy eager pytesseract",
-        "pip install -U --upgrade-strategy eager natten",
-        # TODO (ydshieh): Remove this line once `https://github.com/facebookresearch/detectron2/issues/5010` is resolved
-        'pip install -U --upgrade-strategy eager "Pillow<10.0.0"',
+        "pip install -U --upgrade-strategy eager 'natten<0.15.0'",
+        "pip install -U --upgrade-strategy eager python-Levenshtein",
+        "pip install -U --upgrade-strategy eager opencv-python",
+        "pip install -U --upgrade-strategy eager nltk",
     ],
     tests_to_run=[
         "tests/models/*layoutlmv*",
         "tests/models/*nat",
         "tests/models/deta",
+        "tests/models/nougat",
     ],
     pytest_num_workers=1,
     pytest_options={"durations": 100},
@@ -473,9 +512,10 @@ doc_test_job = CircleCIJob(
         "sudo apt-get -y update && sudo apt-get install -y libsndfile1-dev espeak-ng time ffmpeg",
         "pip install --upgrade --upgrade-strategy eager pip",
         "pip install -U --upgrade-strategy eager -e .[dev]",
-        "pip install -U --upgrade-strategy eager git+https://github.com/huggingface/accelerate",
+        "pip install -U --upgrade-strategy eager -e git+https://github.com/huggingface/accelerate@main#egg=accelerate",
         "pip install --upgrade --upgrade-strategy eager pytest pytest-sugar",
-        "pip install -U --upgrade-strategy eager natten",
+        "pip install -U --upgrade-strategy eager 'natten<0.15.0'",
+        "pip install -U --upgrade-strategy eager g2p-en",
         "find -name __pycache__ -delete",
         "find . -name \*.pyc -delete",
         # Add an empty file to keep the test step running correctly even no file is selected to be tested.
@@ -580,14 +620,14 @@ def create_circleci_config(folder=None):
     example_file = os.path.join(folder, "examples_test_list.txt")
     if os.path.exists(example_file) and os.path.getsize(example_file) > 0:
         with open(example_file, "r", encoding="utf-8") as f:
-            example_tests = f.read().split(" ")
+            example_tests = f.read()
         for job in EXAMPLES_TESTS:
             framework = job.name.replace("examples_", "").replace("torch", "pytorch")
             if example_tests == "all":
                 job.tests_to_run = [f"examples/{framework}"]
             else:
-                job.tests_to_run = [f for f in example_tests if f.startswith(f"examples/{framework}")]
-            
+                job.tests_to_run = [f for f in example_tests.split(" ") if f.startswith(f"examples/{framework}")]
+
             if len(job.tests_to_run) > 0:
                 jobs.append(job)
 

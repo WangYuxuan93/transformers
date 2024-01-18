@@ -14,7 +14,6 @@
 # limitations under the License.
 """ DETA model configuration"""
 
-import copy
 
 from ...configuration_utils import PretrainedConfig
 from ...utils import logging
@@ -110,6 +109,10 @@ class DetaConfig(PretrainedConfig):
             based on the predictions from the previous layer.
         focal_alpha (`float`, *optional*, defaults to 0.25):
             Alpha parameter in the focal loss.
+        assign_first_stage (`bool`, *optional*, defaults to `True`):
+            Whether to assign each prediction i to the highest overlapping ground truth object if the overlap is larger than a threshold 0.7.
+        assign_second_stage (`bool`, *optional*, defaults to `True`):
+            Whether to assign second assignment procedure in the second stage closely follows the first stage assignment procedure.
 
     Examples:
 
@@ -125,6 +128,7 @@ class DetaConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
+
     model_type = "deta"
     attribute_map = {
         "hidden_size": "d_model",
@@ -161,6 +165,7 @@ class DetaConfig(PretrainedConfig):
         two_stage_num_proposals=300,
         with_box_refine=True,
         assign_first_stage=True,
+        assign_second_stage=True,
         class_cost=1,
         bbox_cost=5,
         giou_cost=2,
@@ -208,6 +213,7 @@ class DetaConfig(PretrainedConfig):
         self.two_stage_num_proposals = two_stage_num_proposals
         self.with_box_refine = with_box_refine
         self.assign_first_stage = assign_first_stage
+        self.assign_second_stage = assign_second_stage
         if two_stage is True and with_box_refine is False:
             raise ValueError("If two_stage is True, with_box_refine must be True.")
         # Hungarian matcher
@@ -230,13 +236,3 @@ class DetaConfig(PretrainedConfig):
     @property
     def hidden_size(self) -> int:
         return self.d_model
-
-    def to_dict(self):
-        """
-        Serializes this instance to a Python dictionary. Override the default [`~PretrainedConfig.to_dict`]. Returns:
-            `Dict[str, any]`: Dictionary of all the attributes that make up this configuration instance,
-        """
-        output = copy.deepcopy(self.__dict__)
-        output["backbone_config"] = self.backbone_config.to_dict()
-        output["model_type"] = self.__class__.model_type
-        return output

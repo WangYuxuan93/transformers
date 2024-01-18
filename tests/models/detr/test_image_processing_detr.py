@@ -18,12 +18,10 @@ import json
 import pathlib
 import unittest
 
-import numpy as np
-
 from transformers.testing_utils import require_torch, require_vision, slow
 from transformers.utils import is_torch_available, is_vision_available
 
-from ...test_image_processing_common import ImageProcessingSavingTestMixin, prepare_image_inputs
+from ...test_image_processing_common import AnnotationFormatTestMixin, ImageProcessingTestMixin, prepare_image_inputs
 
 
 if is_torch_available():
@@ -111,10 +109,25 @@ class DetrImageProcessingTester(unittest.TestCase):
 
         return expected_height, expected_width
 
+    def expected_output_image_shape(self, images):
+        height, width = self.get_expected_values(images, batched=True)
+        return self.num_channels, height, width
+
+    def prepare_image_inputs(self, equal_resolution=False, numpify=False, torchify=False):
+        return prepare_image_inputs(
+            batch_size=self.batch_size,
+            num_channels=self.num_channels,
+            min_resolution=self.min_resolution,
+            max_resolution=self.max_resolution,
+            equal_resolution=equal_resolution,
+            numpify=numpify,
+            torchify=torchify,
+        )
+
 
 @require_torch
 @require_vision
-class DetrImageProcessingTest(ImageProcessingSavingTestMixin, unittest.TestCase):
+class DetrImageProcessingTest(AnnotationFormatTestMixin, ImageProcessingTestMixin, unittest.TestCase):
     image_processing_class = DetrImageProcessor if is_vision_available() else None
 
     def setUp(self):
@@ -146,106 +159,62 @@ class DetrImageProcessingTest(ImageProcessingSavingTestMixin, unittest.TestCase)
         self.assertEqual(image_processor.size, {"shortest_edge": 42, "longest_edge": 84})
         self.assertEqual(image_processor.do_pad, False)
 
-    def test_batch_feature(self):
-        pass
+    def test_should_raise_if_annotation_format_invalid(self):
+        image_processor_dict = self.image_processor_tester.prepare_image_processor_dict()
 
-    def test_call_pil(self):
-        # Initialize image_processing
-        image_processing = self.image_processing_class(**self.image_processor_dict)
-        # create random PIL images
-        image_inputs = prepare_image_inputs(self.image_processor_tester, equal_resolution=False)
-        for image in image_inputs:
-            self.assertIsInstance(image, Image.Image)
+        with open("./tests/fixtures/tests_samples/COCO/coco_annotations.txt", "r") as f:
+            detection_target = json.loads(f.read())
 
-        # Test not batched input
-        encoded_images = image_processing(image_inputs[0], return_tensors="pt").pixel_values
+        annotations = {"image_id": 39769, "annotations": detection_target}
 
-        expected_height, expected_width = self.image_processor_tester.get_expected_values(image_inputs)
+        params = {
+            "images": Image.open("./tests/fixtures/tests_samples/COCO/000000039769.png"),
+            "annotations": annotations,
+            "return_tensors": "pt",
+        }
 
-        self.assertEqual(
-            encoded_images.shape,
-            (1, self.image_processor_tester.num_channels, expected_height, expected_width),
-        )
+        image_processor_params = {**image_processor_dict, **{"format": "_INVALID_FORMAT_"}}
+        image_processor = self.image_processing_class(**image_processor_params)
 
-        # Test batched
-        expected_height, expected_width = self.image_processor_tester.get_expected_values(image_inputs, batched=True)
+        with self.assertRaises(ValueError) as e:
+            image_processor(**params)
 
-        encoded_images = image_processing(image_inputs, return_tensors="pt").pixel_values
-        self.assertEqual(
-            encoded_images.shape,
-            (
-                self.image_processor_tester.batch_size,
-                self.image_processor_tester.num_channels,
-                expected_height,
-                expected_width,
-            ),
-        )
+        self.assertTrue(str(e.exception).startswith("_INVALID_FORMAT_ is not a valid AnnotationFormat"))
 
-    def test_call_numpy(self):
-        # Initialize image_processing
-        image_processing = self.image_processing_class(**self.image_processor_dict)
-        # create random numpy tensors
-        image_inputs = prepare_image_inputs(self.image_processor_tester, equal_resolution=False, numpify=True)
-        for image in image_inputs:
-            self.assertIsInstance(image, np.ndarray)
+    def test_valid_coco_detection_annotations(self):
+        # prepare image and target
+        image = Image.open("./tests/fixtures/tests_samples/COCO/000000039769.png")
+        with open("./tests/fixtures/tests_samples/COCO/coco_annotations.txt", "r") as f:
+            target = json.loads(f.read())
 
-        # Test not batched input
-        encoded_images = image_processing(image_inputs[0], return_tensors="pt").pixel_values
+        params = {"image_id": 39769, "annotations": target}
 
-        expected_height, expected_width = self.image_processor_tester.get_expected_values(image_inputs)
+        # encode them
+        image_processing = DetrImageProcessor.from_pretrained("facebook/detr-resnet-50")
 
-        self.assertEqual(
-            encoded_images.shape,
-            (1, self.image_processor_tester.num_channels, expected_height, expected_width),
-        )
+        # legal encodings (single image)
+        _ = image_processing(images=image, annotations=params, return_tensors="pt")
+        _ = image_processing(images=image, annotations=[params], return_tensors="pt")
 
-        # Test batched
-        encoded_images = image_processing(image_inputs, return_tensors="pt").pixel_values
+        # legal encodings (batch of one image)
+        _ = image_processing(images=[image], annotations=params, return_tensors="pt")
+        _ = image_processing(images=[image], annotations=[params], return_tensors="pt")
 
-        expected_height, expected_width = self.image_processor_tester.get_expected_values(image_inputs, batched=True)
+        # legal encoding (batch of more than one image)
+        n = 5
+        _ = image_processing(images=[image] * n, annotations=[params] * n, return_tensors="pt")
 
-        self.assertEqual(
-            encoded_images.shape,
-            (
-                self.image_processor_tester.batch_size,
-                self.image_processor_tester.num_channels,
-                expected_height,
-                expected_width,
-            ),
-        )
+        # example of an illegal encoding (missing the 'image_id' key)
+        with self.assertRaises(ValueError) as e:
+            image_processing(images=image, annotations={"annotations": target}, return_tensors="pt")
 
-    def test_call_pytorch(self):
-        # Initialize image_processing
-        image_processing = self.image_processing_class(**self.image_processor_dict)
-        # create random PyTorch tensors
-        image_inputs = prepare_image_inputs(self.image_processor_tester, equal_resolution=False, torchify=True)
-        for image in image_inputs:
-            self.assertIsInstance(image, torch.Tensor)
+        self.assertTrue(str(e.exception).startswith("Invalid COCO detection annotations"))
 
-        # Test not batched input
-        encoded_images = image_processing(image_inputs[0], return_tensors="pt").pixel_values
+        # example of an illegal encoding (unequal lengths of images and annotations)
+        with self.assertRaises(ValueError) as e:
+            image_processing(images=[image] * n, annotations=[params] * (n - 1), return_tensors="pt")
 
-        expected_height, expected_width = self.image_processor_tester.get_expected_values(image_inputs)
-
-        self.assertEqual(
-            encoded_images.shape,
-            (1, self.image_processor_tester.num_channels, expected_height, expected_width),
-        )
-
-        # Test batched
-        encoded_images = image_processing(image_inputs, return_tensors="pt").pixel_values
-
-        expected_height, expected_width = self.image_processor_tester.get_expected_values(image_inputs, batched=True)
-
-        self.assertEqual(
-            encoded_images.shape,
-            (
-                self.image_processor_tester.batch_size,
-                self.image_processor_tester.num_channels,
-                expected_height,
-                expected_width,
-            ),
-        )
+        self.assertTrue(str(e.exception) == "The number of images (5) and annotations (4) do not match.")
 
     @slow
     def test_call_pytorch_with_coco_detection_annotations(self):

@@ -15,7 +15,6 @@
 """ Testing suite for the PyTorch CvT model. """
 
 
-import inspect
 import unittest
 from math import floor
 
@@ -55,8 +54,8 @@ class CvtModelTester:
         batch_size=13,
         image_size=64,
         num_channels=3,
-        embed_dim=[16, 48, 96],
-        num_heads=[1, 3, 6],
+        embed_dim=[16, 32, 48],
+        num_heads=[1, 2, 3],
         depth=[1, 2, 10],
         patch_sizes=[7, 3, 3],
         patch_stride=[4, 2, 2],
@@ -190,18 +189,6 @@ class CvtModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
     @unittest.skip(reason="Cvt does not support input and output embeddings")
     def test_model_common_attributes(self):
         pass
-
-    def test_forward_signature(self):
-        config, _ = self.model_tester.prepare_config_and_inputs_for_common()
-
-        for model_class in self.all_model_classes:
-            model = model_class(config)
-            signature = inspect.signature(model.forward)
-            # signature.parameters is an OrderedDict => so arg_names order is deterministic
-            arg_names = [*signature.parameters.keys()]
-
-            expected_arg_names = ["pixel_values"]
-            self.assertListEqual(arg_names[:1], expected_arg_names)
 
     def test_model(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()

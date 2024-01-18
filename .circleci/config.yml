@@ -136,20 +136,20 @@ jobs:
             - checkout
             - restore_cache:
                   keys:
-                      - v0.7-code_quality-{{ checksum "setup.py" }}
-                      - v0.7-code-quality
+                      - v0.7-code_quality-pip-{{ checksum "setup.py" }}
+                      - v0.7-code-quality-pip
             - restore_cache:
                   keys:
-                      - v0.7-code_quality-{{ checksum "setup.py" }}-site-packages
+                      - v0.7-code_quality-site-packages-{{ checksum "setup.py" }}
                       - v0.7-code-quality-site-packages
             - run: pip install --upgrade --upgrade-strategy eager pip
             - run: pip install -U --upgrade-strategy eager .[all,quality]
             - save_cache:
-                  key: v0.7-code_quality-{{ checksum "setup.py" }}
+                  key: v0.7-code_quality-pip-{{ checksum "setup.py" }}
                   paths:
                       - '~/.cache/pip'
             - save_cache:
-                  key: v0.7-code_quality-{{ checksum "setup.py" }}-site-packages
+                  key: v0.7-code_quality-site-packages-{{ checksum "setup.py" }}
                   paths:
                       - '~/.pyenv/versions/'
             - run:
@@ -157,11 +157,10 @@ jobs:
                 command: pip freeze | tee installed.txt
             - store_artifacts:
                   path: ~/transformers/installed.txt
-            - run: black --check examples tests src utils
-            - run: ruff examples tests src utils
+            - run: ruff check examples tests src utils
+            - run: ruff format tests src utils --check
             - run: python utils/custom_init_isort.py --check_only
             - run: python utils/sort_auto_mappings.py --check_only
-            - run: doc-builder style src/transformers docs/source --max_len 119 --check_only --path_to_docs docs/source
             - run: python utils/check_doc_toc.py
 
     check_repository_consistency:
@@ -177,20 +176,20 @@ jobs:
             - checkout
             - restore_cache:
                   keys:
-                      - v0.7-repository_consistency-{{ checksum "setup.py" }}
-                      - v0.7-repository_consistency
+                      - v0.7-repository_consistency-pip-{{ checksum "setup.py" }}
+                      - v0.7-repository_consistency-pip
             - restore_cache:
                   keys:
-                      - v0.7-repository_consistency-{{ checksum "setup.py" }}-site-packages
+                      - v0.7-repository_consistency-site-packages-{{ checksum "setup.py" }}
                       - v0.7-repository_consistency-site-packages
             - run: pip install --upgrade --upgrade-strategy eager pip
             - run: pip install -U --upgrade-strategy eager .[all,quality]
             - save_cache:
-                  key: v0.7-repository_consistency-{{ checksum "setup.py" }}
+                  key: v0.7-repository_consistency-pip-{{ checksum "setup.py" }}
                   paths:
                       - '~/.cache/pip'
             - save_cache:
-                  key: v0.7-repository_consistency-{{ checksum "setup.py" }}-site-packages
+                  key: v0.7-repository_consistency-site-packages-{{ checksum "setup.py" }}
                   paths:
                       - '~/.pyenv/versions/'
             - run:
@@ -209,6 +208,8 @@ jobs:
             - run: make deps_table_check_updated
             - run: python utils/update_metadata.py --check-only
             - run: python utils/check_task_guides.py
+            - run: python utils/check_docstrings.py
+            - run: python utils/check_support_list.py
 
 workflows:
     version: 2

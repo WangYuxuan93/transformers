@@ -68,11 +68,13 @@ Installa le seguenti dipendenze se non lo hai già fatto:
 
 <frameworkcontent>
 <pt>
+
 ```bash
 pip install torch
 ```
 </pt>
 <tf>
+
 ```bash
 pip install tensorflow
 ```
@@ -123,7 +125,7 @@ Crea una [`pipeline`] con il compito che vuoi risolvere e con il modello che vuo
 ... )
 ```
 
-Poi, carica un dataset (vedi 🤗 Datasets [Quick Start](https://huggingface.co/docs/datasets/quickstart.html) per maggiori dettagli) sul quale vuoi iterare. Per esempio, carichiamo il dataset [MInDS-14](https://huggingface.co/datasets/PolyAI/minds14):
+Poi, carica un dataset (vedi 🤗 Datasets [Quick Start](https://huggingface.co/docs/datasets/quickstart) per maggiori dettagli) sul quale vuoi iterare. Per esempio, carichiamo il dataset [MInDS-14](https://huggingface.co/datasets/PolyAI/minds14):
 
 ```py
 >>> from datasets import load_dataset, Audio
@@ -379,6 +381,7 @@ Una caratteristica particolarmente interessante di 🤗 Transformers è la sua a
 
 <frameworkcontent>
 <pt>
+
 ```py
 >>> from transformers import AutoModel
 
@@ -387,6 +390,7 @@ Una caratteristica particolarmente interessante di 🤗 Transformers è la sua a
 ```
 </pt>
 <tf>
+
 ```py
 >>> from transformers import TFAutoModel
 

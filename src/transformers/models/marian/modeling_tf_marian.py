@@ -40,7 +40,6 @@ from ...modeling_tf_utils import (
 )
 from ...tf_utils import check_embeddings_within_bounds, shape_list, stable_softmax
 from ...utils import (
-    ContextManagers,
     add_code_sample_docstrings,
     add_end_docstrings,
     add_start_docstrings,
@@ -328,6 +327,23 @@ class TFMarianAttention(tf.keras.layers.Layer):
 
         return attn_output, attn_weights, past_key_value
 
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "k_proj", None) is not None:
+            with tf.name_scope(self.k_proj.name):
+                self.k_proj.build([None, None, self.embed_dim])
+        if getattr(self, "q_proj", None) is not None:
+            with tf.name_scope(self.q_proj.name):
+                self.q_proj.build([None, None, self.embed_dim])
+        if getattr(self, "v_proj", None) is not None:
+            with tf.name_scope(self.v_proj.name):
+                self.v_proj.build([None, None, self.embed_dim])
+        if getattr(self, "out_proj", None) is not None:
+            with tf.name_scope(self.out_proj.name):
+                self.out_proj.build([None, None, self.embed_dim])
+
 
 # Copied from transformers.models.bart.modeling_tf_bart.TFBartEncoderLayer with Bart->Marian
 class TFMarianEncoderLayer(tf.keras.layers.Layer):
@@ -344,6 +360,7 @@ class TFMarianEncoderLayer(tf.keras.layers.Layer):
         self.fc1 = tf.keras.layers.Dense(config.encoder_ffn_dim, name="fc1")
         self.fc2 = tf.keras.layers.Dense(self.embed_dim, name="fc2")
         self.final_layer_norm = tf.keras.layers.LayerNormalization(epsilon=1e-5, name="final_layer_norm")
+        self.config = config
 
     def call(
         self,
@@ -385,6 +402,26 @@ class TFMarianEncoderLayer(tf.keras.layers.Layer):
 
         return hidden_states, self_attn_weights
 
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "self_attn", None) is not None:
+            with tf.name_scope(self.self_attn.name):
+                self.self_attn.build(None)
+        if getattr(self, "self_attn_layer_norm", None) is not None:
+            with tf.name_scope(self.self_attn_layer_norm.name):
+                self.self_attn_layer_norm.build([None, None, self.embed_dim])
+        if getattr(self, "fc1", None) is not None:
+            with tf.name_scope(self.fc1.name):
+                self.fc1.build([None, None, self.embed_dim])
+        if getattr(self, "fc2", None) is not None:
+            with tf.name_scope(self.fc2.name):
+                self.fc2.build([None, None, self.config.encoder_ffn_dim])
+        if getattr(self, "final_layer_norm", None) is not None:
+            with tf.name_scope(self.final_layer_norm.name):
+                self.final_layer_norm.build([None, None, self.embed_dim])
+
 
 # Copied from transformers.models.bart.modeling_tf_bart.TFBartDecoderLayer with Bart->Marian
 class TFMarianDecoderLayer(tf.keras.layers.Layer):
@@ -414,6 +451,7 @@ class TFMarianDecoderLayer(tf.keras.layers.Layer):
         self.fc1 = tf.keras.layers.Dense(config.decoder_ffn_dim, name="fc1")
         self.fc2 = tf.keras.layers.Dense(self.embed_dim, name="fc2")
         self.final_layer_norm = tf.keras.layers.LayerNormalization(epsilon=1e-5, name="final_layer_norm")
+        self.config = config
 
     def call(
         self,
@@ -494,6 +532,32 @@ class TFMarianDecoderLayer(tf.keras.layers.Layer):
             cross_attn_weights,
             present_key_value,
         )
+
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "self_attn", None) is not None:
+            with tf.name_scope(self.self_attn.name):
+                self.self_attn.build(None)
+        if getattr(self, "self_attn_layer_norm", None) is not None:
+            with tf.name_scope(self.self_attn_layer_norm.name):
+                self.self_attn_layer_norm.build([None, None, self.embed_dim])
+        if getattr(self, "encoder_attn", None) is not None:
+            with tf.name_scope(self.encoder_attn.name):
+                self.encoder_attn.build(None)
+        if getattr(self, "encoder_attn_layer_norm", None) is not None:
+            with tf.name_scope(self.encoder_attn_layer_norm.name):
+                self.encoder_attn_layer_norm.build([None, None, self.embed_dim])
+        if getattr(self, "fc1", None) is not None:
+            with tf.name_scope(self.fc1.name):
+                self.fc1.build([None, None, self.embed_dim])
+        if getattr(self, "fc2", None) is not None:
+            with tf.name_scope(self.fc2.name):
+                self.fc2.build([None, None, self.config.decoder_ffn_dim])
+        if getattr(self, "final_layer_norm", None) is not None:
+            with tf.name_scope(self.final_layer_norm.name):
+                self.final_layer_norm.build([None, None, self.embed_dim])
 
 
 class TFMarianPreTrainedModel(TFPreTrainedModel):
@@ -624,6 +688,10 @@ MARIAN_INPUTS_DOCSTRING = r"""
             If `past_key_values` are used, the user can optionally input only the last `decoder_input_ids` (those that
             don't have their past key value states given to this model) of shape `(batch_size, 1)` instead of all
             `decoder_input_ids` of shape `(batch_size, sequence_length)`.
+        inputs_embeds (`tf.Tensor` of shape `(batch_size, sequence_length, hidden_size)`, *optional*):
+            Optionally, instead of passing `input_ids` you can choose to directly pass an embedded representation.
+            This is useful if you want more control over how to convert `input_ids` indices into associated vectors
+            than the model's internal embedding lookup matrix.
         use_cache (`bool`, *optional*, defaults to `True`):
             If set to `True`, `past_key_values` key value states are returned and can be used to speed up decoding (see
             `past_key_values`). Set to `False` during training, `True` during generation
@@ -743,16 +811,8 @@ class TFMarianEncoder(tf.keras.layers.Layer):
             raise ValueError("You have to specify either input_ids or inputs_embeds")
 
         if inputs_embeds is None:
-            # if `self.embed_tokens.load_weight_prefix` is set, runs the embedding operation with the correct name
-            # scope, so that its weights are registered with the desired name for loading/storing. When `tf.name_scope`
-            # is used with a name ending in `/`, that name replaces the current name scope.
-            # (embeddings with tf.name_scope: self.embed_tokens.load_weight_prefix/self.embed_tokens.name/embeddings:0)
-            context = []
-            if hasattr(self.embed_tokens, "load_weight_prefix"):
-                context.append(tf.name_scope(self.embed_tokens.load_weight_prefix + "/"))
-            with ContextManagers(context):
-                check_embeddings_within_bounds(input_ids, self.embed_tokens.input_dim)
-                inputs_embeds = self.embed_tokens(input_ids) * self.embed_scale
+            check_embeddings_within_bounds(input_ids, self.embed_tokens.input_dim)
+            inputs_embeds = self.embed_tokens(input_ids) * self.embed_scale
 
         embed_pos = self.embed_positions(input_shape)
         hidden_states = inputs_embeds + embed_pos
@@ -805,6 +865,18 @@ class TFMarianEncoder(tf.keras.layers.Layer):
         return TFBaseModelOutput(
             last_hidden_state=hidden_states, hidden_states=encoder_states, attentions=all_attentions
         )
+
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "embed_positions", None) is not None:
+            with tf.name_scope(self.embed_positions.name):
+                self.embed_positions.build(None)
+        if getattr(self, "layers", None) is not None:
+            for layer in self.layers:
+                with tf.name_scope(layer.name):
+                    layer.build(None)
 
 
 @keras_serializable
@@ -907,11 +979,11 @@ class TFMarianDecoder(tf.keras.layers.Layer):
 
                 If `past_key_values` are used, the user can optionally input only the last `decoder_input_ids` (those
                 that don't have their past key value states given to this model) of shape `(batch_size, 1)` instead of
-                all `decoder_input_ids` of shape `(batch_size, sequence_length)`. inputs_embeds (`tf.Tensor` of shape
-                `(batch_size, sequence_length, hidden_size)`, *optional*): Optionally, instead of passing `input_ids`
-                you can choose to directly pass an embedded representation. This is useful if you want more control
-                over how to convert `input_ids` indices into associated vectors than the model's internal embedding
-                lookup matrix.
+                all `decoder_input_ids` of shape `(batch_size, sequence_length)`.
+            inputs_embeds (`tf.Tensor` of shape `(batch_size, sequence_length, hidden_size)`, *optional*):
+                Optionally, instead of passing `input_ids` you can choose to directly pass an embedded representation.
+                This is useful if you want more control over how to convert `input_ids` indices into associated vectors
+                than the model's internal embedding lookup matrix.
             output_attentions (`bool`, *optional*):
                 Whether or not to return the attentions tensors of all attention layers. See `attentions` under
                 returned tensors for more detail. This argument can be used only in eager mode, in graph mode the value
@@ -946,16 +1018,8 @@ class TFMarianDecoder(tf.keras.layers.Layer):
             positions = self.embed_positions(input_shape, position_ids=position_ids)
 
         if inputs_embeds is None:
-            # if `self.embed_tokens.load_weight_prefix` is set, runs the embedding operation with the correct name
-            # scope, so that its weights are registered with the desired name for loading/storing. When `tf.name_scope`
-            # is used with a name ending in `/`, that name replaces the current name scope.
-            # (embeddings with tf.name_scope: self.embed_tokens.load_weight_prefix/self.embed_tokens.name/embeddings:0)
-            context = []
-            if hasattr(self.embed_tokens, "load_weight_prefix"):
-                context.append(tf.name_scope(self.embed_tokens.load_weight_prefix + "/"))
-            with ContextManagers(context):
-                check_embeddings_within_bounds(input_ids, self.embed_tokens.input_dim)
-                inputs_embeds = self.embed_tokens(input_ids) * self.embed_scale
+            check_embeddings_within_bounds(input_ids, self.embed_tokens.input_dim)
+            inputs_embeds = self.embed_tokens(input_ids) * self.embed_scale
 
         hidden_states = inputs_embeds
 
@@ -1037,6 +1101,18 @@ class TFMarianDecoder(tf.keras.layers.Layer):
                 attentions=all_self_attns,
                 cross_attentions=all_cross_attns,
             )
+
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "embed_positions", None) is not None:
+            with tf.name_scope(self.embed_positions.name):
+                self.embed_positions.build(None)
+        if getattr(self, "layers", None) is not None:
+            for layer in self.layers:
+                with tf.name_scope(layer.name):
+                    layer.build(None)
 
 
 @keras_serializable
@@ -1149,6 +1225,22 @@ class TFMarianMainLayer(tf.keras.layers.Layer):
             encoder_attentions=encoder_outputs.attentions,
         )
 
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        # The shared/tied weights expect to be in the model base namespace
+        # Adding "/" to the end (not the start!) of a tf.name_scope puts it in the root namespace rather than
+        # the current one.
+        with tf.name_scope(self.shared.load_weight_prefix + "/" + self.shared.name + "/"):
+            self.shared.build(None)
+        if getattr(self, "encoder", None) is not None:
+            with tf.name_scope(self.encoder.name):
+                self.encoder.build(None)
+        if getattr(self, "decoder", None) is not None:
+            with tf.name_scope(self.decoder.name):
+                self.decoder.build(None)
+
 
 @add_start_docstrings(
     "The bare MARIAN Model outputting raw hidden-states without any specific head on top.",
@@ -1187,13 +1279,13 @@ class TFMarianModel(TFMarianPreTrainedModel):
         past_key_values: Tuple[Tuple[tf.Tensor]] | None = None,
         inputs_embeds: tf.Tensor | None = None,
         decoder_inputs_embeds: tf.Tensor | None = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
+        use_cache: bool | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        return_dict: bool | None = None,
         training: bool = False,
         **kwargs,
-    ):
+    ) -> Tuple[tf.Tensor] | TFSeq2SeqModelOutput:
         outputs = self.model(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -1235,6 +1327,14 @@ class TFMarianModel(TFMarianPreTrainedModel):
             encoder_hidden_states=enc_hs,
             encoder_attentions=enc_attns,
         )
+
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "model", None) is not None:
+            with tf.name_scope(self.model.name):
+                self.model.build(None)
 
 
 # Copied from transformers.models.bart.modeling_tf_bart.BiasLayer
@@ -1311,17 +1411,17 @@ class TFMarianMTModel(TFMarianPreTrainedModel, TFCausalLanguageModelingLoss):
         head_mask: tf.Tensor | None = None,
         decoder_head_mask: tf.Tensor | None = None,
         cross_attn_head_mask: tf.Tensor | None = None,
-        encoder_outputs: Optional[TFBaseModelOutput] = None,
+        encoder_outputs: TFBaseModelOutput | None = None,
         past_key_values: Tuple[Tuple[tf.Tensor]] | None = None,
         inputs_embeds: tf.Tensor | None = None,
         decoder_inputs_embeds: tf.Tensor | None = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
+        use_cache: bool | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        return_dict: bool | None = None,
         labels: tf.Tensor | None = None,
         training: bool = False,
-    ):
+    ) -> Tuple[tf.Tensor] | TFSeq2SeqLMOutput:
         r"""
         labels (`tf.tensor` of shape `(batch_size, sequence_length)`, *optional*):
             Labels for computing the masked language modeling loss. Indices should either be in `[0, ...,
@@ -1444,17 +1544,13 @@ class TFMarianMTModel(TFMarianPreTrainedModel, TFCausalLanguageModelingLoss):
     def prepare_decoder_input_ids_from_labels(self, labels: tf.Tensor):
         return shift_tokens_right(labels, self.config.pad_token_id, self.config.decoder_start_token_id)
 
-    def adjust_logits_during_generation(
-        self, logits, cur_len, max_length, forced_bos_token_id, forced_eos_token_id, **kwargs
-    ):
-        """Never predict pad_token_id. Predict </s> when max_length is reached."""
-        vocab_range = tf.constant(range(self.config.vocab_size))
-        logits = tf.where(vocab_range == self.config.pad_token_id, LARGE_NEGATIVE, logits)
-        if cur_len == 1 and forced_bos_token_id is not None:
-            vocab_range = tf.constant(range(self.config.vocab_size))
-            return tf.where(vocab_range != forced_bos_token_id, LARGE_NEGATIVE, logits)
-        elif cur_len == max_length - 1 and forced_eos_token_id is not None:
-            vocab_range = tf.constant(range(self.config.vocab_size))
-            return tf.where(vocab_range != forced_eos_token_id, LARGE_NEGATIVE, logits)
-        else:
-            return logits
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "model", None) is not None:
+            with tf.name_scope(self.model.name):
+                self.model.build(None)
+        if getattr(self, "bias_layer", None) is not None:
+            with tf.name_scope(self.bias_layer.name):
+                self.bias_layer.build(None)

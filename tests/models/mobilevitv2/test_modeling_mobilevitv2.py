@@ -15,7 +15,6 @@
 """ Testing suite for the PyTorch MobileViTV2 model. """
 
 
-import inspect
 import unittest
 
 from transformers import MobileViTV2Config
@@ -115,6 +114,9 @@ class MobileViTV2ModelTester:
             width_multiplier=self.width_multiplier,
             ffn_dropout=self.ffn_dropout_prob,
             attn_dropout=self.attn_dropout_prob,
+            base_attn_unit_dims=[16, 24, 32],
+            n_attn_blocks=[1, 1, 2],
+            aspp_out_channels=32,
         )
 
     def create_and_check_model(self, config, pixel_values, labels, pixel_labels):
@@ -224,18 +226,6 @@ class MobileViTV2ModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestC
     @unittest.skip(reason="Got `CUDA error: misaligned address` for tests after this one being run.")
     def test_multi_gpu_data_parallel_forward(self):
         pass
-
-    def test_forward_signature(self):
-        config, _ = self.model_tester.prepare_config_and_inputs_for_common()
-
-        for model_class in self.all_model_classes:
-            model = model_class(config)
-            signature = inspect.signature(model.forward)
-            # signature.parameters is an OrderedDict => so arg_names order is deterministic
-            arg_names = [*signature.parameters.keys()]
-
-            expected_arg_names = ["pixel_values"]
-            self.assertListEqual(arg_names[:1], expected_arg_names)
 
     def test_model(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()

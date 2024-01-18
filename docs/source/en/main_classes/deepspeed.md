@@ -168,6 +168,8 @@ If after trying everything suggested you still encounter build issues, please, p
 
 To deploy the DeepSpeed integration adjust the [`Trainer`] command line arguments to include a new argument `--deepspeed ds_config.json`, where `ds_config.json` is the DeepSpeed configuration file as
    documented [here](https://www.deepspeed.ai/docs/config-json/). The file naming is up to you.
+   It's recommended to use DeepSpeed's `add_config_arguments` utility to add the necessary command line arguments to your code.
+   For more information please see [DeepSpeed's Argument Parsing](https://deepspeed.readthedocs.io/en/latest/initialize.html#argument-parsing) doc.
 
 You can use a launcher of your choice here. You can continue using the pytorch launcher:
 
@@ -285,7 +287,7 @@ The information in this section isn't not specific to the DeepSpeed integration 
 
 For the duration of this section let's assume that you have 2 nodes with 8 gpus each. And you can reach the first node with `ssh hostname1` and second node with `ssh hostname2`, and both must be able to reach each other via ssh locally without a password. Of course, you will need to rename these host (node) names to the actual host names you are working with.
 
-#### The torch.distributed.run launcher
+#### The torch.distributed.run(torchrun) launcher
 
 
 For example, to use `torch.distributed.run`, you could do:
@@ -1219,11 +1221,7 @@ Therefore you have two ways to take advantage of this very beneficial feature:
 ### Optimizer and Scheduler
 
 As long as you don't enable `offload_optimizer` you can mix and match DeepSpeed and HuggingFace schedulers and
-optimizers, with the exception of using the combination of HuggingFace scheduler and DeepSpeed optimizer:
-
-| Combos       | HF Scheduler | DS Scheduler |
-| HF Optimizer | Yes          | Yes          |
-| DS Optimizer | No           | Yes          |
+optimizers.
 
 It is possible to use a non-DeepSpeed optimizer when `offload_optimizer` is enabled, as long as it has both CPU and
 GPU implementation (except LAMB).
@@ -1410,7 +1408,7 @@ the full fp32 mode, by explicitly disabling the otherwise default fp16 mixed pre
 ```json
 {
     "fp16": {
-        "enabled": "false",
+        "enabled": false,
     }
 }
 ```
@@ -2051,7 +2049,6 @@ In this case you usually need to raise the value of `initial_scale_power`. Setti
 
 ### Notes
 
-- DeepSpeed works with the PyTorch [`Trainer`] but not TF [`TFTrainer`].
 - While DeepSpeed has a pip installable PyPI package, it is highly recommended that it gets installed from [source](https://github.com/microsoft/deepspeed#installation) to best match your hardware and also if you need to enable
   certain features, like 1-bit Adam, which aren't available in the pypi distribution.
 - You don't have to use the [`Trainer`] to use DeepSpeed with 🤗 Transformers - you can use any model
@@ -2063,20 +2060,20 @@ In this case you usually need to raise the value of `initial_scale_power`. Setti
 
 ## Non-Trainer Deepspeed Integration
 
-The [`~deepspeed.HfDeepSpeedConfig`] is used to integrate Deepspeed into the 🤗 Transformers core
+The [`~integrations.HfDeepSpeedConfig`] is used to integrate Deepspeed into the 🤗 Transformers core
 functionality, when [`Trainer`] is not used. The only thing that it does is handling Deepspeed ZeRO-3 param gathering and automatically splitting the model onto multiple gpus during `from_pretrained` call. Everything else you have to do by yourself.
 
 When using [`Trainer`] everything is automatically taken care of.
 
 When not using [`Trainer`], to efficiently deploy DeepSpeed ZeRO-3, you must instantiate the
-[`~deepspeed.HfDeepSpeedConfig`] object before instantiating the model and keep that object alive.
+[`~integrations.HfDeepSpeedConfig`] object before instantiating the model and keep that object alive.
 
 If you're using Deepspeed ZeRO-1 or ZeRO-2 you don't need to use `HfDeepSpeedConfig` at all.
 
 For example for a pretrained model:
 
 ```python
-from transformers.deepspeed import HfDeepSpeedConfig
+from transformers.integrations import HfDeepSpeedConfig
 from transformers import AutoModel
 import deepspeed
 
@@ -2090,7 +2087,7 @@ engine = deepspeed.initialize(model=model, config_params=ds_config, ...)
 or for non-pretrained model:
 
 ```python
-from transformers.deepspeed import HfDeepSpeedConfig
+from transformers.integrations import HfDeepSpeedConfig
 from transformers import AutoModel, AutoConfig
 import deepspeed
 
@@ -2106,7 +2103,7 @@ Please note that if you're not using the [`Trainer`] integration, you're complet
 
 ## HfDeepSpeedConfig
 
-[[autodoc]] deepspeed.HfDeepSpeedConfig
+[[autodoc]] integrations.HfDeepSpeedConfig
     - all
 
 ### Custom DeepSpeed ZeRO Inference
@@ -2159,7 +2156,7 @@ Make sure to:
 
 
 from transformers import AutoTokenizer, AutoConfig, AutoModelForSeq2SeqLM
-from transformers.deepspeed import HfDeepSpeedConfig
+from transformers.integrations import HfDeepSpeedConfig
 import deepspeed
 import os
 import torch

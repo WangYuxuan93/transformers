@@ -16,6 +16,7 @@
 import importlib
 import json
 import os
+import warnings
 from collections import OrderedDict
 from typing import Dict, Optional, Union
 
@@ -56,39 +57,47 @@ IMAGE_PROCESSOR_MAPPING_NAMES = OrderedDict(
         ("deta", "DetaImageProcessor"),
         ("detr", "DetrImageProcessor"),
         ("dinat", "ViTImageProcessor"),
+        ("dinov2", "BitImageProcessor"),
         ("donut-swin", "DonutImageProcessor"),
         ("dpt", "DPTImageProcessor"),
         ("efficientformer", "EfficientFormerImageProcessor"),
         ("efficientnet", "EfficientNetImageProcessor"),
         ("flava", "FlavaImageProcessor"),
         ("focalnet", "BitImageProcessor"),
+        ("fuyu", "FuyuImageProcessor"),
         ("git", "CLIPImageProcessor"),
         ("glpn", "GLPNImageProcessor"),
         ("groupvit", "CLIPImageProcessor"),
+        ("idefics", "IdeficsImageProcessor"),
         ("imagegpt", "ImageGPTImageProcessor"),
         ("instructblip", "BlipImageProcessor"),
+        ("kosmos-2", "CLIPImageProcessor"),
         ("layoutlmv2", "LayoutLMv2ImageProcessor"),
         ("layoutlmv3", "LayoutLMv3ImageProcessor"),
         ("levit", "LevitImageProcessor"),
+        ("llava", "CLIPImageProcessor"),
         ("mask2former", "Mask2FormerImageProcessor"),
         ("maskformer", "MaskFormerImageProcessor"),
         ("mgp-str", "ViTImageProcessor"),
         ("mobilenet_v1", "MobileNetV1ImageProcessor"),
         ("mobilenet_v2", "MobileNetV2ImageProcessor"),
-        ("mobilenet_v2", "MobileNetV2ImageProcessor"),
         ("mobilevit", "MobileViTImageProcessor"),
         ("mobilevit", "MobileViTImageProcessor"),
         ("mobilevitv2", "MobileViTImageProcessor"),
         ("nat", "ViTImageProcessor"),
+        ("nougat", "NougatImageProcessor"),
         ("oneformer", "OneFormerImageProcessor"),
+        ("owlv2", "Owlv2ImageProcessor"),
         ("owlvit", "OwlViTImageProcessor"),
         ("perceiver", "PerceiverImageProcessor"),
         ("pix2struct", "Pix2StructImageProcessor"),
         ("poolformer", "PoolFormerImageProcessor"),
+        ("pvt", "PvtImageProcessor"),
         ("regnet", "ConvNextImageProcessor"),
         ("resnet", "ConvNextImageProcessor"),
         ("sam", "SamImageProcessor"),
         ("segformer", "SegformerImageProcessor"),
+        ("siglip", "SiglipImageProcessor"),
         ("swiftformer", "ViTImageProcessor"),
         ("swin", "ViTImageProcessor"),
         ("swin2sr", "Swin2SRImageProcessor"),
@@ -96,14 +105,17 @@ IMAGE_PROCESSOR_MAPPING_NAMES = OrderedDict(
         ("table-transformer", "DetrImageProcessor"),
         ("timesformer", "VideoMAEImageProcessor"),
         ("tvlt", "TvltImageProcessor"),
+        ("tvp", "TvpImageProcessor"),
         ("upernet", "SegformerImageProcessor"),
         ("van", "ConvNextImageProcessor"),
         ("videomae", "VideoMAEImageProcessor"),
         ("vilt", "ViltImageProcessor"),
+        ("vipllava", "CLIPImageProcessor"),
         ("vit", "ViTImageProcessor"),
         ("vit_hybrid", "ViTHybridImageProcessor"),
         ("vit_mae", "ViTImageProcessor"),
         ("vit_msn", "ViTImageProcessor"),
+        ("vitmatte", "VitMatteImageProcessor"),
         ("xclip", "CLIPImageProcessor"),
         ("yolos", "YolosImageProcessor"),
     ]
@@ -142,7 +154,7 @@ def get_image_processor_config(
     force_download: bool = False,
     resume_download: bool = False,
     proxies: Optional[Dict[str, str]] = None,
-    use_auth_token: Optional[Union[bool, str]] = None,
+    token: Optional[Union[bool, str]] = None,
     revision: Optional[str] = None,
     local_files_only: bool = False,
     **kwargs,
@@ -171,7 +183,7 @@ def get_image_processor_config(
         proxies (`Dict[str, str]`, *optional*):
             A dictionary of proxy servers to use by protocol or endpoint, e.g., `{'http': 'foo.bar:3128',
             'http://hostname': 'foo.bar:4012'}.` The proxies are used on each request.
-        use_auth_token (`str` or *bool*, *optional*):
+        token (`str` or *bool*, *optional*):
             The token to use as HTTP bearer authorization for remote files. If `True`, will use the token generated
             when running `huggingface-cli login` (stored in `~/.huggingface`).
         revision (`str`, *optional*, defaults to `"main"`):
@@ -183,7 +195,7 @@ def get_image_processor_config(
 
     <Tip>
 
-    Passing `use_auth_token=True` is required when you want to use a private model.
+    Passing `token=True` is required when you want to use a private model.
 
     </Tip>
 
@@ -205,6 +217,16 @@ def get_image_processor_config(
     image_processor.save_pretrained("image-processor-test")
     image_processor_config = get_image_processor_config("image-processor-test")
     ```"""
+    use_auth_token = kwargs.pop("use_auth_token", None)
+    if use_auth_token is not None:
+        warnings.warn(
+            "The `use_auth_token` argument is deprecated and will be removed in v5 of Transformers. Please use `token` instead.",
+            FutureWarning,
+        )
+        if token is not None:
+            raise ValueError("`token` and `use_auth_token` are both specified. Please set only the argument `token`.")
+        token = use_auth_token
+
     resolved_config_file = get_file_from_repo(
         pretrained_model_name_or_path,
         IMAGE_PROCESSOR_NAME,
@@ -212,7 +234,7 @@ def get_image_processor_config(
         force_download=force_download,
         resume_download=resume_download,
         proxies=proxies,
-        use_auth_token=use_auth_token,
+        token=token,
         revision=revision,
         local_files_only=local_files_only,
     )
@@ -276,7 +298,7 @@ class AutoImageProcessor:
             proxies (`Dict[str, str]`, *optional*):
                 A dictionary of proxy servers to use by protocol or endpoint, e.g., `{'http': 'foo.bar:3128',
                 'http://hostname': 'foo.bar:4012'}.` The proxies are used on each request.
-            use_auth_token (`str` or *bool*, *optional*):
+            token (`str` or *bool*, *optional*):
                 The token to use as HTTP bearer authorization for remote files. If `True`, will use the token generated
                 when running `huggingface-cli login` (stored in `~/.huggingface`).
             revision (`str`, *optional*, defaults to `"main"`):
@@ -299,7 +321,7 @@ class AutoImageProcessor:
 
         <Tip>
 
-        Passing `use_auth_token=True` is required when you want to use a private model.
+        Passing `token=True` is required when you want to use a private model.
 
         </Tip>
 
@@ -314,6 +336,18 @@ class AutoImageProcessor:
         >>> # If image processor files are in a directory (e.g. image processor was saved using *save_pretrained('./test/saved_model/')*)
         >>> # image_processor = AutoImageProcessor.from_pretrained("./test/saved_model/")
         ```"""
+        use_auth_token = kwargs.pop("use_auth_token", None)
+        if use_auth_token is not None:
+            warnings.warn(
+                "The `use_auth_token` argument is deprecated and will be removed in v5 of Transformers. Please use `token` instead.",
+                FutureWarning,
+            )
+            if kwargs.get("token", None) is not None:
+                raise ValueError(
+                    "`token` and `use_auth_token` are both specified. Please set only the argument `token`."
+                )
+            kwargs["token"] = use_auth_token
+
         config = kwargs.pop("config", None)
         trust_remote_code = kwargs.pop("trust_remote_code", None)
         kwargs["_from_auto"] = True
@@ -330,16 +364,20 @@ class AutoImageProcessor:
             feature_extractor_class = config_dict.pop("feature_extractor_type", None)
             if feature_extractor_class is not None:
                 logger.warning(
-                    "Could not find image processor class in the image processor config or the model config. Loading"
-                    " based on pattern matching with the model's feature extractor configuration."
+                    "Could not find image processor class in the image processor config or the model config. Loading "
+                    "based on pattern matching with the model's feature extractor configuration. Please open a "
+                    "PR/issue to update `preprocessor_config.json` to use `image_processor_type` instead of "
+                    "`feature_extractor_type`. This warning will be removed in v4.40."
                 )
                 image_processor_class = feature_extractor_class.replace("FeatureExtractor", "ImageProcessor")
             if "AutoFeatureExtractor" in config_dict.get("auto_map", {}):
                 feature_extractor_auto_map = config_dict["auto_map"]["AutoFeatureExtractor"]
                 image_processor_auto_map = feature_extractor_auto_map.replace("FeatureExtractor", "ImageProcessor")
                 logger.warning(
-                    "Could not find image processor auto map in the image processor config or the model config."
-                    " Loading based on pattern matching with the model's feature extractor configuration."
+                    "Could not find image processor auto map in the image processor config or the model config. "
+                    "Loading based on pattern matching with the model's feature extractor configuration. Please open a "
+                    "PR/issue to update `preprocessor_config.json` to use `AutoImageProcessor` instead of "
+                    "`AutoFeatureExtractor`. This warning will be removed in v4.40."
                 )
 
         # If we don't find the image processor class in the image processor config, let's try the model config.
@@ -365,6 +403,8 @@ class AutoImageProcessor:
                 image_processor_auto_map, pretrained_model_name_or_path, **kwargs
             )
             _ = kwargs.pop("code_revision", None)
+            if os.path.isdir(pretrained_model_name_or_path):
+                image_processor_class.register_for_auto_class()
             return image_processor_class.from_dict(config_dict, **kwargs)
         elif image_processor_class is not None:
             return image_processor_class.from_dict(config_dict, **kwargs)
@@ -380,7 +420,7 @@ class AutoImageProcessor:
         )
 
     @staticmethod
-    def register(config_class, image_processor_class):
+    def register(config_class, image_processor_class, exist_ok=False):
         """
         Register a new image processor for this class.
 
@@ -389,4 +429,4 @@ class AutoImageProcessor:
                 The configuration corresponding to the model to register.
             image_processor_class ([`ImageProcessingMixin`]): The image processor to register.
         """
-        IMAGE_PROCESSOR_MAPPING.register(config_class, image_processor_class)
+        IMAGE_PROCESSOR_MAPPING.register(config_class, image_processor_class, exist_ok=exist_ok)

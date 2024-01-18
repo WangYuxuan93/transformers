@@ -13,15 +13,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+import tempfile
 import unittest
 
 import datasets
 import numpy as np
 import pytest
+from huggingface_hub.file_download import http_get
+from requests import ConnectTimeout, ReadTimeout
 
+from tests.pipelines.test_pipelines_document_question_answering import INVOICE_URL
 from transformers import is_torch_available, is_vision_available
 from transformers.image_utils import ChannelDimension, get_channel_dimension_axis, make_list_of_images
-from transformers.testing_utils import require_torch, require_vision
+from transformers.testing_utils import is_flaky, require_torch, require_vision
 
 
 if is_torch_available():
@@ -478,6 +483,17 @@ class ImageFeatureExtractionTester(unittest.TestCase):
 
 @require_vision
 class LoadImageTester(unittest.TestCase):
+    def test_load_img_url(self):
+        img = load_image(INVOICE_URL)
+        img_arr = np.array(img)
+
+        self.assertEqual(img_arr.shape, (1061, 750, 3))
+
+    @is_flaky()
+    def test_load_img_url_timeout(self):
+        with self.assertRaises((ReadTimeout, ConnectTimeout)):
+            load_image(INVOICE_URL, timeout=0.001)
+
     def test_load_img_local(self):
         img = load_image("./tests/fixtures/tests_samples/COCO/000000039769.png")
         img_arr = np.array(img)
@@ -487,10 +503,46 @@ class LoadImageTester(unittest.TestCase):
             (480, 640, 3),
         )
 
-    def test_load_img_rgba(self):
-        dataset = datasets.load_dataset("hf-internal-testing/fixtures_image_utils", "image", split="test")
+    def test_load_img_base64_prefix(self):
+        try:
+            tmp_file = tempfile.mktemp()
+            with open(tmp_file, "wb") as f:
+                http_get(
+                    "https://huggingface.co/datasets/hf-internal-testing/dummy-base64-images/raw/main/image_0.txt", f
+                )
 
-        img = load_image(dataset[0]["file"])  # img with mode RGBA
+            with open(tmp_file, encoding="utf-8") as b64:
+                img = load_image(b64.read())
+                img_arr = np.array(img)
+
+        finally:
+            os.remove(tmp_file)
+
+        self.assertEqual(img_arr.shape, (64, 32, 3))
+
+    def test_load_img_base64(self):
+        try:
+            tmp_file = tempfile.mktemp()
+            with open(tmp_file, "wb") as f:
+                http_get(
+                    "https://huggingface.co/datasets/hf-internal-testing/dummy-base64-images/raw/main/image_1.txt", f
+                )
+
+            with open(tmp_file, encoding="utf-8") as b64:
+                img = load_image(b64.read())
+                img_arr = np.array(img)
+
+        finally:
+            os.remove(tmp_file)
+
+        self.assertEqual(img_arr.shape, (64, 32, 3))
+
+    def test_load_img_rgba(self):
+        # we use revision="refs/pr/1" until the PR is merged
+        # https://hf.co/datasets/hf-internal-testing/fixtures_image_utils/discussions/1
+        dataset = datasets.load_dataset("hf-internal-testing/fixtures_image_utils", split="test", revision="refs/pr/1")
+
+        img = load_image(dataset[0]["image"])  # img with mode RGBA
         img_arr = np.array(img)
 
         self.assertEqual(
@@ -499,9 +551,11 @@ class LoadImageTester(unittest.TestCase):
         )
 
     def test_load_img_la(self):
-        dataset = datasets.load_dataset("hf-internal-testing/fixtures_image_utils", "image", split="test")
+        # we use revision="refs/pr/1" until the PR is merged
+        # https://hf.co/datasets/hf-internal-testing/fixtures_image_utils/discussions/1
+        dataset = datasets.load_dataset("hf-internal-testing/fixtures_image_utils", split="test", revision="refs/pr/1")
 
-        img = load_image(dataset[1]["file"])  # img with mode LA
+        img = load_image(dataset[1]["image"])  # img with mode LA
         img_arr = np.array(img)
 
         self.assertEqual(
@@ -510,9 +564,11 @@ class LoadImageTester(unittest.TestCase):
         )
 
     def test_load_img_l(self):
-        dataset = datasets.load_dataset("hf-internal-testing/fixtures_image_utils", "image", split="test")
+        # we use revision="refs/pr/1" until the PR is merged
+        # https://hf.co/datasets/hf-internal-testing/fixtures_image_utils/discussions/1
+        dataset = datasets.load_dataset("hf-internal-testing/fixtures_image_utils", split="test", revision="refs/pr/1")
 
-        img = load_image(dataset[2]["file"])  # img with mode L
+        img = load_image(dataset[2]["image"])  # img with mode L
         img_arr = np.array(img)
 
         self.assertEqual(
@@ -521,10 +577,11 @@ class LoadImageTester(unittest.TestCase):
         )
 
     def test_load_img_exif_transpose(self):
-        dataset = datasets.load_dataset("hf-internal-testing/fixtures_image_utils", "image", split="test")
-        img_file = dataset[3]["file"]
+        # we use revision="refs/pr/1" until the PR is merged
+        # https://hf.co/datasets/hf-internal-testing/fixtures_image_utils/discussions/1
+        dataset = datasets.load_dataset("hf-internal-testing/fixtures_image_utils", split="test", revision="refs/pr/1")
 
-        img_without_exif_transpose = PIL.Image.open(img_file)
+        img_without_exif_transpose = dataset[3]["image"]
         img_arr_without_exif_transpose = np.array(img_without_exif_transpose)
 
         self.assertEqual(
@@ -532,7 +589,7 @@ class LoadImageTester(unittest.TestCase):
             (333, 500, 3),
         )
 
-        img_with_exif_transpose = load_image(img_file)
+        img_with_exif_transpose = load_image(dataset[3]["image"])
         img_arr_with_exif_transpose = np.array(img_with_exif_transpose)
 
         self.assertEqual(
@@ -565,6 +622,10 @@ class UtilFunctionTester(unittest.TestCase):
         # Test we fail if neither first not last dimension is of size 3 or 1
         with pytest.raises(ValueError):
             infer_channel_dimension_format(np.random.randint(0, 256, (10, 1, 50)))
+
+        # But if we explicitly set one of the number of channels to 50 it works
+        inferred_dim = infer_channel_dimension_format(np.random.randint(0, 256, (10, 1, 50)), num_channels=50)
+        self.assertEqual(inferred_dim, ChannelDimension.LAST)
 
         # Test we correctly identify the channel dimension
         image = np.random.randint(0, 256, (3, 4, 5))

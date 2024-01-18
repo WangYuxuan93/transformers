@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # Load pretrained instances with an AutoClass
 
-With so many different Transformer architectures, it can be challenging to create one for your checkpoint. As a part of 🤗 Transformers core philosophy to make the library easy, simple and flexible to use, an `AutoClass` automatically infer and load the correct architecture from a given checkpoint. The `from_pretrained()` method lets you quickly load a pretrained model for any architecture so you don't have to devote time and resources to train a model from scratch. Producing this type of checkpoint-agnostic code means if your code works for one checkpoint, it will work with another checkpoint - as long as it was trained for a similar task - even if the architecture is different.
+With so many different Transformer architectures, it can be challenging to create one for your checkpoint. As a part of 🤗 Transformers core philosophy to make the library easy, simple and flexible to use, an `AutoClass` automatically infers and loads the correct architecture from a given checkpoint. The `from_pretrained()` method lets you quickly load a pretrained model for any architecture so you don't have to devote time and resources to train a model from scratch. Producing this type of checkpoint-agnostic code means if your code works for one checkpoint, it will work with another checkpoint - as long as it was trained for a similar task - even if the architecture is different.
 
 <Tip>
 
@@ -31,6 +31,7 @@ In this tutorial, learn to:
 * Load a pretrained feature extractor.
 * Load a pretrained processor.
 * Load a pretrained model.
+* Load a model as a backbone.
 
 ## AutoTokenizer
 
@@ -95,7 +96,7 @@ Load a processor with [`AutoProcessor.from_pretrained`]:
 
 <frameworkcontent>
 <pt>
-Finally, the `AutoModelFor` classes let you load a pretrained model for a given task (see [here](model_doc/auto) for a complete list of available tasks). For example, load a model for sequence classification with [`AutoModelForSequenceClassification.from_pretrained`]:
+The `AutoModelFor` classes let you load a pretrained model for a given task (see [here](model_doc/auto) for a complete list of available tasks). For example, load a model for sequence classification with [`AutoModelForSequenceClassification.from_pretrained`]:
 
 ```py
 >>> from transformers import AutoModelForSequenceClassification
@@ -141,3 +142,24 @@ Easily reuse the same checkpoint to load an architecture for a different task:
 Generally, we recommend using the `AutoTokenizer` class and the `TFAutoModelFor` class to load pretrained instances of models. This will ensure you load the correct architecture every time. In the next [tutorial](preprocessing), learn how to use your newly loaded tokenizer, image processor, feature extractor and processor to preprocess a dataset for fine-tuning.
 </tf>
 </frameworkcontent>
+
+## AutoBackbone
+
+`AutoBackbone` lets you use pretrained models as backbones and get feature maps as outputs from different stages of the models. Below you can see how to get feature maps from a [Swin](model_doc/swin) checkpoint.
+
+```py
+>>> from transformers import AutoImageProcessor, AutoBackbone
+>>> import torch
+>>> from PIL import Image
+>>> import requests
+>>> url = "http://images.cocodataset.org/val2017/000000039769.jpg"
+>>> image = Image.open(requests.get(url, stream=True).raw)
+>>> processor = AutoImageProcessor.from_pretrained("microsoft/swin-tiny-patch4-window7-224")
+>>> model = AutoBackbone.from_pretrained("microsoft/swin-tiny-patch4-window7-224", out_indices=(0,))
+
+>>> inputs = processor(image, return_tensors="pt")
+>>> outputs = model(**inputs)
+>>> feature_maps = outputs.feature_maps
+>>> list(feature_maps[-1].shape)
+[1, 96, 56, 56]
+```

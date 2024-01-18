@@ -68,11 +68,13 @@ Installieren Sie die folgenden Abhängigkeiten, falls Sie dies nicht bereits get
 
 <frameworkcontent>
 <pt>
+
 ```bash
 pip install torch
 ```
 </pt>
 <tf>
+
 ```bash
 pip install tensorflow
 ```
@@ -119,7 +121,7 @@ Erstellen wir eine [`pipeline`] mit der Aufgabe die wir lösen und dem Modell we
 >>> speech_recognizer = pipeline("automatic-speech-recognition", model="facebook/wav2vec2-base-960h")
 ```
 
-Als nächstes laden wir den Datensatz (siehe 🤗 Datasets [Quick Start](https://huggingface.co/docs/datasets/quickstart.html) für mehr Details) welches wir nutzen möchten. Zum Beispiel laden wir den [MInDS-14](https://huggingface.co/datasets/PolyAI/minds14) Datensatz:
+Als nächstes laden wir den Datensatz (siehe 🤗 Datasets [Quick Start](https://huggingface.co/docs/datasets/quickstart) für mehr Details) welches wir nutzen möchten. Zum Beispiel laden wir den [MInDS-14](https://huggingface.co/datasets/PolyAI/minds14) Datensatz:
 
 ```py
 >>> from datasets import load_dataset, Audio
@@ -226,6 +228,7 @@ Genau wie die [`pipeline`] akzeptiert der Tokenizer eine Liste von Eingaben. Dar
 
 <frameworkcontent>
 <pt>
+
 ```py
 >>> pt_batch = tokenizer(
 ...     ["We are very happy to show you the 🤗 Transformers library.", "We hope you don't hate it."],
@@ -237,6 +240,7 @@ Genau wie die [`pipeline`] akzeptiert der Tokenizer eine Liste von Eingaben. Dar
 ```
 </pt>
 <tf>
+
 ```py
 >>> tf_batch = tokenizer(
 ...     ["We are very happy to show you the 🤗 Transformers library.", "We hope you don't hate it."],
@@ -375,6 +379,7 @@ Ein besonders cooles 🤗 Transformers-Feature ist die Möglichkeit, ein Modell 
 
 <frameworkcontent>
 <pt>
+
 ```py
 >>> from transformers import AutoModel
 
@@ -383,6 +388,7 @@ Ein besonders cooles 🤗 Transformers-Feature ist die Möglichkeit, ein Modell 
 ```
 </pt>
 <tf>
+
 ```py
 >>> from transformers import TFAutoModel
 

@@ -16,12 +16,11 @@
 
 import copy
 import math
-from typing import Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import torch
 from torch import nn
-from torch.nn import CrossEntropyLoss
-from torch.utils.checkpoint import checkpoint
+from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
 from ...activations import ACT2FN
 from ...modeling_outputs import (
@@ -30,6 +29,7 @@ from ...modeling_outputs import (
     Seq2SeqLMOutput,
     Seq2SeqModelOutput,
     Seq2SeqQuestionAnsweringModelOutput,
+    Seq2SeqSequenceClassifierOutput,
 )
 from ...modeling_utils import PreTrainedModel
 from ...utils import (
@@ -451,6 +451,25 @@ class UMT5Block(nn.Module):
         return outputs
 
 
+# Copied from transformers.models.t5.modeling_t5.T5ClassificationHead with T5->UMT5
+class UMT5ClassificationHead(nn.Module):
+    """Head for sentence-level classification tasks."""
+
+    def __init__(self, config: UMT5Config):
+        super().__init__()
+        self.dense = nn.Linear(config.d_model, config.d_model)
+        self.dropout = nn.Dropout(p=config.classifier_dropout)
+        self.out_proj = nn.Linear(config.d_model, config.num_labels)
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        hidden_states = self.dropout(hidden_states)
+        hidden_states = self.dense(hidden_states)
+        hidden_states = torch.tanh(hidden_states)
+        hidden_states = self.dropout(hidden_states)
+        hidden_states = self.out_proj(hidden_states)
+        return hidden_states
+
+
 class UMT5PreTrainedModel(PreTrainedModel):
     """
     An abstract class to handle weights initialization and a simple interface for downloading and loading pretrained
@@ -479,7 +498,15 @@ class UMT5PreTrainedModel(PreTrainedModel):
         factor = self.config.initializer_factor  # Used for testing weights initialization
         if isinstance(module, UMT5LayerNorm):
             module.weight.data.fill_(factor * 1.0)
-        elif isinstance(module, (UMT5Model, UMT5ForConditionalGeneration, UMT5EncoderModel, UMT5ForQuestionAnswering)):
+        elif isinstance(
+            module,
+            (
+                UMT5Model,
+                UMT5ForConditionalGeneration,
+                UMT5EncoderModel,
+                UMT5ForQuestionAnswering,
+            ),
+        ):
             # Mesh TensorFlow embeddings initialization
             # See https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/layers.py#L1624
             module.shared.weight.data.normal_(mean=0.0, std=factor * 1.0)
@@ -488,6 +515,13 @@ class UMT5PreTrainedModel(PreTrainedModel):
             if hasattr(module, "qa_outputs"):
                 module.qa_outputs.weight.data.normal_(mean=0.0, std=factor * ((self.config.d_model) ** -0.5))
                 module.qa_outputs.bias.data.zero_()
+        elif isinstance(module, UMT5ClassificationHead):
+            module.dense.weight.data.normal_(mean=0.0, std=factor * ((self.config.d_model) ** -0.5))
+            if hasattr(module.dense, "bias") and module.dense.bias is not None:
+                module.dense.bias.data.zero_()
+            module.out_proj.weight.data.normal_(mean=0.0, std=factor * ((self.config.d_model) ** -0.5))
+            if hasattr(module.out_proj, "bias") and module.out_proj.bias is not None:
+                module.out_proj.bias.data.zero_()
         elif isinstance(module, UMT5DenseActDense):
             # Mesh TensorFlow FF initialization
             # See https://github.com/tensorflow/mesh/blob/master/mesh_tensorflow/transformer/transformer_layers.py#L56
@@ -521,17 +555,13 @@ class UMT5PreTrainedModel(PreTrainedModel):
             if module.has_relative_attention_bias:
                 module.relative_attention_bias.weight.data.normal_(mean=0.0, std=factor * ((d_model) ** -0.5))
 
-    def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, (UMT5Attention, UMT5Stack)):
-            module.gradient_checkpointing = value
-
     def _shift_right(self, input_ids):
         decoder_start_token_id = self.config.decoder_start_token_id
         pad_token_id = self.config.pad_token_id
 
         if decoder_start_token_id is None:
             raise ValueError(
-                "self.model.config.decoder_start_token_id has to be defined. In UMT5 it is usually set to the pad_token_id."
+                "self.model.config.decoder_start_token_id has to be defined. In UMT5 it is usually set to the pad_token_id. "
                 "See UMT5 docs for more information."
             )
 
@@ -674,15 +704,8 @@ class UMT5Stack(UMT5PreTrainedModel):
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
             if self.gradient_checkpointing and self.training:
-
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        return tuple(module(*inputs, use_cache, output_attentions))
-
-                    return custom_forward
-
-                layer_outputs = checkpoint(
-                    create_custom_forward(layer_module),
+                layer_outputs = self._gradient_checkpointing_func(
+                    layer_module.forward,
                     hidden_states,
                     extended_attention_mask,
                     encoder_hidden_states,
@@ -690,6 +713,8 @@ class UMT5Stack(UMT5PreTrainedModel):
                     layer_head_mask,
                     cross_attn_layer_head_mask,
                     None,  # past_key_value is always None with gradient checkpointing
+                    use_cache,
+                    output_attentions,
                 )
             else:
                 layer_outputs = layer_module(
@@ -915,6 +940,7 @@ class UMT5Model(UMT5PreTrainedModel):
     >>> outputs = model(input_ids=inputs["input_ids"], decoder_input_ids=labels["input_ids"])
     >>> hidden_states = outputs.last_hidden_state
     ```"""
+
     model_type = "uumt5"
     config_class = UMT5Config
     _tied_weights_keys = ["encoder.embed_tokens.weight", "decoder.embed_tokens.weight"]
@@ -947,6 +973,12 @@ class UMT5Model(UMT5PreTrainedModel):
         self.shared = new_embeddings
         self.encoder.set_input_embeddings(new_embeddings)
         self.decoder.set_input_embeddings(new_embeddings)
+
+    # Copied from transformers.models.t5.modeling_t5.T5Model._tie_weights
+    def _tie_weights(self):
+        if self.config.tie_word_embeddings:
+            self._tie_or_clone_weights(self.encoder.embed_tokens, self.shared)
+            self._tie_or_clone_weights(self.decoder.embed_tokens, self.shared)
 
     # Copied from transformers.models.t5.modeling_t5.T5Model.get_encoder
     def get_encoder(self):
@@ -1117,6 +1149,12 @@ class UMT5ForConditionalGeneration(UMT5PreTrainedModel):
         self.encoder.set_input_embeddings(new_embeddings)
         self.decoder.set_input_embeddings(new_embeddings)
 
+    # Copied from transformers.models.t5.modeling_t5.T5ForConditionalGeneration._tie_weights
+    def _tie_weights(self):
+        if self.config.tie_word_embeddings:
+            self._tie_or_clone_weights(self.encoder.embed_tokens, self.shared)
+            self._tie_or_clone_weights(self.decoder.embed_tokens, self.shared)
+
     # Copied from transformers.models.t5.modeling_t5.T5ForConditionalGeneration.set_output_embeddings
     def set_output_embeddings(self, new_embeddings):
         self.lm_head = new_embeddings
@@ -1272,9 +1310,18 @@ class UMT5ForConditionalGeneration(UMT5PreTrainedModel):
         encoder_outputs=None,
         **kwargs,
     ):
-        # cut decoder_input_ids if past is used
+        # cut decoder_input_ids if past_key_values is used
         if past_key_values is not None:
-            input_ids = input_ids[:, -1:]
+            past_length = past_key_values[0][0].shape[2]
+
+            # Some generation methods already pass only the last input ID
+            if input_ids.shape[1] > past_length:
+                remove_prefix_length = past_length
+            else:
+                # Default to old behavior: keep only final ID
+                remove_prefix_length = input_ids.shape[1] - 1
+
+            input_ids = input_ids[:, remove_prefix_length:]
 
         return {
             "decoder_input_ids": input_ids,
@@ -1296,7 +1343,9 @@ class UMT5ForConditionalGeneration(UMT5PreTrainedModel):
     def _reorder_cache(past_key_values, beam_idx):
         reordered_past = ()
         for layer_past in past_key_values:
-            reordered_past += (tuple(past_state.index_select(0, beam_idx) for past_state in layer_past),)
+            reordered_past += (
+                tuple(past_state.index_select(0, beam_idx.to(past_state.device)) for past_state in layer_past),
+            )
         return reordered_past
 
 
@@ -1343,6 +1392,11 @@ class UMT5EncoderModel(UMT5PreTrainedModel):
     def set_input_embeddings(self, new_embeddings):
         self.shared = new_embeddings
         self.encoder.set_input_embeddings(new_embeddings)
+
+    # Copied from transformers.models.t5.modeling_t5.T5EncoderModel._tie_weights
+    def _tie_weights(self):
+        if self.config.tie_word_embeddings:
+            self._tie_or_clone_weights(self.encoder.embed_tokens, self.shared)
 
     # Copied from transformers.models.t5.modeling_t5.T5EncoderModel.get_encoder
     def get_encoder(self):
@@ -1403,6 +1457,140 @@ class UMT5EncoderModel(UMT5PreTrainedModel):
 
 @add_start_docstrings(
     """
+    UMT5 model with a sequence classification/head on top (a linear layer on top of the pooled output) e.g. for GLUE
+    tasks.
+    """,
+    UMT5_START_DOCSTRING,
+)
+class UMT5ForSequenceClassification(UMT5PreTrainedModel):
+    _keys_to_ignore_on_load_unexpected = ["decoder.block.0.layer.1.EncDecAttention.relative_attention_bias.weight"]
+    _tied_weights_keys = ["encoder.embed_tokens.weight", "decoder.embed_tokens.weight"]
+
+    # Copied from transformers.models.t5.modeling_t5.T5ForSequenceClassification.__init__ with T5->UMT5
+    def __init__(self, config: UMT5Config):
+        super().__init__(config)
+        self.transformer = UMT5Model(config)
+        self.classification_head = UMT5ClassificationHead(config)
+
+        # Initialize weights and apply final processing
+        self.post_init()
+
+        self.model_parallel = False
+
+    @add_start_docstrings_to_model_forward(UMT5_INPUTS_DOCSTRING)
+    @replace_return_docstrings(output_type=Seq2SeqSequenceClassifierOutput, config_class=_CONFIG_FOR_DOC)
+    def forward(
+        self,
+        input_ids: torch.LongTensor = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        decoder_input_ids: Optional[torch.LongTensor] = None,
+        decoder_attention_mask: Optional[torch.LongTensor] = None,
+        head_mask: Optional[torch.Tensor] = None,
+        decoder_head_mask: Optional[torch.Tensor] = None,
+        cross_attn_head_mask: Optional[torch.Tensor] = None,
+        encoder_outputs: Optional[List[torch.FloatTensor]] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        decoder_inputs_embeds: Optional[torch.FloatTensor] = None,
+        labels: Optional[torch.LongTensor] = None,
+        use_cache: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ) -> Union[Tuple, Seq2SeqSequenceClassifierOutput]:
+        r"""
+        labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
+            Labels for computing the sequence classification/regression loss. Indices should be in `[0, ...,
+            config.num_labels - 1]`. If `config.num_labels > 1` a classification loss is computed (Cross-Entropy).
+        Returns:
+        """
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        if labels is not None:
+            use_cache = False
+
+        if input_ids is None and inputs_embeds is not None:
+            raise NotImplementedError(
+                f"Passing input embeddings is currently not supported for {self.__class__.__name__}"
+            )
+
+        # Copied from models.bart.modeling_bart.BartModel.forward different to other models, T5 automatically creates
+        # decoder_input_ids from input_ids if no decoder_input_ids are provided
+        if decoder_input_ids is None and decoder_inputs_embeds is None:
+            if input_ids is None:
+                raise ValueError(
+                    "If no `decoder_input_ids` or `decoder_inputs_embeds` are "
+                    "passed, `input_ids` cannot be `None`. Please pass either "
+                    "`input_ids` or `decoder_input_ids` or `decoder_inputs_embeds`."
+                )
+            decoder_input_ids = self._shift_right(input_ids)
+
+        outputs = self.transformer(
+            input_ids,
+            attention_mask=attention_mask,
+            decoder_input_ids=decoder_input_ids,
+            decoder_attention_mask=decoder_attention_mask,
+            head_mask=head_mask,
+            decoder_head_mask=decoder_head_mask,
+            cross_attn_head_mask=cross_attn_head_mask,
+            encoder_outputs=encoder_outputs,
+            inputs_embeds=inputs_embeds,
+            decoder_inputs_embeds=decoder_inputs_embeds,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+        sequence_output = outputs[0]
+
+        eos_mask = input_ids.eq(self.config.eos_token_id).to(sequence_output.device)
+
+        if len(torch.unique_consecutive(eos_mask.sum(1))) > 1:
+            raise ValueError("All examples must have the same number of <eos> tokens.")
+        batch_size, _, hidden_size = sequence_output.shape
+        sentence_representation = sequence_output[eos_mask, :].view(batch_size, -1, hidden_size)[:, -1, :]
+        logits = self.classification_head(sentence_representation)
+
+        loss = None
+        if labels is not None:
+            labels = labels.to(logits.device)
+            if self.config.problem_type is None:
+                if self.config.num_labels == 1:
+                    self.config.problem_type = "regression"
+                elif self.config.num_labels > 1 and (labels.dtype == torch.long or labels.dtype == torch.int):
+                    self.config.problem_type = "single_label_classification"
+                else:
+                    self.config.problem_type = "multi_label_classification"
+
+            if self.config.problem_type == "regression":
+                loss_fct = MSELoss()
+                if self.config.num_labels == 1:
+                    loss = loss_fct(logits.squeeze(), labels.squeeze())
+                else:
+                    loss = loss_fct(logits, labels)
+            elif self.config.problem_type == "single_label_classification":
+                loss_fct = CrossEntropyLoss()
+                loss = loss_fct(logits.view(-1, self.config.num_labels), labels.view(-1))
+            elif self.config.problem_type == "multi_label_classification":
+                loss_fct = BCEWithLogitsLoss()
+                loss = loss_fct(logits, labels)
+        if not return_dict:
+            output = (logits,) + outputs[1:]
+            return ((loss,) + output) if loss is not None else output
+
+        return Seq2SeqSequenceClassifierOutput(
+            loss=loss,
+            logits=logits,
+            past_key_values=outputs.past_key_values,
+            decoder_hidden_states=outputs.decoder_hidden_states,
+            decoder_attentions=outputs.decoder_attentions,
+            cross_attentions=outputs.cross_attentions,
+            encoder_last_hidden_state=outputs.encoder_last_hidden_state,
+            encoder_hidden_states=outputs.encoder_hidden_states,
+            encoder_attentions=outputs.encoder_attentions,
+        )
+
+
+@add_start_docstrings(
+    """
     UMT5 Model with a span classification head on top for extractive question-answering tasks like SQuAD (linear layers
     on top of the hidden-states output to compute `span start logits` and `span end logits`).
     """,
@@ -1444,6 +1632,12 @@ class UMT5ForQuestionAnswering(UMT5PreTrainedModel):
         self.shared = new_embeddings
         self.encoder.set_input_embeddings(new_embeddings)
         self.decoder.set_input_embeddings(new_embeddings)
+
+    # Copied from transformers.models.t5.modeling_t5.T5ForQuestionAnswering._tie_weights
+    def _tie_weights(self):
+        if self.config.tie_word_embeddings:
+            self._tie_or_clone_weights(self.encoder.embed_tokens, self.shared)
+            self._tie_or_clone_weights(self.decoder.embed_tokens, self.shared)
 
     # Copied from transformers.models.t5.modeling_t5.T5ForQuestionAnswering.get_encoder
     def get_encoder(self):

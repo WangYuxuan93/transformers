@@ -96,6 +96,9 @@ class ConfigTester(object):
 
         self.parent.assertEqual(config_second.to_dict(), config_first.to_dict())
 
+        with self.parent.assertRaises(OSError):
+            self.config_class.from_pretrained(f".{tmpdirname}")
+
     def create_and_test_config_from_and_save_pretrained_subfolder(self):
         config_first = self.config_class(**self.inputs_dict)
 
@@ -118,9 +121,11 @@ class ConfigTester(object):
 
     def check_config_can_be_init_without_params(self):
         if self.config_class.is_composition:
-            return
-        config = self.config_class()
-        self.parent.assertIsNotNone(config)
+            with self.parent.assertRaises(ValueError):
+                config = self.config_class()
+        else:
+            config = self.config_class()
+            self.parent.assertIsNotNone(config)
 
     def check_config_arguments_init(self):
         kwargs = copy.deepcopy(config_common_kwargs)

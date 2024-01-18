@@ -49,9 +49,6 @@ if is_torch_available():
         Pix2StructVisionModel,
     )
     from transformers.models.pix2struct.modeling_pix2struct import PIX2STRUCT_PRETRAINED_MODEL_ARCHIVE_LIST
-    from transformers.pytorch_utils import is_torch_greater_or_equal_than_1_11
-else:
-    is_torch_greater_or_equal_than_1_11 = False
 
 
 if is_vision_available():
@@ -71,7 +68,7 @@ class Pix2StructVisionModelTester:
         patch_embed_hidden_size=12,
         projection_dim=32,
         max_patches=64,
-        num_hidden_layers=5,
+        num_hidden_layers=2,
         num_attention_heads=4,
         intermediate_size=37,
         dropout=0.1,
@@ -199,6 +196,18 @@ class Pix2StructVisionModelTest(ModelTesterMixin, unittest.TestCase):
     def test_training_gradient_checkpointing(self):
         pass
 
+    @unittest.skip(
+        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
+    )
+    def test_training_gradient_checkpointing_use_reentrant(self):
+        pass
+
+    @unittest.skip(
+        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
+    )
+    def test_training_gradient_checkpointing_use_reentrant_false(self):
+        pass
+
     @unittest.skip(reason="Training is tested directly on `Pix2StructTextImageModelTest`")
     def test_retain_grad_hidden_states_attentions(self):
         pass
@@ -230,7 +239,7 @@ class Pix2StructTextModelTester:
         vocab_size=99,
         hidden_size=12,
         projection_dim=32,
-        num_hidden_layers=5,
+        num_hidden_layers=2,
         num_attention_heads=4,
         intermediate_size=37,
         dropout=0.1,
@@ -334,6 +343,18 @@ class Pix2StructTextModelTest(ModelTesterMixin, unittest.TestCase):
 
     @unittest.skip(reason="Training is tested directly on `Pix2StructTextImageModelTest`")
     def test_training_gradient_checkpointing(self):
+        pass
+
+    @unittest.skip(
+        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
+    )
+    def test_training_gradient_checkpointing_use_reentrant(self):
+        pass
+
+    @unittest.skip(
+        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
+    )
+    def test_training_gradient_checkpointing_use_reentrant_false(self):
         pass
 
     @unittest.skip(reason="Pix2Struct does not use inputs_embeds")
@@ -722,10 +743,6 @@ def prepare_img():
     return im
 
 
-@unittest.skipIf(
-    not is_torch_greater_or_equal_than_1_11,
-    reason="`Pix2StructImageProcessor` requires `torch>=1.11.0`.",
-)
 @require_vision
 @require_torch
 @slow

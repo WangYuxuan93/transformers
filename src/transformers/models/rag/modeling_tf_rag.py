@@ -224,6 +224,7 @@ class TFRagPreTrainedModel(TFPreTrainedModel):
     generator, the encoder and generator are trainable while the retriever is just an indexed dataset.
 
     """
+
     config_class = RagConfig
     base_model_prefix = "rag"
     _keys_to_ignore_on_load_missing = [r"position_ids"]
@@ -553,19 +554,19 @@ class TFRagModel(TFRagPreTrainedModel):
         encoder_outputs: np.ndarray | tf.Tensor | None = None,
         decoder_input_ids: np.ndarray | tf.Tensor | None = None,
         decoder_attention_mask: np.ndarray | tf.Tensor | None = None,
-        past_key_values: Optional[Tuple[Tuple[Union[np.ndarray, tf.Tensor]]]] = None,
+        past_key_values: Tuple[Tuple[Union[np.ndarray, tf.Tensor]]] | None = None,
         doc_scores: np.ndarray | tf.Tensor | None = None,
         context_input_ids: np.ndarray | tf.Tensor | None = None,
         context_attention_mask: np.ndarray | tf.Tensor | None = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        output_retrieved: Optional[bool] = None,
-        n_docs: Optional[int] = None,
-        return_dict: Optional[bool] = None,
+        use_cache: bool | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        output_retrieved: bool | None = None,
+        n_docs: int | None = None,
+        return_dict: bool | None = None,
         training: bool = False,
         **kwargs,
-    ):
+    ) -> TFRetrievAugLMOutput:
         r"""
         Returns:
 
@@ -719,6 +720,15 @@ class TFRagModel(TFRagPreTrainedModel):
             generator_dec_attentions=gen_outputs.decoder_attentions,
         )
 
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        with tf.name_scope(self.generator.name):
+            self.generator.build(None)
+        with tf.name_scope(self.question_encoder.name):
+            self.question_encoder.build(None)
+
 
 @add_start_docstrings_to_model_forward(
     """
@@ -849,22 +859,22 @@ class TFRagTokenForGeneration(TFRagPreTrainedModel, TFCausalLanguageModelingLoss
         decoder_input_ids: np.ndarray | tf.Tensor | None = None,
         decoder_attention_mask: np.ndarray | tf.Tensor | None = None,
         encoder_outputs: np.ndarray | tf.Tensor | None = None,
-        past_key_values: Optional[Tuple[Tuple[Union[np.ndarray, tf.Tensor]]]] = None,
+        past_key_values: Tuple[Tuple[Union[np.ndarray, tf.Tensor]]] | None = None,
         doc_scores: np.ndarray | tf.Tensor | None = None,
         context_input_ids: np.ndarray | tf.Tensor | None = None,
         context_attention_mask: np.ndarray | tf.Tensor | None = None,
-        use_cache: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        output_retrieved: Optional[bool] = None,
-        n_docs: Optional[int] = None,
-        do_marginalize: Optional[bool] = None,
+        use_cache: bool | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        output_retrieved: bool | None = None,
+        n_docs: int | None = None,
+        do_marginalize: bool | None = None,
         labels: np.ndarray | tf.Tensor | None = None,
-        reduce_loss: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
+        reduce_loss: bool | None = None,
+        return_dict: bool | None = None,
         training: bool = False,
         **kwargs,  # needs kwargs for generation
-    ):
+    ) -> TFRetrievAugLMMarginOutput:
         r"""
         do_marginalize (`bool`, *optional*):
             If `True`, the logits are marginalized over all documents by making use of
@@ -1051,7 +1061,7 @@ class TFRagTokenForGeneration(TFRagPreTrainedModel, TFCausalLanguageModelingLoss
                 Custom logits processors that complement the default logits processors built from arguments and a
                 model's config. If a logit processor is passed that is already created with the arguments or a model's
                 config an error is thrown.
-            kwargs:
+            kwargs (`Dict[str, Any]`, *optional*):
                 Ad hoc parametrization of `generate_config` and/or additional model-specific kwargs that will be
                 forwarded to the `forward` function of the model.
 
@@ -1290,6 +1300,14 @@ class TFRagTokenForGeneration(TFRagPreTrainedModel, TFCausalLanguageModelingLoss
         loss = (1.0 - smooth_epsilon) * nll_loss + eps_i * smooth_loss
 
         return loss
+
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "rag", None) is not None:
+            with tf.name_scope(self.rag.name):
+                self.rag.build(None)
 
 
 @add_start_docstrings_to_model_forward(
@@ -1629,7 +1647,7 @@ class TFRagSequenceForGeneration(TFRagPreTrainedModel, TFCausalLanguageModelingL
                 Number of beams for beam search. 1 means no beam search.
             n_docs (`int`, *optional*, defaults to `config.n_docs`)
                 Number of documents to retrieve and/or number of documents for which to generate an answer.
-            kwargs:
+            kwargs (`Dict[str, Any]`, *optional*):
                 Additional kwargs will be passed to [`~generation.GenerationMixin.generate`]
 
         Return:
@@ -1742,3 +1760,11 @@ class TFRagSequenceForGeneration(TFRagPreTrainedModel, TFCausalLanguageModelingL
 
         output = tf.convert_to_tensor(output)
         return tf.cast(output, tensors[0][0][0].dtype)
+
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "rag", None) is not None:
+            with tf.name_scope(self.rag.name):
+                self.rag.build(None)

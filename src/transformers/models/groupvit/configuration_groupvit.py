@@ -14,7 +14,6 @@
 # limitations under the License.
 """ GroupViT model configuration"""
 
-import copy
 import os
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, Mapping, Optional, Union
@@ -89,6 +88,7 @@ class GroupViTTextConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
+
     model_type = "groupvit_text_model"
 
     def __init__(
@@ -106,8 +106,8 @@ class GroupViTTextConfig(PretrainedConfig):
         initializer_range=0.02,
         initializer_factor=1.0,
         pad_token_id=1,
-        bos_token_id=0,
-        eos_token_id=2,
+        bos_token_id=49406,
+        eos_token_id=49407,
         **kwargs,
     ):
         super().__init__(pad_token_id=pad_token_id, bos_token_id=bos_token_id, eos_token_id=eos_token_id, **kwargs)
@@ -296,7 +296,6 @@ class GroupViTConfig(PretrainedConfig):
     """
 
     model_type = "groupvit"
-    is_composition = True
 
     def __init__(
         self,
@@ -340,7 +339,7 @@ class GroupViTConfig(PretrainedConfig):
                             f"`text_config_dict` is provided which will be used to initialize `GroupViTTextConfig`. "
                             f'The value `text_config["{key}"]` will be overriden.'
                         )
-                    logger.warning(message)
+                    logger.info(message)
 
             # Update all values in `text_config` with the ones in `_text_config_dict`.
             text_config.update(_text_config_dict)
@@ -372,7 +371,7 @@ class GroupViTConfig(PretrainedConfig):
                             f"`vision_config_dict` is provided which will be used to initialize `GroupViTVisionConfig`."
                             f' The value `vision_config["{key}"]` will be overriden.'
                         )
-                    logger.warning(message)
+                    logger.info(message)
 
             # Update all values in `vision_config` with the ones in `_vision_config_dict`.
             vision_config.update(_vision_config_dict)
@@ -406,19 +405,6 @@ class GroupViTConfig(PretrainedConfig):
         """
 
         return cls(text_config=text_config.to_dict(), vision_config=vision_config.to_dict(), **kwargs)
-
-    def to_dict(self):
-        """
-        Serializes this instance to a Python dictionary. Override the default [`~PretrainedConfig.to_dict`].
-
-        Returns:
-            `Dict[str, any]`: Dictionary of all the attributes that make up this configuration instance,
-        """
-        output = copy.deepcopy(self.__dict__)
-        output["text_config"] = self.text_config.to_dict()
-        output["vision_config"] = self.vision_config.to_dict()
-        output["model_type"] = self.__class__.model_type
-        return output
 
 
 class GroupViTOnnxConfig(OnnxConfig):

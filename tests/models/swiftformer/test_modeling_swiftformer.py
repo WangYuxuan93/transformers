@@ -16,7 +16,6 @@
 
 
 import copy
-import inspect
 import unittest
 
 from transformers import PretrainedConfig, SwiftFormerConfig
@@ -58,9 +57,9 @@ class SwiftFormerModelTester:
         hidden_dropout_prob=0.1,
         attention_probs_dropout_prob=0.1,
         image_size=224,
-        num_labels=1000,
-        layer_depths=[3, 3, 6, 4],
-        embed_dims=[48, 56, 112, 220],
+        num_labels=3,
+        layer_depths=[1, 1, 1, 1],
+        embed_dims=[16, 16, 32, 32],
     ):
         self.parent = parent
         self.batch_size = batch_size
@@ -176,18 +175,6 @@ class SwiftFormerModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestC
             model = model_class(config)
             x = model.get_output_embeddings()
             self.assertTrue(x is None or isinstance(x, nn.Linear))
-
-    def test_forward_signature(self):
-        config, _ = self.model_tester.prepare_config_and_inputs_for_common()
-
-        for model_class in self.all_model_classes:
-            model = model_class(config)
-            signature = inspect.signature(model.forward)
-            # signature.parameters is an OrderedDict => so arg_names order is deterministic
-            arg_names = [*signature.parameters.keys()]
-
-            expected_arg_names = ["pixel_values"]
-            self.assertListEqual(arg_names[:1], expected_arg_names)
 
     def test_model(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()

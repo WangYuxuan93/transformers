@@ -67,7 +67,7 @@ class UniSpeechSatModelTester:
         conv_bias=False,
         num_conv_pos_embeddings=16,
         num_conv_pos_embedding_groups=2,
-        num_hidden_layers=4,
+        num_hidden_layers=2,
         num_attention_heads=2,
         hidden_dropout_prob=0.1,  # this is most likely not correctly set yet
         intermediate_size=20,
@@ -265,8 +265,8 @@ class UniSpeechSatModelTester:
             input_values[i, input_lengths[i] :] = 0.0
 
             if max_length_labels[i] < labels.shape[-1]:
-                # it's important that we make sure that target lenghts are at least
-                # one shorter than logit lenghts to prevent -inf
+                # it's important that we make sure that target lengths are at least
+                # one shorter than logit lengths to prevent -inf
                 labels[i, max_length_labels[i] - 1 :] = -100
 
         loss = model(input_values, labels=labels).loss
@@ -471,6 +471,7 @@ class UniSpeechSatModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.Test
             for name, param in model.named_parameters():
                 uniform_init_parms = [
                     "conv.weight",
+                    "conv.parametrizations.weight",
                     "masked_spec_embed",
                     "codevectors",
                     "quantizer.weight_proj.weight",
@@ -682,6 +683,7 @@ class UniSpeechSatRobustModelTest(ModelTesterMixin, unittest.TestCase):
             for name, param in model.named_parameters():
                 uniform_init_parms = [
                     "conv.weight",
+                    "conv.parametrizations.weight",
                     "masked_spec_embed",
                     "codevectors",
                     "quantizer.weight_proj.weight",
@@ -904,7 +906,6 @@ class UniSpeechSatModelIntegrationTest(unittest.TestCase):
         )
         self.assertEqual(labels[0, :, 0].sum(), 270)
         self.assertEqual(labels[0, :, 1].sum(), 647)
-        # TODO: update the tolerance after the CI moves to torch 1.10
         self.assertTrue(torch.allclose(outputs.logits[:, :4], expected_logits, atol=1e-2))
 
     def test_inference_speaker_verification(self):
@@ -929,5 +930,4 @@ class UniSpeechSatModelIntegrationTest(unittest.TestCase):
         # id10002 vs id10004
         self.assertAlmostEqual(cosine_sim(embeddings[2], embeddings[3]).item(), 0.5616, 3)
 
-        # TODO: update the tolerance after the CI moves to torch 1.10
         self.assertAlmostEqual(outputs.loss.item(), 18.5925, 2)

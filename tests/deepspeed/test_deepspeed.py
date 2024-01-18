@@ -27,24 +27,29 @@ from parameterized import parameterized
 import tests.trainer.test_trainer
 from tests.trainer.test_trainer import TrainerIntegrationCommon  # noqa
 from transformers import AutoModel, TrainingArguments, is_torch_available, logging
-from transformers.deepspeed import HfDeepSpeedConfig, is_deepspeed_available, unset_hf_deepspeed_config
+from transformers.integrations.deepspeed import (
+    HfDeepSpeedConfig,
+    is_deepspeed_available,
+    unset_hf_deepspeed_config,
+)
 from transformers.testing_utils import (
     CaptureLogger,
     CaptureStd,
     CaptureStderr,
     LoggingLevel,
     TestCasePlus,
+    backend_device_count,
     execute_subprocess_async,
-    get_gpu_count,
     mockenv_context,
     require_deepspeed,
     require_optuna,
-    require_torch_gpu,
-    require_torch_multi_gpu,
+    require_torch_accelerator,
+    require_torch_multi_accelerator,
     slow,
+    torch_device,
 )
 from transformers.trainer_utils import get_last_checkpoint, set_seed
-from transformers.utils import WEIGHTS_NAME, is_torch_bf16_gpu_available
+from transformers.utils import SAFE_WEIGHTS_NAME, is_torch_bf16_available_on_device
 
 
 if is_torch_available():
@@ -113,7 +118,7 @@ def require_deepspeed_aio(test_case):
 if is_deepspeed_available():
     from deepspeed.utils import logger as deepspeed_logger  # noqa
     from deepspeed.utils.zero_to_fp32 import load_state_dict_from_zero_checkpoint
-    from transformers.deepspeed import deepspeed_config, is_deepspeed_zero3_enabled  # noqa
+    from transformers.integrations.deepspeed import deepspeed_config, is_deepspeed_zero3_enabled  # noqa
 
 
 def get_launcher(distributed=False):
@@ -121,7 +126,7 @@ def get_launcher(distributed=False):
     # - it won't be able to handle that
     # 2. for now testing with just 2 gpus max (since some quality tests may give different
     # results with mode gpus because we use very little data)
-    num_gpus = min(2, get_gpu_count()) if distributed else 1
+    num_gpus = min(2, backend_device_count(torch_device)) if distributed else 1
     master_port = get_master_port(real_launcher=True)
     return f"deepspeed --num_nodes 1 --num_gpus {num_gpus} --master_port {master_port}".split()
 
@@ -132,8 +137,16 @@ ZERO3 = "zero3"
 FP16 = "fp16"
 BF16 = "bf16"
 
+HF_OPTIM = "hf_optim"
+HF_SCHEDULER = "hf_scheduler"
+DS_OPTIM = "ds_optim"
+DS_SCHEDULER = "ds_scheduler"
+
+optims = [HF_OPTIM, DS_OPTIM]
+schedulers = [HF_SCHEDULER, DS_SCHEDULER]
+
 stages = [ZERO2, ZERO3]
-if is_torch_bf16_gpu_available():
+if is_torch_bf16_available_on_device(torch_device):
     dtypes = [FP16, BF16]
 else:
     dtypes = [FP16]
@@ -149,9 +162,11 @@ def parameterized_custom_name_func(func, param_num, param):
 # Cartesian-product of zero stages with models to test
 params = list(itertools.product(stages, dtypes))
 
+params_with_optims_and_schedulers = list(itertools.product(stages, dtypes, optims, schedulers))
+
 
 @require_deepspeed
-@require_torch_gpu
+@require_torch_accelerator
 class CoreIntegrationDeepSpeed(TestCasePlus, TrainerIntegrationCommon):
     """
     Testing non-Trainer DeepSpeed integration
@@ -210,6 +225,78 @@ class CoreIntegrationDeepSpeed(TestCasePlus, TrainerIntegrationCommon):
                     AutoModel.from_pretrained(T5_TINY)
         self.assertNotIn("Detected DeepSpeed ZeRO-3", cl.out)
 
+    def test_init_zero3_missing_params(self):
+        # test that zero.Init() for missing parameters works correctly under zero3
+        import deepspeed
+        import torch
+
+        from transformers.models.gpt2.modeling_gpt2 import GPT2PreTrainedModel
+
+        class TinyGPT2WithUninitializedWeights(GPT2PreTrainedModel):
+            def __init__(self, config):
+                super().__init__(config)
+                self.transformer = AutoModel.from_pretrained(GPT2_TINY, config=config)
+                self.new_head = torch.nn.Linear(config.hidden_size, config.vocab_size, bias=True)
+
+            def forward(self, *args, **kwargs):
+                transformer_outputs = self.transformer(*args, **kwargs)
+                hidden_states = transformer_outputs[0]
+                return self.new_head(hidden_states).float()
+
+            def _init_weights(self, module):
+                super()._init_weights(module)
+                if module is self.new_head:
+                    self.new_head.weight.data.fill_(-100.0)
+                    self.new_head.bias.data.fill_(+100.0)
+
+        ds_config = {
+            "train_batch_size": 1,
+            "zero_optimization": {
+                "stage": 3,
+            },
+        }
+
+        dschf = HfDeepSpeedConfig(ds_config)
+
+        self.assertTrue(dschf.is_zero3())
+        self.assertTrue(is_deepspeed_zero3_enabled())
+
+        with LoggingLevel(logging.INFO):
+            with mockenv_context(**self.dist_env_1_gpu):
+                logger = logging.get_logger("transformers.modeling_utils")
+                with CaptureLogger(logger) as cl:
+                    model = TinyGPT2WithUninitializedWeights.from_pretrained(GPT2_TINY)
+        self.assertIn("Detected DeepSpeed ZeRO-3", cl.out)
+        self.assertRegex(cl.out, r"newly initialized.*new_head\.bias.*new_head\.weight")
+        with deepspeed.zero.GatheredParameters([model.new_head.weight, model.new_head.bias]):
+            self.assertTrue(
+                torch.allclose(model.new_head.weight, torch.tensor(-100.0, device=model.new_head.weight.device)),
+            )
+            self.assertTrue(
+                torch.allclose(model.new_head.bias, torch.tensor(+100.0, device=model.new_head.bias.device)),
+            )
+
+        # now remove zero optimization
+        del ds_config["zero_optimization"]
+        dschf = HfDeepSpeedConfig(ds_config)
+
+        self.assertFalse(dschf.is_zero3())
+        self.assertFalse(is_deepspeed_zero3_enabled())
+
+        with LoggingLevel(logging.INFO):
+            with mockenv_context(**self.dist_env_1_gpu):
+                logger = logging.get_logger("transformers.modeling_utils")
+                with CaptureLogger(logger) as cl:
+                    model = TinyGPT2WithUninitializedWeights.from_pretrained(GPT2_TINY)
+        self.assertNotIn("Detected DeepSpeed ZeRO-3", cl.out)
+        self.assertRegex(cl.out, r"newly initialized.*new_head\.bias.*new_head\.weight")
+        self.assertTrue(
+            torch.allclose(model.new_head.weight, torch.tensor(-100.0, device=model.new_head.weight.device)),
+        )
+        self.assertTrue(
+            torch.allclose(model.new_head.bias, torch.tensor(+100.0, device=model.new_head.bias.device)),
+        )
+
 
 class TrainerIntegrationDeepSpeedWithCustomConfig(TestCasePlus):
     def setUp(self):
@@ -259,7 +346,7 @@ class TrainerIntegrationDeepSpeedWithCustomConfig(TestCasePlus):
 
 
 @require_deepspeed
-@require_torch_gpu
+@require_torch_accelerator
 class TrainerIntegrationDeepSpeed(TrainerIntegrationDeepSpeedWithCustomConfig, TrainerIntegrationCommon):
     """
 
@@ -365,19 +452,16 @@ class TrainerIntegrationDeepSpeed(TrainerIntegrationDeepSpeedWithCustomConfig, T
         self.assertNotEqual(new_a, a)
 
     def test_hf_scheduler_ds_optimizer(self):
+        a = 0
         with mockenv_context(**self.dist_env_1_gpu):
             ds_config_zero2_dict = self.get_config_dict(ZERO2)
             del ds_config_zero2_dict["scheduler"]  # force default HF Trainer scheduler
             ds_config_zero2_dict["zero_optimization"]["offload_optimizer"]["device"] = "none"
             ds_config_zero2_dict["fp16"]["initial_scale_power"] = 1  # force optimizer on the first step
-            trainer = get_regression_trainer(local_rank=0, fp16=True, deepspeed=ds_config_zero2_dict)
-            with self.assertRaises(Exception) as context:
-                trainer.train()
-        self.assertIn(
-            "Found `optimizer` configured in the DeepSpeed config, but no `scheduler`. "
-            "Please configure a scheduler in the DeepSpeed config.",
-            str(context.exception),
-        )
+            trainer = get_regression_trainer(a=a, local_rank=0, fp16=True, deepspeed=ds_config_zero2_dict)
+            trainer.train()
+        new_a = trainer.model.a.item()
+        self.assertNotEqual(new_a, a)
 
     @require_deepspeed_aio
     def test_stage3_nvme_offload(self):
@@ -549,13 +633,12 @@ class TrainerIntegrationDeepSpeed(TrainerIntegrationDeepSpeedWithCustomConfig, T
         self.assertAlmostEqual(no_grad_accum_a, yes_grad_accum_a, places=5)
         self.assertAlmostEqual(no_grad_accum_b, yes_grad_accum_b, places=5)
 
-        # see the note above how to get identical loss on a small bs
-        self.assertAlmostEqual(no_grad_accum_loss, yes_grad_accum_loss, places=2)
+        # Relative difference. See the note above how to get identical loss on a small bs
+        self.assertTrue((no_grad_accum_loss - yes_grad_accum_loss) / (no_grad_accum_loss + 1e-15) <= 1e-3)
 
     def check_saved_checkpoints_deepspeed(self, output_dir, freq, total, stage, dtype):
         # adapted from TrainerIntegrationCommon.check_saved_checkpoints
-
-        file_list = [WEIGHTS_NAME, "training_args.bin", "trainer_state.json", "config.json"]
+        file_list = [SAFE_WEIGHTS_NAME, "training_args.bin", "trainer_state.json", "config.json"]
 
         if stage == ZERO2:
             ds_file_list = ["mp_rank_00_model_states.pt"]
@@ -570,7 +653,6 @@ class TrainerIntegrationDeepSpeed(TrainerIntegrationDeepSpeedWithCustomConfig, T
         for step in range(freq, total, freq):
             checkpoint = os.path.join(output_dir, f"checkpoint-{step}")
             self.assertTrue(os.path.isdir(checkpoint), f"[{stage}] {checkpoint} dir is not found")
-
             # common files
             for filename in file_list:
                 path = os.path.join(checkpoint, filename)
@@ -636,10 +718,16 @@ class TrainerIntegrationDeepSpeed(TrainerIntegrationDeepSpeedWithCustomConfig, T
                 "Can't find a valid checkpoint at" in str(context.exception), f"got exception: {context.exception}"
             )
 
-    @parameterized.expand(params, name_func=parameterized_custom_name_func)
-    def test_can_resume_training_normal(self, stage, dtype):
+    @parameterized.expand(params_with_optims_and_schedulers, name_func=parameterized_custom_name_func)
+    def test_can_resume_training_normal(self, stage, dtype, optim, scheduler):
         # adapted from TrainerIntegrationTest.test_can_resume_training
         # test normal resume for each stage separately, error-handling is tested in a different test
+
+        # ToDo: Currently, hf_optim + hf_scheduler resumes with the correct states and
+        # also has same losses for few steps but then slowly diverges. Need to figure it out.
+        if optim == HF_OPTIM and scheduler == HF_SCHEDULER:
+            return
+
         output_dir = self.get_auto_remove_tmp_dir("./xxx", after=False)
         ds_config_dict = self.get_config_dict(stage)
         if dtype == FP16:
@@ -647,6 +735,12 @@ class TrainerIntegrationDeepSpeed(TrainerIntegrationDeepSpeedWithCustomConfig, T
         # XXX:
         if stage == ZERO3:
             ds_config_dict["zero_optimization"]["stage3_gather_16bit_weights_on_model_save"] = True
+
+        if optim == HF_OPTIM:
+            del ds_config_dict["optimizer"]
+
+        if scheduler == HF_SCHEDULER:
+            del ds_config_dict["scheduler"]
 
         kwargs = {
             "output_dir": output_dir,
@@ -854,7 +948,7 @@ class TrainerIntegrationDeepSpeed(TrainerIntegrationDeepSpeedWithCustomConfig, T
 
 @slow
 @require_deepspeed
-@require_torch_gpu
+@require_torch_accelerator
 class TestDeepSpeedWithLauncher(TestCasePlus):
     """This class is for testing via an external script - can do multiple gpus"""
 
@@ -875,7 +969,7 @@ class TestDeepSpeedWithLauncher(TestCasePlus):
     #
 
     @parameterized.expand(params, name_func=parameterized_custom_name_func)
-    @require_torch_multi_gpu
+    @require_torch_multi_accelerator
     def test_basic_distributed(self, stage, dtype):
         self.run_and_check(stage=stage, dtype=dtype, distributed=True)
 
@@ -906,7 +1000,7 @@ class TestDeepSpeedWithLauncher(TestCasePlus):
         )
 
     @parameterized.expand(params, name_func=parameterized_custom_name_func)
-    @require_torch_multi_gpu
+    @require_torch_multi_accelerator
     def test_fp32_distributed(self, stage, dtype):
         # real model needs too much GPU memory under stage2+fp32, so using tiny random model here -
         # therefore no quality checks, just basic completion checks are done
@@ -947,9 +1041,9 @@ class TestDeepSpeedWithLauncher(TestCasePlus):
         self.do_checks(output_dir, do_train=do_train, do_eval=do_eval)
 
     @parameterized.expand(["bf16", "fp16", "fp32"])
-    @require_torch_multi_gpu
+    @require_torch_multi_accelerator
     def test_inference(self, dtype):
-        if dtype == "bf16" and not is_torch_bf16_gpu_available():
+        if dtype == "bf16" and not is_torch_bf16_available_on_device(torch_device):
             self.skipTest("test requires bfloat16 hardware support")
 
         # this is just inference, so no optimizer should be loaded

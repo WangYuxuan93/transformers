@@ -316,7 +316,7 @@ class TFModelTesterMixin:
 
             with tf.Graph().as_default() as g:
                 model = model_class(config)
-                model.build()
+                model.build_in_name_scope()
 
                 for op in g.get_operations():
                     model_op_names.add(op.node_def.op)
@@ -330,6 +330,9 @@ class TFModelTesterMixin:
 
             self.assertEqual(len(incompatible_ops), 0, incompatible_ops)
 
+    # `tf2onnx` issue page: https://github.com/onnx/tensorflow-onnx/issues/2172
+    # TODO: undo skip once a fix is done in `tf2onnx`
+    @unittest.skip("`tf2onnx` broke with TF 2.13")
     @require_tf2onnx
     @slow
     def test_onnx_runtime_optimize(self):
@@ -343,7 +346,7 @@ class TFModelTesterMixin:
 
         for model_class in self.all_model_classes[:2]:
             model = model_class(config)
-            model.build()
+            model.build_in_name_scope()
 
             onnx_model_proto, _ = tf2onnx.convert.from_keras(model, opset=self.onnx_min_opset)
 
@@ -462,7 +465,6 @@ class TFModelTesterMixin:
             "TFFunnelForPreTraining",
             "TFElectraForPreTraining",
             "TFXLMWithLMHeadModel",
-            "TFTransfoXLLMHeadModel",
         ]:
             for k in key_differences:
                 if k in ["loss", "losses"]:
@@ -573,7 +575,7 @@ class TFModelTesterMixin:
     def prepare_pt_inputs_from_tf_inputs(self, tf_inputs_dict):
         pt_inputs_dict = {}
         for name, key in tf_inputs_dict.items():
-            if type(key) == bool:
+            if isinstance(key, bool):
                 pt_inputs_dict[name] = key
             elif name == "input_values":
                 pt_inputs_dict[name] = torch.from_numpy(key.numpy()).to(torch.float32)
@@ -1086,7 +1088,7 @@ class TFModelTesterMixin:
         def _get_word_embedding_weight(model, embedding_layer):
             if isinstance(embedding_layer, tf.keras.layers.Embedding):
                 # builds the embeddings layer
-                model.build()
+                model.build_in_name_scope()
                 return embedding_layer.embeddings
             else:
                 return model._get_word_embedding_weight(embedding_layer)
@@ -1149,7 +1151,7 @@ class TFModelTesterMixin:
             old_total_size = config.vocab_size
             new_total_size = old_total_size + new_tokens_size
             model = model_class(config=copy.deepcopy(config))  # `resize_token_embeddings` mutates `config`
-            model.build()
+            model.build_in_name_scope()
             model.resize_token_embeddings(new_total_size)
 
             # fetch the output for an input exclusively made of new members of the vocabulary
