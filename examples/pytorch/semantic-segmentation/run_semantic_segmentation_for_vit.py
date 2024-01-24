@@ -189,6 +189,12 @@ class DataTrainingArguments:
     dataset_config_name: Optional[str] = field(
         default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
     )
+    label_file: Optional[str] = field(
+        default="/home/mrch/data/CelebAMask-HQ/id2label.json",
+        metadata={
+            "help": "Name of a dataset from the hub (could be your own, possibly private dataset hosted on the hub)."
+        },
+    )
     train_val_split: Optional[float] = field(
         default=0.15, metadata={"help": "Percent to split off of train for validation."}
     )
@@ -343,7 +349,9 @@ def main():
     # In distributed training, the load_dataset function guarantees that only one local process can concurrently
     # download the dataset.
     # TODO support datasets from local folders
-    dataset = load_dataset(data_args.dataset_name, cache_dir=model_args.cache_dir)
+    #dataset = load_dataset(data_args.dataset_name, cache_dir=model_args.cache_dir)
+    from datasets import load_from_disk
+    dataset = load_from_disk(data_args.dataset_name)
 
     # Rename column names to standardized names (only "image" and "label" need to be present)
     if "pixel_values" in dataset["train"].column_names:
@@ -360,13 +368,13 @@ def main():
 
     # Prepare label mappings.
     # We'll include these in the model's config to get human readable labels in the Inference API.
-    if data_args.dataset_name == "scene_parse_150":
-        repo_id = "huggingface/label-files"
-        filename = "ade20k-id2label.json"
-    else:
-        repo_id = data_args.dataset_name
-        filename = "id2label.json"
-    id2label = json.load(open(hf_hub_download(repo_id, filename, repo_type="dataset"), "r"))
+    #if data_args.dataset_name == "scene_parse_150":
+    #    repo_id = "huggingface/label-files"
+    #    filename = "ade20k-id2label.json"
+    #else:
+    #    repo_id = data_args.dataset_name
+    #    filename = "id2label.json"
+    id2label = json.load(open(os.path.join(data_args.dataset_name, "id2label.json"), "r"))
     id2label = {int(k): v for k, v in id2label.items()}
     label2id = {v: str(k) for k, v in id2label.items()}
 
@@ -393,7 +401,7 @@ def main():
             references=labels,
             num_labels=len(id2label),
             ignore_index=0,
-            reduce_labels=image_processor.do_reduce_labels,
+            reduce_labels=False, #image_processor.do_reduce_labels,
         )
         # add per category metrics as individual key-value pairs
         per_category_accuracy = metrics.pop("per_category_accuracy").tolist()
@@ -413,7 +421,13 @@ def main():
         token=model_args.token,
         trust_remote_code=model_args.trust_remote_code,
     )
-    if model_args.model_type == "vitmea":
+    if model_args.model_type == "vitmae":
+        #image_processor.do_reduce_labels = False
+        config.out_indices = [3,5,7,11]
+        config.pool_scales = [1,2,3,6]
+        config.use_auxiliary_head = False
+        config.mask_ratio = 0
+        config.semantic_loss_ignore_index = 255
         model = ViTMAEForSemanticSegmentation.from_pretrained(
             model_args.model_name_or_path,
             from_tf=bool(".ckpt" in model_args.model_name_or_path),
@@ -424,6 +438,11 @@ def main():
             trust_remote_code=model_args.trust_remote_code,
         )
     else:
+        config.out_indices = [3,5,7,11]
+        config.pool_scales = [1,2,3,6]
+        config.use_auxiliary_head = False
+        config.mask_ratio = 0
+        config.semantic_loss_ignore_index = 255
         model = AutoModelForSemanticSegmentation.from_pretrained(
             model_args.model_name_or_path,
             from_tf=bool(".ckpt" in model_args.model_name_or_path),
@@ -475,14 +494,16 @@ def main():
         pixel_values = []
         labels = []
         for image, target in zip(example_batch["image"], example_batch["label"]):
+            #print ("target:", np.array(target).shape)
             image, target = train_transforms(image.convert("RGB"), target)
+            #print ("output target:", target.shape)
             pixel_values.append(image)
             labels.append(target)
 
         encoding = {}
         encoding["pixel_values"] = torch.stack(pixel_values)
         encoding["labels"] = torch.stack(labels)
-
+        
         return encoding
 
     def preprocess_val(example_batch):
@@ -495,7 +516,7 @@ def main():
 
         encoding = {}
         encoding["pixel_values"] = torch.stack(pixel_values)
-        encoding["labels"] = torch.stack(labels)
+        encoding["labels"] = torch.stack(labels) 
 
         return encoding
 

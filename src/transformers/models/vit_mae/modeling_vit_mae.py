@@ -1044,6 +1044,8 @@ class ViTMAEConvModule(nn.Module):
         self.activation = nn.ReLU()
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
+        #print ("conv:{}, input:{},bn:{}".format
+        #        (self.conv.weight.device, input.device, self.bn.weight.device))
         output = self.conv(input)
         output = self.bn(output)
         output = self.activation(output)
@@ -1054,12 +1056,17 @@ class ViTMAEConvModule(nn.Module):
 class ViTMAEPyramidPoolingBlock(nn.Module):
     def __init__(self, pool_scale: int, in_channels: int, channels: int) -> None:
         super().__init__()
-        self.layers = [
-            nn.AdaptiveAvgPool2d(pool_scale),
-            ViTMAEConvModule(in_channels, channels, kernel_size=1),
-        ]
-        for i, layer in enumerate(self.layers):
-            self.add_module(str(i), layer)
+        self.layers = nn.ModuleList()
+        pool_layer = nn.AdaptiveAvgPool2d(pool_scale)
+        self.layers.append(pool_layer)
+        conv = ViTMAEConvModule(in_channels, channels, kernel_size=1)
+        self.layers.append(conv)
+        #self.layers = [
+        #    nn.AdaptiveAvgPool2d(pool_scale),
+        #    ViTMAEConvModule(in_channels, channels, kernel_size=1),
+        #]
+        #for i, layer in enumerate(self.layers):
+        #    self.add_module(str(i), layer)
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         hidden_state = input
@@ -1088,15 +1095,17 @@ class ViTMAEPyramidPoolingModule(nn.Module):
         self.align_corners = align_corners
         self.in_channels = in_channels
         self.channels = channels
-        self.blocks = []
+        #self.blocks = []
+        self.blocks = nn.ModuleList()
         for i, pool_scale in enumerate(pool_scales):
             block = ViTMAEPyramidPoolingBlock(pool_scale=pool_scale, in_channels=in_channels, channels=channels)
             self.blocks.append(block)
-            self.add_module(str(i), block)
+            #self.add_module(str(i), block)
 
-    def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
+    def forward(self, x: torch.Tensor):
         ppm_outs = []
         for ppm in self.blocks:
+            #print ("PyramidPoolingModul x:{}, blk[i]:{}".format(x.device, [self.blocks[i].layers[1].conv.weight.device for i in range(len(self.blocks))]), flush=True)
             ppm_out = ppm(x)
             upsampled_ppm_out = nn.functional.interpolate(
                 ppm_out, size=x.size()[2:], mode="bilinear", align_corners=self.align_corners
@@ -1154,6 +1163,7 @@ class ViTMAEUperHead(nn.Module):
     def psp_forward(self, inputs):
         x = inputs[-1]
         psp_outs = [x]
+        #print ("psp_forward, x:", x.device, flush=True)
         psp_outs.extend(self.psp_modules(x))
         psp_outs = torch.cat(psp_outs, dim=1)
         output = self.bottleneck(psp_outs)
@@ -1254,7 +1264,7 @@ class ViTMAEForSemanticSegmentation(ViTMAEPreTrainedModel):
         super().__init__(config)
 
         self.num_labels = config.num_labels
-        self.vit = ViTMAEModel(config, add_pooling_layer=False)
+        self.vit = ViTMAEModel(config)
 
         # FPNs
         if len(self.config.out_indices) != 4:
@@ -1347,8 +1357,10 @@ class ViTMAEForSemanticSegmentation(ViTMAEPreTrainedModel):
             output_hidden_states=True,  # we need the intermediate hidden states
             return_dict=return_dict,
         )
-
+        
         encoder_hidden_states = outputs.hidden_states if return_dict else outputs[1]
+        #print ("Main vit:{}, encoder_states:{}".format(self.vit.layernorm.weight.device, encoder_hidden_states[0].device), flush=True)
+        #print ("Main decode_head.bottleneck:{}, decode_head.lateral_conv.weight:{}, decode_head.psp_modules:{}".format(self.decode_head.bottleneck.conv.weight.device, self.decode_head.lateral_convs[0].conv.weight.device, self.decode_head.psp_modules.blocks[0].layers[1].conv.weight.device), flush=True)
 
         # only keep certain features, and reshape
         # note that we do +1 as the encoder_hidden_states also includes the initial embeddings
@@ -1363,7 +1375,7 @@ class ViTMAEForSemanticSegmentation(ViTMAEPreTrainedModel):
         ops = [self.fpn1, self.fpn2, self.fpn3, self.fpn4]
         for i in range(len(features)):
             features[i] = ops[i](features[i])
-
+        
         logits = self.decode_head(features)
 
         auxiliary_logits = None
