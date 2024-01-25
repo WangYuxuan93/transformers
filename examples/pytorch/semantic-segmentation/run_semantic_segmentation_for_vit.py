@@ -349,9 +349,28 @@ def main():
     # In distributed training, the load_dataset function guarantees that only one local process can concurrently
     # download the dataset.
     # TODO support datasets from local folders
-    #dataset = load_dataset(data_args.dataset_name, cache_dir=model_args.cache_dir)
-    from datasets import load_from_disk
-    dataset = load_from_disk(data_args.dataset_name)
+    #if os.path.exists(data_args.dataset_name):
+    if "celeba_mask" in data_args.dataset_name:
+        from datasets import load_from_disk
+        dataset = load_from_disk(data_args.dataset_name)   
+    else:
+        dataset = load_dataset(data_args.dataset_name, cache_dir=model_args.cache_dir) 
+    if os.path.exists(data_args.dataset_name):
+        id2label = json.load(open(os.path.join(data_args.dataset_name, "id2label.json"), "r"))
+        id2label = {int(k): v for k, v in id2label.items()}
+        label2id = {v: str(k) for k, v in id2label.items()}
+    else:
+        # Prepare label mappings.
+        # We'll include these in the model's config to get human readable labels in the Inference API.
+        if data_args.dataset_name == "scene_parse_150":
+            repo_id = "huggingface/label-files"
+            filename = "ade20k-id2label.json"
+        else:
+            repo_id = data_args.dataset_name
+            filename = "id2label.json"
+        id2label = json.load(open(hf_hub_download(repo_id, filename, repo_type="dataset"), "r"))
+        id2label = {int(k): v for k, v in id2label.items()}
+        label2id = {v: str(k) for k, v in id2label.items()}
 
     # Rename column names to standardized names (only "image" and "label" need to be present)
     if "pixel_values" in dataset["train"].column_names:
@@ -366,18 +385,7 @@ def main():
         dataset["train"] = split["train"]
         dataset["validation"] = split["test"]
 
-    # Prepare label mappings.
-    # We'll include these in the model's config to get human readable labels in the Inference API.
-    #if data_args.dataset_name == "scene_parse_150":
-    #    repo_id = "huggingface/label-files"
-    #    filename = "ade20k-id2label.json"
-    #else:
-    #    repo_id = data_args.dataset_name
-    #    filename = "id2label.json"
-    id2label = json.load(open(os.path.join(data_args.dataset_name, "id2label.json"), "r"))
-    id2label = {int(k): v for k, v in id2label.items()}
-    label2id = {v: str(k) for k, v in id2label.items()}
-
+    
     # Load the mean IoU metric from the datasets package
     metric = evaluate.load("mean_iou", cache_dir=model_args.cache_dir)
 
@@ -401,7 +409,7 @@ def main():
             references=labels,
             num_labels=len(id2label),
             ignore_index=0,
-            reduce_labels=False, #image_processor.do_reduce_labels,
+            reduce_labels=data_args.reduce_labels, #reduce_labels=False, #image_processor.do_reduce_labels,
         )
         # add per category metrics as individual key-value pairs
         per_category_accuracy = metrics.pop("per_category_accuracy").tolist()
@@ -496,7 +504,9 @@ def main():
         for image, target in zip(example_batch["image"], example_batch["label"]):
             #print ("target:", np.array(target).shape)
             image, target = train_transforms(image.convert("RGB"), target)
-            #print ("output target:", target.shape)
+            #torch.set_printoptions(threshold=np.inf)
+            #print ("output target({}):\n{}".format(target.shape, target))
+            #print ("output target: {}".format(target.shape))
             pixel_values.append(image)
             labels.append(target)
 

@@ -578,12 +578,16 @@ class ViTMAEPreTrainedModel(PreTrainedModel):
 
     def _init_weights(self, module):
         """Initialize the weights"""
-        if isinstance(module, (nn.Linear, nn.Conv2d)):
+        if isinstance(module, (nn.Linear, nn.Conv2d, nn.ConvTranspose2d)):
             # Slightly different from the TF version which uses truncated_normal for initialization
             # cf https://github.com/pytorch/pytorch/pull/5617
             module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
             if module.bias is not None:
                 module.bias.data.zero_()
+        elif isinstance(module, nn.Embedding):
+            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+            if module.padding_idx is not None:
+                module.weight.data[module.padding_idx].zero_()
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
@@ -1044,9 +1048,9 @@ class ViTMAEConvModule(nn.Module):
         self.activation = nn.ReLU()
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
-        #print ("conv:{}, input:{},bn:{}".format
-        #        (self.conv.weight.device, input.device, self.bn.weight.device))
+        #print ("### ConvModule: input:\n", input)
         output = self.conv(input)
+        #print ("### ConvModule: after conv output:\n", output)
         output = self.bn(output)
         output = self.activation(output)
 
@@ -1173,8 +1177,11 @@ class ViTMAEUperHead(nn.Module):
     def forward(self, encoder_hidden_states: torch.Tensor) -> torch.Tensor:
         # build laterals
         laterals = [lateral_conv(encoder_hidden_states[i]) for i, lateral_conv in enumerate(self.lateral_convs)]
-
+        #for i in range(len(laterals)):
+            #print ("### UperHead: laterals[{}]:{}\n{}".format(i, laterals[i].shape, laterals[i]))
         laterals.append(self.psp_forward(encoder_hidden_states))
+        #for i in range(len(laterals)):
+        #    print ("### UperHead: after psp_forward laterals[{}]:{}\n{}".format(i, laterals[i].shape, laterals[i]))
 
         # build top-down path
         used_backbone_levels = len(laterals)
@@ -1186,6 +1193,8 @@ class ViTMAEUperHead(nn.Module):
 
         # build outputs
         fpn_outs = [self.fpn_convs[i](laterals[i]) for i in range(used_backbone_levels - 1)]
+        #for i in range(len(fpn_outs)):
+        #    print ("### UperHead: fpn_outs[{}]:{}\n{}".format(i, fpn_outs[i].shape, fpn_outs[i]))
         # append psp feature
         fpn_outs.append(laterals[-1])
 
@@ -1193,8 +1202,12 @@ class ViTMAEUperHead(nn.Module):
             fpn_outs[i] = nn.functional.interpolate(
                 fpn_outs[i], size=fpn_outs[0].shape[2:], mode="bilinear", align_corners=self.align_corners
             )
+        #for i in range(len(fpn_outs)):
+        #    print ("### UperHead: fpn_outs[{}] (after interpolate):{}\n{}".format(i, fpn_outs[i].shape, fpn_outs[i]))
         fpn_outs = torch.cat(fpn_outs, dim=1)
+        #print ("### UperHead: fpn_outs (cat):{}\n{}".format(fpn_outs.shape, fpn_outs))
         output = self.fpn_bottleneck(fpn_outs)
+        #print ("### UperHead: after bottleneck output:\n", output)
         output = self.classifier(output)
 
         return output
@@ -1357,8 +1370,13 @@ class ViTMAEForSemanticSegmentation(ViTMAEPreTrainedModel):
             output_hidden_states=True,  # we need the intermediate hidden states
             return_dict=return_dict,
         )
+        #print ("VIT_MAE:\npixel_val:{}, labels:{}, encoded_hidden_states:{}".format(pixel_values.shape, labels.shape, [x.shape for x in outputs.hidden_states]))
+        
         
         encoder_hidden_states = outputs.hidden_states if return_dict else outputs[1]
+
+        #for i in range(len(encoder_hidden_states)):
+        #    print ("### encoded_hidden_states[{}]:{}\n{}".format(i, outputs.hidden_states[i].shape, outputs.hidden_states[i]))
         #print ("Main vit:{}, encoder_states:{}".format(self.vit.layernorm.weight.device, encoder_hidden_states[0].device), flush=True)
         #print ("Main decode_head.bottleneck:{}, decode_head.lateral_conv.weight:{}, decode_head.psp_modules:{}".format(self.decode_head.bottleneck.conv.weight.device, self.decode_head.lateral_convs[0].conv.weight.device, self.decode_head.psp_modules.blocks[0].layers[1].conv.weight.device), flush=True)
 
@@ -1371,12 +1389,20 @@ class ViTMAEForSemanticSegmentation(ViTMAEPreTrainedModel):
             x[:, 1:, :].permute(0, 2, 1).reshape(batch_size, -1, patch_resolution, patch_resolution) for x in features
         ]
 
+        #print ("@@@ self.fpn1:{}".format(self.fpn1[0].weight))
+        #print ("@@@ self.fpn2:{}".format(self.fpn2[0].weight))
+        #for i in range(len(features)):
+        #    print ("### before fpn: features[{}]:{}\n{}".format(i, features[i].shape, features[i]))
         # apply FPNs
         ops = [self.fpn1, self.fpn2, self.fpn3, self.fpn4]
         for i in range(len(features)):
             features[i] = ops[i](features[i])
-        
+            #print ("### features[{}]:{}\n{}".format(i, features[i].shape, features[i]))
+
         logits = self.decode_head(features)
+
+        
+        #print ("logits:{}\n{}".format(logits.shape, logits))
 
         auxiliary_logits = None
         if self.auxiliary_head is not None:
