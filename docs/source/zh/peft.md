@@ -44,7 +44,7 @@ Transformers原生支持一些PEFT方法，这意味着你可以加载本地存�
 
 - [Low Rank Adapters](https://huggingface.co/docs/peft/conceptual_guides/lora)
 - [IA3](https://huggingface.co/docs/peft/conceptual_guides/ia3)
-- [AdaLoRA](https://arxiv.org/abs/2303.10512)
+- [AdaLoRA](https://huggingface.co/papers/2303.10512)
 
 如果你想使用其他PEFT方法，例如提示学习或提示微调，或者关于通用的 🤗 PEFT库，请参阅[文档](https://huggingface.co/docs/peft/index)。
 
@@ -86,10 +86,10 @@ model.load_adapter(peft_model_id)
 `bitsandbytes`集成支持8bit和4bit精度数据类型，这对于加载大模型非常有用，因为它可以节省内存（请参阅`bitsandbytes`[指南](./quantization#bitsandbytes-integration)以了解更多信息）。要有效地将模型分配到您的硬件，请在[`~PreTrainedModel.from_pretrained`]中添加`load_in_8bit`或`load_in_4bit`参数，并将`device_map="auto"`设置为：
 
 ```py
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 peft_model_id = "ybelkada/opt-350m-lora"
-model = AutoModelForCausalLM.from_pretrained(peft_model_id, device_map="auto", load_in_8bit=True)
+model = AutoModelForCausalLM.from_pretrained(peft_model_id, quantization_config=BitsAndBytesConfig(load_in_8bit=True))
 ```
 
 ## 添加新的adapter

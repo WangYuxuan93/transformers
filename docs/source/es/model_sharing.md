@@ -43,7 +43,7 @@ Como resultado, puedes cargar una versión específica del modelo con el paráme
 
 ```py
 >>> model = AutoModel.from_pretrained(
-...     "julien-c/EsperBERTo-small", revision="v2.0.1"  # tag name, or branch name, or commit hash
+...     "julien-c/EsperBERTo-small", revision="4c77982"  # tag name, or branch name, or commit hash
 ... )
 ```
 
@@ -56,7 +56,7 @@ Los archivos son editados fácilmente dentro de un repositorio. Incluso puedes o
 Antes de compartir un modelo al Hub necesitarás tus credenciales de Hugging Face. Si tienes acceso a una terminal ejecuta el siguiente comando en el entorno virtual donde 🤗 Transformers esté instalado. Esto guardará tu token de acceso dentro de tu carpeta cache de Hugging Face (~/.cache/ by default):
 
 ```bash
-huggingface-cli login
+hf auth login
 ```
 
 Si usas un notebook como Jupyter o Colaboratory, asegúrate de tener instalada la biblioteca [`huggingface_hub`](https://huggingface.co/docs/hub/adding-a-library). Esta biblioteca te permitirá interactuar por código con el Hub.
@@ -220,4 +220,4 @@ Para asegurarnos que los usuarios entiendan las capacidades de tu modelo, sus li
 * Elaborando y subiendo manualmente el archivo`README.md`.
 * Dando click en el botón **Edit model card** dentro del repositorio.
 
-Toma un momento para ver la [tarjeta de modelo](https://huggingface.co/distilbert-base-uncased) de DistilBert para que tengas un buen ejemplo del tipo de información que debería incluir. Consulta [la documentación](https://huggingface.co/docs/hub/models-cards) para más detalles acerca de otras opciones que puedes controlar dentro del archivo `README.md` como la huella de carbono del modelo o ejemplos de widgets. Consulta la documentación [aquí] (https://huggingface.co/docs/hub/models-cards).
+Toma un momento para ver la [tarjeta de modelo](https://huggingface.co/distilbert/distilbert-base-uncased) de DistilBert para que tengas un buen ejemplo del tipo de información que debería incluir. Consulta [la documentación](https://huggingface.co/docs/hub/models-cards) para más detalles acerca de otras opciones que puedes controlar dentro del archivo `README.md` como la huella de carbono del modelo o ejemplos de widgets. Consulta la documentación [aquí](https://huggingface.co/docs/hub/models-cards).

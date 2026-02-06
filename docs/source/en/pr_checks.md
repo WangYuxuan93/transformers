@@ -21,6 +21,7 @@ rendered properly in your Markdown viewer.
 # Checks on a Pull Request
 
 When you open a pull request on 🤗 Transformers, a fair number of checks will be run to make sure the patch you are adding is not breaking anything existing. Those checks are of four types:
+
 - regular tests
 - documentation build
 - code and documentation style
@@ -37,10 +38,10 @@ pip install transformers[dev]
 or for an editable install:
 
 ```bash
-pip install -e .[dev]
+pip install -e ".[dev]"
 ```
 
-inside the Transformers repo. Since the number of optional dependencies of Transformers has grown a lot, it's possible you don't manage to get all of them. If the dev install fails, make sure to install the Deep Learning framework you are working with (PyTorch, TensorFlow and/or Flax) then do
+inside the Transformers repo. Since the number of optional dependencies of Transformers has grown a lot, it's possible you don't manage to get all of them. If the dev install fails, make sure to install PyTorch then do
 
 ```bash
 pip install transformers[quality]
@@ -49,13 +50,12 @@ pip install transformers[quality]
 or for an editable install:
 
 ```bash
-pip install -e .[quality]
+pip install -e ".[quality]"
 ```
-
 
 ## Tests
 
-All the jobs that begin with `ci/circleci: run_tests_` run parts of the Transformers testing suite. Each of those jobs focuses on a part of the library in a certain environment: for instance `ci/circleci: run_tests_pipelines_tf` runs the pipelines test in an environment where TensorFlow only is installed.
+All the jobs that begin with `ci/circleci: run_tests_` run parts of the Transformers testing suite. Each of those jobs focuses on a part of the library in a certain environment: for instance `ci/circleci: run_tests_pipelines` runs the pipeline tests in an environment where all pipeline-related requirements are installed.
 
 Note that to avoid running tests when there is no real change in the modules they are testing, only part of the test suite is run each time: a utility is run to determine the differences in the library between before and after the PR (what GitHub shows you in the "Files changes" tab) and picks the tests impacted by that diff. That utility can be run locally with:
 
@@ -95,13 +95,7 @@ make style
 The CI checks those have been applied inside the `ci/circleci: check_code_quality` check. It also runs `ruff`, that will have a basic look at your code and will complain if it finds an undefined variable, or one that is not used. To run that check locally, use
 
 ```bash
-make quality
-```
-
-This can take a lot of time, so to run the same thing on only the files you modified in the current branch, run
-
-```bash
-make fixup
+make check-repo
 ```
 
 This last command will also run all the additional checks for the repository consistency. Let's have a look at them.
@@ -111,7 +105,7 @@ This last command will also run all the additional checks for the repository con
 This regroups all the tests to make sure your PR leaves the repository in a good state, and is performed by the `ci/circleci: check_repository_consistency` check. You can locally run that check by executing the following:
 
 ```bash
-make repo-consistency
+make check-repo
 ```
 
 This checks that:
@@ -129,7 +123,7 @@ This checks that:
 Should this check fail, the first two items require manual fixing, the last four can be fixed automatically for you by running the command
 
 ```bash
-make fix-copies
+make fix-repo
 ```
 
 Additional checks concern PRs that add new models, mainly that:
@@ -166,7 +160,7 @@ Note that instead of applying this to a whole class, you can apply it to the rel
 # Copied from transformers.models.bert.modeling_bert.BertPreTrainedModel._init_weights
 ```
 
-Sometimes the copy is exactly the same except for names: for instance in `RobertaAttention`, we use `RobertaSelfAttention` insted of `BertSelfAttention` but other than that, the code is exactly the same. This is why `# Copied from` supports simple string replacements with the follwoing syntax: `Copied from xxx with foo->bar`. This means the code is copied with all instances of `foo` being replaced by `bar`. You can see how it used [here](https://github.com/huggingface/transformers/blob/2bd7a27a671fd1d98059124024f580f8f5c0f3b5/src/transformers/models/roberta/modeling_roberta.py#L304C1-L304C86) in `RobertaAttention` with the comment:
+Sometimes the copy is exactly the same except for names: for instance in `RobertaAttention`, we use `RobertaSelfAttention` instead of `BertSelfAttention` but other than that, the code is exactly the same. This is why `# Copied from` supports simple string replacements with the following syntax: `Copied from xxx with foo->bar`. This means the code is copied with all instances of `foo` being replaced by `bar`. You can see how it used [here](https://github.com/huggingface/transformers/blob/2bd7a27a671fd1d98059124024f580f8f5c0f3b5/src/transformers/models/roberta/modeling_roberta.py#L304C1-L304C86) in `RobertaAttention` with the comment:
 
 ```py
 # Copied from transformers.models.bert.modeling_bert.BertAttention with Bert->Roberta
@@ -195,6 +189,7 @@ Another way when the patterns are just different casings of the same replacement
 ```
 
 In this case, the code is copied from `BertForSequenceClassification` by replacing:
+
 - `Bert` by `MobileBert` (for instance when using `MobileBertModel` in the init)
 - `bert` by `mobilebert` (for instance when defining `self.mobilebert`)
 - `BERT` by `MOBILEBERT` (in the constant `MOBILEBERT_INPUTS_DOCSTRING`)

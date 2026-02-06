@@ -37,7 +37,7 @@ DeepMind によって最初に開発された最先端の視覚言語モデル�
 このアプローチは、個別のタスクごとに特化したモデルを微調整するよりも、ユースケースに適しています。
 
 このガイドでは、次の方法を学習します。
-- [IDEFICS をロード](#loading-the-model) および [モデルの量子化バージョンをロード](#loading-the-quantized-version-of-the-model)
+- [IDEFICS をロード](#loading-the-model) および [モデルの量子化バージョンをロード](#quantized-model)
 - IDEFICS を次の目的で使用します。
   - [画像キャプション](#image-captioning)
   - [プロンプト画像キャプション](#prompted-image-captioning)
@@ -78,7 +78,7 @@ IDEFICS プロセッサは、[`LlamaTokenizer`] と IDEFICS 画像プロセッ�
 
 >>> processor = AutoProcessor.from_pretrained(checkpoint)
 
->>> model = IdeficsForVisionText2Text.from_pretrained(checkpoint, torch_dtype=torch.bfloat16, device_map="auto")
+>>> model = IdeficsForVisionText2Text.from_pretrained(checkpoint, dtype=torch.bfloat16, device_map="auto")
 ```
 
 `device_map`を`auto`に設定すると、モデルの重みを最も最適化された状態でロードおよび保存する方法が自動的に決定されます。
@@ -395,7 +395,7 @@ This is an image of a vegetable stand.
 >>> device = "cuda" if torch.cuda.is_available() else "cpu"
 
 >>> checkpoint = "HuggingFaceM4/idefics-9b-instruct"
->>> model = IdeficsForVisionText2Text.from_pretrained(checkpoint, torch_dtype=torch.bfloat16).to(device)
+>>> model = IdeficsForVisionText2Text.from_pretrained(checkpoint, dtype=torch.bfloat16).to(device)
 >>> processor = AutoProcessor.from_pretrained(checkpoint)
 
 >>> prompts = [

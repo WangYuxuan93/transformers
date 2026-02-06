@@ -30,7 +30,7 @@ transformers.logging.set_verbosity_info()
 ```
 
 You can also use the environment variable `TRANSFORMERS_VERBOSITY` to override the default verbosity. You can set it
-to one of the following: `debug`, `info`, `warning`, `error`, `critical`. For example:
+to one of the following: `debug`, `info`, `warning`, `error`, `critical`, `fatal`. For example:
 
 ```bash
 TRANSFORMERS_VERBOSITY=error ./myprogram.py
@@ -55,7 +55,6 @@ logger.info("INFO")
 logger.warning("WARN")
 ```
 
-
 All the methods of this logging module are documented below, the main ones are
 [`logging.get_verbosity`] to get the current level of verbosity in the logger and
 [`logging.set_verbosity`] to set the verbosity to the level of your choice. In order (from the least
@@ -65,7 +64,7 @@ verbose to the most verbose), those levels (with their corresponding int values 
   critical errors.
 - `transformers.logging.ERROR` (int value, 40): only report errors.
 - `transformers.logging.WARNING` or `transformers.logging.WARN` (int value, 30): only reports error and
-  warnings. This the default level used by the library.
+  warnings. This is the default level used by the library.
 - `transformers.logging.INFO` (int value, 20): reports error, warnings and basic information.
 - `transformers.logging.DEBUG` (int value, 10): report all information.
 
@@ -77,10 +76,11 @@ Python has two logging systems that are often used in conjunction: `logging`, wh
 which allows further classification of warnings in specific buckets, e.g., `FutureWarning` for a feature or path
 that has already been deprecated and `DeprecationWarning` to indicate an upcoming deprecation.
 
-We use both in the `transformers` library. We leverage and adapt `logging`'s `captureWarning` method to allow
+We use both in the `transformers` library. We leverage and adapt `logging`'s `captureWarnings` method to allow
 management of these warning messages by the verbosity setters above.
 
-What does that mean for developers of the library? We should respect the following heuristic:
+What does that mean for developers of the library? We should respect the following heuristics:
+
 - `warnings` should be favored for developers of the library and libraries dependent on `transformers`
 - `logging` should be used for end-users of the library using it in every-day projects
 

@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2022, The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,12 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch PLBART model. """
-
+"""Testing suite for the PyTorch PLBART model."""
 
 import copy
 import tempfile
 import unittest
+from functools import cached_property
 
 from transformers import PLBartConfig, is_torch_available
 from transformers.testing_utils import (
@@ -28,7 +27,6 @@ from transformers.testing_utils import (
     slow,
     torch_device,
 )
-from transformers.utils import cached_property
 
 from ...generation.test_utils import GenerationTesterMixin
 from ...test_configuration_common import ConfigTester
@@ -55,28 +53,17 @@ def prepare_plbart_inputs_dict(
     decoder_input_ids,
     attention_mask=None,
     decoder_attention_mask=None,
-    head_mask=None,
-    decoder_head_mask=None,
-    cross_attn_head_mask=None,
 ):
     if attention_mask is None:
         attention_mask = input_ids.ne(config.pad_token_id)
     if decoder_attention_mask is None:
         decoder_attention_mask = decoder_input_ids.ne(config.pad_token_id)
-    if head_mask is None:
-        head_mask = torch.ones(config.encoder_layers, config.encoder_attention_heads, device=torch_device)
-    if decoder_head_mask is None:
-        decoder_head_mask = torch.ones(config.decoder_layers, config.decoder_attention_heads, device=torch_device)
-    if cross_attn_head_mask is None:
-        cross_attn_head_mask = torch.ones(config.decoder_layers, config.decoder_attention_heads, device=torch_device)
+
     return {
         "input_ids": input_ids,
         "decoder_input_ids": decoder_input_ids,
         "attention_mask": attention_mask,
         "decoder_attention_mask": attention_mask,
-        "head_mask": head_mask,
-        "decoder_head_mask": decoder_head_mask,
-        "cross_attn_head_mask": cross_attn_head_mask,
     }
 
 
@@ -156,10 +143,9 @@ class PLBartModelTester:
         model = PLBartModel(config=config).get_decoder().to(torch_device).eval()
         input_ids = inputs_dict["input_ids"]
         attention_mask = inputs_dict["attention_mask"]
-        head_mask = inputs_dict["head_mask"]
 
         # first forward pass
-        outputs = model(input_ids, attention_mask=attention_mask, head_mask=head_mask, use_cache=True)
+        outputs = model(input_ids, attention_mask=attention_mask, use_cache=True)
 
         output, past_key_values = outputs.to_tuple()
 
@@ -225,10 +211,8 @@ class PLBartModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMix
     all_model_classes = (
         (PLBartModel, PLBartForConditionalGeneration, PLBartForSequenceClassification) if is_torch_available() else ()
     )
-    all_generative_model_classes = (PLBartForConditionalGeneration,) if is_torch_available() else ()
     pipeline_model_mapping = (
         {
-            "conversational": PLBartForConditionalGeneration,
             "feature-extraction": PLBartModel,
             "summarization": PLBartForConditionalGeneration,
             "text-classification": PLBartForSequenceClassification,
@@ -241,15 +225,21 @@ class PLBartModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMix
         else {}
     )
     is_encoder_decoder = True
-    fx_compatible = False  # Fix me Michael
-    test_pruning = False
+
     test_missing_keys = False
 
     # TODO: Fix the failed tests
     def is_pipeline_test_to_skip(
-        self, pipeline_test_casse_name, config_class, model_architecture, tokenizer_name, processor_name
+        self,
+        pipeline_test_case_name,
+        config_class,
+        model_architecture,
+        tokenizer_name,
+        image_processor_name,
+        feature_extractor_name,
+        processor_name,
     ):
-        if pipeline_test_casse_name == "TranslationPipelineTests":
+        if pipeline_test_case_name == "TranslationPipelineTests":
             # Get `ValueError: Translation requires a `src_lang` and a `tgt_lang` for this model`.
             # `PLBartConfig` was never used in pipeline tests: cannot create a simple tokenizer.
             return True
@@ -271,7 +261,7 @@ class PLBartModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMix
             with tempfile.TemporaryDirectory() as tmpdirname:
                 model.save_pretrained(tmpdirname)
                 model2, info = model_class.from_pretrained(tmpdirname, output_loading_info=True)
-            self.assertEqual(info["missing_keys"], [])
+            self.assertEqual(info["missing_keys"], set())
 
     def test_decoder_model_past_with_large_inputs(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
@@ -321,8 +311,14 @@ class PLBartModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMix
         model.generate(input_ids, attention_mask=attention_mask)
         model.generate(num_beams=4, do_sample=True, early_stopping=False, num_return_sequences=3)
 
-    @unittest.skip("Failing since #26752")
+    @unittest.skip(reason="Failing since #26752")
     def test_sample_generate(self):
+        pass
+
+    @unittest.skip(
+        reason="This architecture has tied weights by default and there is no way to remove it, check: https://github.com/huggingface/transformers/pull/31771#issuecomment-2210915245"
+    )
+    def test_load_save_without_tied_weights(self):
         pass
 
 
@@ -333,7 +329,7 @@ def assert_tensors_close(a, b, atol=1e-12, prefix=""):
     try:
         if torch.allclose(a, b, atol=atol):
             return True
-        raise
+        raise Exception
     except Exception:
         pct_different = (torch.gt((a - b).abs(), atol)).float().mean().item()
         if a.numel() > 100:
@@ -391,7 +387,7 @@ class PLBartJavaCsIntegrationTest(AbstractSeq2SeqIntegrationTest):
         )
         batch = batch.to(torch_device)
         translated_tokens = self.model.generate(**batch)
-        decoded = self.tokenizer.batch_decode(translated_tokens, skip_special_tokens=True)
+        decoded = self.tokenizer.decode(translated_tokens, skip_special_tokens=True)
         self.assertEqual(self.tgt_text[0], decoded[0])
         # self.assertEqual(self.tgt_text[1], decoded[1])
 
@@ -400,7 +396,7 @@ class PLBartJavaCsIntegrationTest(AbstractSeq2SeqIntegrationTest):
         batch = self.tokenizer(self.src_text, return_tensors="pt", padding=True, truncation=True)
         batch = batch.to(torch_device)
         translated_tokens = self.model.generate(**batch)
-        decoded = self.tokenizer.batch_decode(translated_tokens, skip_special_tokens=True)
+        decoded = self.tokenizer.decode(translated_tokens, skip_special_tokens=True)
         assert self.tgt_text == decoded
 
     def test_plbart_java_cs_config(self):
@@ -441,6 +437,7 @@ class PLBartJavaCsIntegrationTest(AbstractSeq2SeqIntegrationTest):
 @require_torch
 @require_sentencepiece
 @require_tokenizers
+@slow
 class PLBartBaseIntegrationTest(AbstractSeq2SeqIntegrationTest):
     checkpoint_name = "uclanlp/plbart-base"
     src_text = ["Is 0 the first Fibonacci number ?", "Find the sum of all prime numbers ."]
@@ -453,19 +450,18 @@ class PLBartBaseIntegrationTest(AbstractSeq2SeqIntegrationTest):
             input_ids=inputs["input_ids"].to(torch_device),
             decoder_start_token_id=self.tokenizer.lang_code_to_id[src_lan],
         )
-        decoded = self.tokenizer.batch_decode(translated_tokens, skip_special_tokens=True)
+        decoded = self.tokenizer.decode(translated_tokens, skip_special_tokens=True)
         self.assertEqual(self.tgt_text[0], decoded[0])
 
-    @slow
     def test_fill_mask(self):
         inputs = self.tokenizer(["Is 0 the <mask> Fibonacci <mask> ?"], return_tensors="pt").to(torch_device)
         src_lan = self.tokenizer._convert_lang_code_special_format("en_XX")
         outputs = self.model.generate(
             inputs["input_ids"], decoder_start_token_id=self.tokenizer.lang_code_to_id[src_lan], num_beams=1
         )
-        prediction: str = self.tokenizer.batch_decode(
-            outputs, clean_up_tokenization_spaces=True, skip_special_tokens=True
-        )[0]
+        prediction: str = self.tokenizer.decode(outputs, clean_up_tokenization_spaces=True, skip_special_tokens=True)[
+            0
+        ]
         self.assertEqual(prediction, "0 0 the 0 the 0 the 0 the 0 the 0 the 0 the 0 the")
 
 
@@ -487,7 +483,7 @@ class PLBartStandaloneDecoderModelTester:
         decoder_layers=2,
         encoder_attention_heads=4,
         decoder_attention_heads=4,
-        max_position_embeddings=30,
+        max_position_embeddings=50,
         is_encoder_decoder=False,
         pad_token_id=0,
         bos_token_id=1,
@@ -540,6 +536,7 @@ class PLBartStandaloneDecoderModelTester:
             vocab_size=self.vocab_size,
             d_model=self.d_model,
             decoder_layers=self.decoder_layers,
+            num_hidden_layers=self.decoder_layers,
             decoder_ffn_dim=self.decoder_ffn_dim,
             encoder_attention_heads=self.encoder_attention_heads,
             decoder_attention_heads=self.decoder_attention_heads,
@@ -625,9 +622,9 @@ class PLBartStandaloneDecoderModelTester:
 
         # get two different outputs
         output_from_no_past = model(next_input_ids, attention_mask=attn_mask)["last_hidden_state"]
-        output_from_past = model(next_tokens, attention_mask=attn_mask, past_key_values=past_key_values)[
-            "last_hidden_state"
-        ]
+        output_from_past = model(
+            next_tokens, attention_mask=attn_mask, past_key_values=past_key_values, use_cache=True
+        )["last_hidden_state"]
 
         # select random slice
         random_slice_idx = ids_tensor((1,), output_from_past.shape[-1]).item()
@@ -647,8 +644,7 @@ class PLBartStandaloneDecoderModelTester:
 @require_torch
 class PLBartStandaloneDecoderModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase):
     all_model_classes = (PLBartDecoder, PLBartForCausalLM) if is_torch_available() else ()
-    all_generative_model_classes = (PLBartForCausalLM,) if is_torch_available() else ()
-    test_pruning = False
+
     is_encoder_decoder = False
 
     def setUp(self):
@@ -666,10 +662,10 @@ class PLBartStandaloneDecoderModelTest(ModelTesterMixin, GenerationTesterMixin, 
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_decoder_model_attention_mask_past(*config_and_inputs)
 
+    @unittest.skip(reason="Decoder cannot keep gradients")
     def test_retain_grad_hidden_states_attentions(self):
-        # decoder cannot keep gradients
         return
 
-    @unittest.skip("The model doesn't support left padding")  # and it's not used enough to be worth fixing :)
-    def test_left_padding_compatibility(self):
-        pass
+    @unittest.skip(reason="Decoder cannot keep gradients")
+    def test_flex_attention_with_grads():
+        return

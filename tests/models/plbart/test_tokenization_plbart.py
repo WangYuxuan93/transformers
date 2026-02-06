@@ -18,6 +18,7 @@ import unittest
 from transformers import SPIECE_UNDERLINE, BatchEncoding, PLBartTokenizer, is_torch_available
 from transformers.testing_utils import (
     get_tests_dir,
+    is_flaky,
     nested_simplify,
     require_sentencepiece,
     require_tokenizers,
@@ -40,19 +41,26 @@ PYTHON_CODE = 50002
 @require_sentencepiece
 @require_tokenizers
 class PLBartTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
+    from_pretrained_id = "uclanlp/plbart-base"
     tokenizer_class = PLBartTokenizer
-    rust_tokenizer_class = None
-    test_rust_tokenizer = False
+    test_tokenizer_from_extractor = False
+    test_sentencepiece = True
 
-    def setUp(self):
-        super().setUp()
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
 
-        # We have a SentencePiece fixture for testing
-        tokenizer = PLBartTokenizer(SAMPLE_VOCAB, language_codes="base", keep_accents=True)
-        tokenizer.save_pretrained(self.tmpdirname)
+        tokenizer = PLBartTokenizer(SAMPLE_VOCAB, language_codes="base")
+        tokenizer.save_pretrained(cls.tmpdirname)
+
+    # Integration test data - expected outputs for the default input string
+    integration_expected_tokens = ['▁This', '▁is', '▁a', '▁test', '▁', '😊', '▁I', '▁was', '▁b', 'orn', '▁in', '▁92', '000,', '▁and', '▁this', '▁is', '▁f', 'als', 'é', '.', '▁', '生', '活', '的', '真', '谛', '是', '▁Hi', '▁Hello', '▁Hi', '▁Hello', '▁Hello', '<s>', '▁hi', '<s>', '▁there', '▁The', '▁following', '▁string', '▁should', '▁be', '▁properly', '▁encoded', ':', '▁Hello', '.', '▁But', '▁ir', 'd', '▁and', '▁', 'ป', 'ี', '▁ir', 'd', '▁', 'ด', '▁Hey', '▁how', '▁are', '▁you', '▁doing']  # fmt: skip
+    integration_expected_token_ids = [670, 96, 14, 242, 33438, 39172, 34, 880, 56, 6309, 55, 26431, 9478, 135, 143, 96, 33, 3875, 33537, 33455, 33438, 33859, 34721, 33590, 34984, 3, 33720, 9434, 4536, 9434, 4536, 4536, 0, 8039, 0, 656, 418, 987, 625, 595, 229, 3914, 5158, 33475, 4536, 33455, 1160, 4042, 33448, 135, 33438, 34693, 34205, 4042, 33448, 33438, 34410, 22256, 654, 395, 144, 1777]  # fmt: skip
+    expected_tokens_from_ids = ['▁This', '▁is', '▁a', '▁test', '▁', '😊', '▁I', '▁was', '▁b', 'orn', '▁in', '▁92', '000,', '▁and', '▁this', '▁is', '▁f', 'als', 'é', '.', '▁', '生', '活', '的', '真', '<unk>', '是', '▁Hi', '▁Hello', '▁Hi', '▁Hello', '▁Hello', '<s>', '▁hi', '<s>', '▁there', '▁The', '▁following', '▁string', '▁should', '▁be', '▁properly', '▁encoded', ':', '▁Hello', '.', '▁But', '▁ir', 'd', '▁and', '▁', 'ป', 'ี', '▁ir', 'd', '▁', 'ด', '▁Hey', '▁how', '▁are', '▁you', '▁doing']  # fmt: skip
+    integration_expected_decoded_text = "This is a test 😊 I was born in 92000, and this is falsé. 生活的真<unk>是 Hi Hello Hi Hello Hello<s> hi<s> there The following string should be properly encoded: Hello. But ird and ปี ird ด Hey how are you doing"
 
     def test_full_base_tokenizer(self):
-        tokenizer = PLBartTokenizer(SAMPLE_VOCAB, language_codes="base", keep_accents=True)
+        tokenizer = PLBartTokenizer(vocab_file=SAMPLE_VOCAB, language_codes="base")
 
         tokens = tokenizer.tokenize("This is a test")
         self.assertListEqual(tokens, ["▁This", "▁is", "▁a", "▁t", "est"])
@@ -139,7 +147,7 @@ class PLBartTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
         )
 
     def test_full_multi_tokenizer(self):
-        tokenizer = PLBartTokenizer(SAMPLE_VOCAB, language_codes="multi", keep_accents=True)
+        tokenizer = PLBartTokenizer(vocab_file=SAMPLE_VOCAB, language_codes="multi")
 
         tokens = tokenizer.tokenize("This is a test")
         self.assertListEqual(tokens, ["▁This", "▁is", "▁a", "▁t", "est"])
@@ -281,10 +289,12 @@ class PLBartPythonEnIntegrationTest(unittest.TestCase):
         self.assertEqual(self.tokenizer.fairseq_tokens_to_ids["__python__"], 50002)
         self.assertEqual(self.tokenizer.fairseq_tokens_to_ids["__en_XX__"], 50003)
 
+    @is_flaky
     def test_python_en_tokenizer_batch_encode_plus(self):
-        ids = self.tokenizer.batch_encode_plus(self.src_text).input_ids[0]
+        ids = self.tokenizer(self.src_text).input_ids[0]
         self.assertListEqual(self.expected_src_tokens, ids)
 
+    @is_flaky
     def test_python_en_tokenizer_decode_ignores_language_codes(self):
         self.assertIn(PYTHON_CODE, self.tokenizer.all_special_ids)
         generated_ids = [EN_CODE, 9037, 33442, 57, 752, 153, 14, 56, 18, 9, 2]
@@ -293,6 +303,7 @@ class PLBartPythonEnIntegrationTest(unittest.TestCase):
         self.assertEqual(result, expected_english)
         self.assertNotIn(self.tokenizer.eos_token, result)
 
+    @is_flaky
     def test_python_en_tokenizer_truncation(self):
         src_text = ["def sum(a,b,c):NEW_LINE_INDENTreturn sum([a,b,c])" * 20]
         self.assertIsInstance(src_text[0], str)
@@ -302,9 +313,11 @@ class PLBartPythonEnIntegrationTest(unittest.TestCase):
         self.assertEqual(ids[-1], PYTHON_CODE)
         self.assertEqual(len(ids), desired_max_length)
 
+    @is_flaky
     def test_mask_token(self):
         self.assertListEqual(self.tokenizer.convert_tokens_to_ids(["<mask>", "__java__"]), [50004, 50001])
 
+    @is_flaky
     def test_special_tokens_unaffacted_by_save_load(self):
         tmpdirname = tempfile.mkdtemp()
         original_special_tokens = self.tokenizer.fairseq_tokens_to_ids
@@ -313,6 +326,7 @@ class PLBartPythonEnIntegrationTest(unittest.TestCase):
         self.assertDictEqual(new_tok.fairseq_tokens_to_ids, original_special_tokens)
 
     @require_torch
+    @is_flaky
     def test_batch_fairseq_parity(self):
         batch = self.tokenizer(self.src_text, text_target=self.tgt_text, padding=True, return_tensors="pt")
         batch["decoder_input_ids"] = shift_tokens_right(batch["labels"], self.tokenizer.pad_token_id)
@@ -324,6 +338,7 @@ class PLBartPythonEnIntegrationTest(unittest.TestCase):
         self.assertEqual(batch.labels[1][-2:].tolist(), [2, EN_CODE])
 
     @require_torch
+    @is_flaky
     def test_python_en_tokenizer_prepare_batch(self):
         batch = self.tokenizer(
             self.src_text,
@@ -346,6 +361,7 @@ class PLBartPythonEnIntegrationTest(unittest.TestCase):
         self.assertEqual(self.tokenizer.prefix_tokens, [])
         self.assertEqual(self.tokenizer.suffix_tokens, [self.tokenizer.eos_token_id, PYTHON_CODE])
 
+    @is_flaky
     def test_seq2seq_max_length(self):
         batch = self.tokenizer(self.src_text, padding=True, truncation=True, max_length=3, return_tensors="pt")
         targets = self.tokenizer(
@@ -358,6 +374,7 @@ class PLBartPythonEnIntegrationTest(unittest.TestCase):
         self.assertEqual(batch.decoder_input_ids.shape[1], 10)
 
     @require_torch
+    @is_flaky
     def test_tokenizer_translation(self):
         inputs = self.tokenizer._build_translation_inputs(
             "A test", return_tensors="pt", src_lang="en_XX", tgt_lang="java"

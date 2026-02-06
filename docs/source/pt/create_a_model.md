@@ -83,19 +83,19 @@ DistilBertConfig {
 }
 ```
 
-Atributos de um modelo pré-treinado podem ser modificados na função [`~PretrainedConfig.from_pretrained`]:
+Atributos de um modelo pré-treinado podem ser modificados na função [`~PreTrainedConfig.from_pretrained`]:
 
 ```py
->>> my_config = DistilBertConfig.from_pretrained("distilbert-base-uncased", activation="relu", attention_dropout=0.4)
+>>> my_config = DistilBertConfig.from_pretrained("distilbert/distilbert-base-uncased", activation="relu", attention_dropout=0.4)
 ```
 
-Uma vez que você está satisfeito com as configurações do seu modelo, você consegue salvar elas com [`~PretrainedConfig.save_pretrained`]. Seu arquivo de configurações está salvo como um arquivo JSON no diretório especificado:
+Uma vez que você está satisfeito com as configurações do seu modelo, você consegue salvar elas com [`~PreTrainedConfig.save_pretrained`]. Seu arquivo de configurações está salvo como um arquivo JSON no diretório especificado:
 
 ```py
 >>> my_config.save_pretrained(save_directory="./your_model_save_path")
 ```
 
-Para reusar o arquivo de configurações, carregue com [`~PretrainedConfig.from_pretrained`]:
+Para reusar o arquivo de configurações, carregue com [`~PreTrainedConfig.from_pretrained`]:
 
 ```py
 >>> my_config = DistilBertConfig.from_pretrained("./your_model_save_path/my_config.json")
@@ -111,8 +111,6 @@ Você pode também salvar seu arquivo de configurações como um dicionário ou 
 
 O próximo passo é criar um [model](main_classes/models). O modelo - também vagamente referido como arquitetura - define o que cada camada está fazendo e quais operações estão acontecendo. Atributos como `num_hidden_layers` das configurações são utilizados para definir a arquitetura. Todo modelo compartilha a classe base [`PreTrainedModel`] e alguns métodos em comum como redimensionar o tamanho dos embeddings de entrada e podar as 'self-attention heads'. Além disso, todos os modelos também são subclasses de [`torch.nn.Module`](https://pytorch.org/docs/stable/generated/torch.nn.Module.html), [`tf.keras.Model`](https://www.tensorflow.org/api_docs/python/tf/keras/Model) ou [`flax.linen.Module`](https://flax.readthedocs.io/en/latest/api_reference/flax.linen/module.html). Isso significa que os modelos são compatíveis com cada respectivo uso de framework.
 
-<frameworkcontent>
-<pt>
 Carregar seus atributos de configuração customizados em um modelo:
 
 ```py
@@ -127,53 +125,25 @@ Isso cria um modelo com valores aleatórios ao invés de pré-treinar os pesos. 
 Criar um modelo pré-treinado com [`~PreTrainedModel.from_pretrained`]:
 
 ```py
->>> model = DistilBertModel.from_pretrained("distilbert-base-uncased")
+>>> model = DistilBertModel.from_pretrained("distilbert/distilbert-base-uncased")
 ```
 
 Quando você carregar os pesos pré-treinados, a configuração padrão do modelo é automaticamente carregada se o modelo é provido pelo 🤗 Transformers. No entanto, você ainda consegue mudar - alguns ou todos - os atributos padrões de configuração do modelo com os seus próprio atributos, se você preferir: 
 
 ```py
->>> model = DistilBertModel.from_pretrained("distilbert-base-uncased", config=my_config)
+>>> model = DistilBertModel.from_pretrained("distilbert/distilbert-base-uncased", config=my_config)
 ```
-</pt>
-<tf>
-Carregar os seus próprios atributos padrões de contiguração no modelo:
-
-```py
->>> from transformers import TFDistilBertModel
-
->>> my_config = DistilBertConfig.from_pretrained("./your_model_save_path/my_config.json")
->>> tf_model = TFDistilBertModel(my_config)
-```
-
-Isso cria um modelo com valores aleatórios ao invés de pré-treinar os pesos. Você não irá conseguir usar usar esse modelo para nada útil ainda, até você treinar ele. Treino é um processo caro e demorado. Geralmente é melhor utilizar um modelo pré-treinado para obter melhores resultados mais rápido, enquanto usa apenas uma fração dos recursos necessários para treinar.
-
-Criar um modelo pré-treinado com [`~TFPreTrainedModel.from_pretrained`]:
-
-```py
->>> tf_model = TFDistilBertModel.from_pretrained("distilbert-base-uncased")
-```
-
-Quando você carregar os pesos pré-treinados, a configuração padrão do modelo é automaticamente carregada se o modelo é provido pelo 🤗 Transformers. No entanto, você ainda consegue mudar - alguns ou todos - os atributos padrões de configuração do modelo com os seus próprio atributos, se você preferir: 
-
-```py
->>> tf_model = TFDistilBertModel.from_pretrained("distilbert-base-uncased", config=my_config)
-```
-</tf>
-</frameworkcontent>
 
 ### Heads do modelo
 
 Neste ponto, você tem um modelo básico do DistilBERT que gera os *estados ocultos*. Os estados ocultos são passados como entrada para a head do moelo para produzir a saída final. 🤗 Transformers fornece uma head de modelo diferente para cada tarefa desde que o modelo suporte essa tarefa (por exemplo, você não consegue utilizar o modelo DistilBERT para uma tarefa de 'sequence-to-sequence' como tradução).
 
-<frameworkcontent>
-<pt>
 Por exemplo, [`DistilBertForSequenceClassification`] é um modelo DistilBERT base com uma head de classificação de sequência. A head de calssificação de sequência é uma camada linear no topo das saídas agrupadas.
 
 ```py
 >>> from transformers import DistilBertForSequenceClassification
 
->>> model = DistilBertForSequenceClassification.from_pretrained("distilbert-base-uncased")
+>>> model = DistilBertForSequenceClassification.from_pretrained("distilbert/distilbert-base-uncased")
 ```
 
 Reutilize facilmente esse ponto de parada para outra tarefe mudando para uma head de modelo diferente. Para uma tarefe de responder questões, você usaria a head do modelo [`DistilBertForQuestionAnswering`]. A head de responder questões é similar com a de classificação de sequências exceto o fato de que ela é uma camada no topo dos estados das saídas ocultas.
@@ -181,27 +151,8 @@ Reutilize facilmente esse ponto de parada para outra tarefe mudando para uma hea
 ```py
 >>> from transformers import DistilBertForQuestionAnswering
 
->>> model = DistilBertForQuestionAnswering.from_pretrained("distilbert-base-uncased")
+>>> model = DistilBertForQuestionAnswering.from_pretrained("distilbert/distilbert-base-uncased")
 ```
-</pt>
-<tf>
-Por exemplo, [`TFDistilBertForSequenceClassification`] é um modelo DistilBERT base com uma head de classificação de sequência. A head de calssificação de sequência é uma camada linear no topo das saídas agrupadas.
-
-```py
->>> from transformers import TFDistilBertForSequenceClassification
-
->>> tf_model = TFDistilBertForSequenceClassification.from_pretrained("distilbert-base-uncased")
-```
-
-Reutilize facilmente esse ponto de parada para outra tarefe mudando para uma head de modelo diferente. Para uma tarefe de responder questões, você usaria a head do modelo [`TFDistilBertForQuestionAnswering`]. A head de responder questões é similar com a de classificação de sequências exceto o fato de que ela é uma camada no topo dos estados das saídas ocultas.
-
-```py
->>> from transformers import TFDistilBertForQuestionAnswering
-
->>> tf_model = TFDistilBertForQuestionAnswering.from_pretrained("distilbert-base-uncased")
-```
-</tf>
-</frameworkcontent>
 
 ## Tokenizer
 
@@ -231,7 +182,7 @@ Se você treinou seu prórpio tokenizer, você pode criar um a partir do seu arq
 ```py
 >>> from transformers import DistilBertTokenizer
 
->>> slow_tokenizer = DistilBertTokenizer.from_pretrained("distilbert-base-uncased")
+>>> slow_tokenizer = DistilBertTokenizer.from_pretrained("distilbert/distilbert-base-uncased")
 ```
 
 Criando um 'fast tokenizer' com a classe [`DistilBertTokenizerFast`]:
@@ -239,7 +190,7 @@ Criando um 'fast tokenizer' com a classe [`DistilBertTokenizerFast`]:
 ```py
 >>> from transformers import DistilBertTokenizerFast
 
->>> fast_tokenizer = DistilBertTokenizerFast.from_pretrained("distilbert-base-uncased")
+>>> fast_tokenizer = DistilBertTokenizerFast.from_pretrained("distilbert/distilbert-base-uncased")
 ```
 
 <Tip>

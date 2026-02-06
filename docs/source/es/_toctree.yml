@@ -31,11 +31,15 @@
       title: Generación de resúmenes
     - local: tasks/multiple_choice
       title: Selección múltiple
+    - local: tasks/image_captioning
+      title: Subtítulos de imágenes
     title: Procesamiento del Lenguaje Natural
   - isExpanded: false
     sections:
     - local: tasks/asr
       title: Reconocimiento automático del habla
+    - local: tasks/audio_classification
+      title: Clasificación de audio
     title: Audio
   - isExpanded: false
     sections:
@@ -54,12 +58,12 @@
     title: Compartir modelos personalizados
   - local: run_scripts
     title: Entrenamiento con scripts
+  - local: chat_templating
+    title: Plantillas para Modelos de Chat
+  - local: trainer
+    title: Entrenador
   - local: sagemaker
     title: Ejecutar el entrenamiento en Amazon SageMaker
-  - local: converting_tensorflow_models
-    title: Convertir checkpoints de TensorFlow
-  - local: serialization
-    title: Exportar a ONNX
   - local: community
     title: Los recursos de la comunidad
   title: Guías para desarrolladores
@@ -80,10 +84,22 @@
     title: Filosofía
   - local: glossary
     title: Glosario
+  - local: task_summary
+    title: Lo que 🤗 Transformers puede hacer
+  - local: tasks_explained
+    title: Como los 🤗 Transformers resuelven tareas
+  - local: tokenizer_summary
+    title: Descripción general de los tokenizadores
+  - local: attention
+    title: Mecanismos de atención
   - local: pad_truncation
     title: Relleno y truncamiento
   - local: bertology
     title: BERTología
   - local: perplexity
     title: Perplejidad de los modelos de longitud fija
+  - local: pipeline_webserver
+    title: Flujo de trabajo para la inferencia de los servidores web
+  - local: model_memory_anatomy
+    title: Anatomía del entrenamiento de los modelos
   title: Guías conceptuales

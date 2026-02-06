@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2021 The I-BERT Authors (Sehoon Kim, Amir Gholami, Zhewei Yao,
 # Michael Mahoney, Kurt Keutzer - UC Berkeley) and The HuggingFace Inc. team.
 # Copyright (c) 20121, NVIDIA CORPORATION.  All rights reserved.
@@ -171,9 +170,9 @@ class QuantAct(nn.Module):
             x_min = x_act.data.min()
             x_max = x_act.data.max()
 
-            assert (
-                x_max.isnan().sum() == 0 and x_min.isnan().sum() == 0
-            ), "NaN detected when computing min/max of the activation"
+            assert x_max.isnan().sum() == 0 and x_min.isnan().sum() == 0, (
+                "NaN detected when computing min/max of the activation"
+            )
 
             # Initialization
             if self.x_min.min() > -1.1e-5 and self.x_max.max() < 1.1e-5:
@@ -651,7 +650,7 @@ class SymmetricQuantFunction(Function):
         Returns:
             `torch.Tensor`: Symmetric-quantized value of *input*.
         """
-        zero_point = torch.tensor(0.0).to(scale.device)
+        zero_point = torch.tensor(0.0, device=scale.device)
 
         n = 2 ** (k - 1) - 1
         new_quant_x = linear_quantize(x, scale, zero_point, inplace=False)
@@ -723,7 +722,7 @@ def batch_frexp(inputs, max_bit=31):
     tmp_m = []
     for m in output_m:
         int_m_shifted = int(
-            decimal.Decimal(m * (2**max_bit)).quantize(decimal.Decimal("1"), rounding=decimal.ROUND_HALF_UP)
+            decimal.Decimal(m * (2**max_bit)).quantize(decimal.Decimal(1), rounding=decimal.ROUND_HALF_UP)
         )
         tmp_m.append(int_m_shifted)
     output_m = np.array(tmp_m)

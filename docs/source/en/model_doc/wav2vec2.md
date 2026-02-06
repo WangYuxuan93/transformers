@@ -13,12 +13,19 @@ specific language governing permissions and limitations under the License.
 rendered properly in your Markdown viewer.
 
 -->
+*This model was released on 2020-06-20 and added to Hugging Face Transformers on 2021-02-02.*
 
 # Wav2Vec2
 
+<div class="flex flex-wrap space-x-1">
+<img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-DE3412?style=flat&logo=pytorch&logoColor=white">
+<img alt="FlashAttention" src="https://img.shields.io/badge/%E2%9A%A1%EF%B8%8E%20FlashAttention-eae0c8?style=flat">
+<img alt="SDPA" src="https://img.shields.io/badge/SDPA-DE3412?style=flat&logo=pytorch&logoColor=white">
+</div>
+
 ## Overview
 
-The Wav2Vec2 model was proposed in [wav2vec 2.0: A Framework for Self-Supervised Learning of Speech Representations](https://arxiv.org/abs/2006.11477) by Alexei Baevski, Henry Zhou, Abdelrahman Mohamed, Michael Auli.
+The Wav2Vec2 model was proposed in [wav2vec 2.0: A Framework for Self-Supervised Learning of Speech Representations](https://huggingface.co/papers/2006.11477) by Alexei Baevski, Henry Zhou, Abdelrahman Mohamed, Michael Auli.
 
 The abstract from the paper is the following:
 
@@ -33,11 +40,46 @@ recognition with limited amounts of labeled data.*
 
 This model was contributed by [patrickvonplaten](https://huggingface.co/patrickvonplaten).
 
+Note: Meta (FAIR) released a new version of [Wav2Vec2-BERT 2.0](https://huggingface.co/docs/transformers/en/model_doc/wav2vec2-bert) - it's pretrained on 4.5M hours of audio. We especially recommend using it for fine-tuning tasks, e.g. as per [this guide](https://huggingface.co/blog/fine-tune-w2v2-bert).
+
 ## Usage tips
 
 - Wav2Vec2 is a speech model that accepts a float array corresponding to the raw waveform of the speech signal.
 - Wav2Vec2 model was trained using connectionist temporal classification (CTC) so the model output has to be decoded
   using [`Wav2Vec2CTCTokenizer`].
+
+## Using Flash Attention 2
+
+Flash Attention 2 is an faster, optimized version of the model.
+
+### Installation
+
+First, check whether your hardware is compatible with Flash Attention 2. The latest list of compatible hardware can be found in the [official documentation](https://github.com/Dao-AILab/flash-attention#installation-and-features).
+
+Next, [install](https://github.com/Dao-AILab/flash-attention#installation-and-features) the latest version of Flash Attention 2:
+
+```bash
+pip install -U flash-attn --no-build-isolation
+```
+
+### Usage
+
+To load a model using Flash Attention 2, we can pass the argument `attn_implementation="flash_attention_2"` to [`.from_pretrained`](https://huggingface.co/docs/transformers/main/en/main_classes/model#transformers.PreTrainedModel.from_pretrained). We'll also load the model in half-precision (e.g. `torch.float16`), since it results in almost no degradation to audio quality but significantly lower memory usage and faster inference:
+
+```python
+>>> from transformers import Wav2Vec2Model
+
+model = Wav2Vec2Model.from_pretrained("facebook/wav2vec2-large-960h-lv60-self", dtype=torch.float16, attn_implementation="flash_attention_2").to(device)
+...
+```
+
+### Expected speedups
+
+Below is an expected speedup diagram comparing the pure inference time between the native implementation in transformers of the `facebook/wav2vec2-large-960h-lv60-self` model and the flash-attention-2 and sdpa (scale-dot-product-attention) versions. . We show the average speedup obtained on the `librispeech_asr` `clean` validation split:
+
+<div style="text-align: center">
+<img src="https://huggingface.co/datasets/kamilakesbi/transformers_image_doc/resolve/main/data/Wav2Vec2_speedup.png">
+</div>
 
 ## Resources
 
@@ -60,7 +102,7 @@ A list of official Hugging Face and community (indicated by 🌎) resources to h
 
 🚀 Deploy
 
-- A blog post on how to deploy Wav2Vec2 for [Automatic Speech Recogntion with Hugging Face's Transformers & Amazon SageMaker](https://www.philschmid.de/automatic-speech-recognition-sagemaker).
+- A blog post on how to deploy Wav2Vec2 for [Automatic Speech Recognition with Hugging Face's Transformers & Amazon SageMaker](https://www.philschmid.de/automatic-speech-recognition-sagemaker).
 
 ## Wav2Vec2Config
 
@@ -109,12 +151,14 @@ Otherwise, [`~Wav2Vec2ProcessorWithLM.batch_decode`] performance will be slower 
 >>> # Let's see how to use a user-managed pool for batch decoding multiple audios
 >>> from multiprocessing import get_context
 >>> from transformers import AutoTokenizer, AutoProcessor, AutoModelForCTC
+from accelerate import Accelerator
 >>> from datasets import load_dataset
 >>> import datasets
 >>> import torch
 
+>>> device = Accelerator().device
 >>> # import model, feature extractor, tokenizer
->>> model = AutoModelForCTC.from_pretrained("patrickvonplaten/wav2vec2-base-100h-with-lm").to("cuda")
+>>> model = AutoModelForCTC.from_pretrained("patrickvonplaten/wav2vec2-base-100h-with-lm").to(device)
 >>> processor = AutoProcessor.from_pretrained("patrickvonplaten/wav2vec2-base-100h-with-lm")
 
 >>> # load example dataset
@@ -122,9 +166,9 @@ Otherwise, [`~Wav2Vec2ProcessorWithLM.batch_decode`] performance will be slower 
 >>> dataset = dataset.cast_column("audio", datasets.Audio(sampling_rate=16_000))
 
 
->>> def map_to_array(batch):
-...     batch["speech"] = batch["audio"]["array"]
-...     return batch
+>>> def map_to_array(example):
+...     example["speech"] = example["audio"]["array"]
+...     return example
 
 
 >>> # prepare speech data for batch inference
@@ -132,8 +176,9 @@ Otherwise, [`~Wav2Vec2ProcessorWithLM.batch_decode`] performance will be slower 
 
 
 >>> def map_to_pred(batch, pool):
+...     device = Accelerator().device
 ...     inputs = processor(batch["speech"], sampling_rate=16_000, padding=True, return_tensors="pt")
-...     inputs = {k: v.to("cuda") for k, v in inputs.items()}
+...     inputs = {k: v.to(device) for k, v in inputs.items()}
 
 ...     with torch.no_grad():
 ...         logits = model(**inputs).logits
@@ -162,13 +207,6 @@ Otherwise, [`~Wav2Vec2ProcessorWithLM.batch_decode`] performance will be slower 
 [[autodoc]] models.wav2vec2.modeling_wav2vec2.Wav2Vec2BaseModelOutput
 
 [[autodoc]] models.wav2vec2.modeling_wav2vec2.Wav2Vec2ForPreTrainingOutput
-
-[[autodoc]] models.wav2vec2.modeling_flax_wav2vec2.FlaxWav2Vec2BaseModelOutput
-
-[[autodoc]] models.wav2vec2.modeling_flax_wav2vec2.FlaxWav2Vec2ForPreTrainingOutput
-
-<frameworkcontent>
-<pt>
 
 ## Wav2Vec2Model
 
@@ -200,42 +238,3 @@ Otherwise, [`~Wav2Vec2ProcessorWithLM.batch_decode`] performance will be slower 
 
 [[autodoc]] Wav2Vec2ForPreTraining
     - forward
-
-</pt>
-<tf>
-
-## TFWav2Vec2Model
-
-[[autodoc]] TFWav2Vec2Model
-    - call
-
-## TFWav2Vec2ForSequenceClassification
-
-[[autodoc]] TFWav2Vec2ForSequenceClassification
-    - call
-
-## TFWav2Vec2ForCTC
-
-[[autodoc]] TFWav2Vec2ForCTC
-    - call
-
-</tf>
-<jax>
-
-## FlaxWav2Vec2Model
-
-[[autodoc]] FlaxWav2Vec2Model
-    - __call__
-
-## FlaxWav2Vec2ForCTC
-
-[[autodoc]] FlaxWav2Vec2ForCTC
-    - __call__
-
-## FlaxWav2Vec2ForPreTraining
-
-[[autodoc]] FlaxWav2Vec2ForPreTraining
-    - __call__
-
-</jax>
-</frameworkcontent>

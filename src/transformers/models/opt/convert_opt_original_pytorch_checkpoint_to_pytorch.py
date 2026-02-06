@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2022 The HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Convert OPT checkpoint."""
-
 
 import argparse
 from pathlib import Path
@@ -30,9 +28,9 @@ logger = logging.get_logger(__name__)
 
 def load_checkpoint(checkpoint_path):
     """Checkpoint path should end in model.pt"""
-    sd = torch.load(checkpoint_path, map_location="cpu")
-    if "model" in sd.keys():
-        sd = torch.load(checkpoint_path, map_location="cpu")["model"]
+    sd = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    if "model" in sd:
+        sd = torch.load(checkpoint_path, map_location="cpu", weights_only=True)["model"]
 
     # pop unnecessary weights
     keys_to_delete = [

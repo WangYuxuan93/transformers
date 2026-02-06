@@ -39,7 +39,7 @@ Antes de aplicar o fine-tuning a um modelo pré-treinado, baixe um dataset e pre
 O tutorial anterior ensinará a processar os dados para o treinamento, e então poderá ter a oportunidade de testar
 esse novo conhecimento em algo prático.
 
-Comece carregando o dataset [Yelp Reviews](https://huggingface.co/datasets/yelp_review_full):
+Comece carregando o dataset [Yelp Reviews](https://huggingface.co/datasets/Yelp/yelp_review_full):
 
 ```py
 >>> from datasets import load_dataset
@@ -58,7 +58,7 @@ todo o dataset.
 ```py
 >>> from transformers import AutoTokenizer
 
->>> tokenizer = AutoTokenizer.from_pretrained("bert-base-cased")
+>>> tokenizer = AutoTokenizer.from_pretrained("google-bert/bert-base-cased")
 
 
 >>> def tokenize_function(examples):
@@ -87,13 +87,13 @@ A API do [`Trainer`] suporta um grande conjunto de opções de treinamento e fun
 o gradient accumulation e o mixed precision.
 
 Comece carregando seu modelo e especifique o número de labels de previsão.
-A partir do [Card Dataset](https://huggingface.co/datasets/yelp_review_full#data-fields) do Yelp Reveiw, que ja
+A partir do [Card Dataset](https://huggingface.co/datasets/Yelp/yelp_review_full#data-fields) do Yelp Reveiw, que ja
 sabemos ter 5 labels usamos o seguinte código:
 
 ```py
 >>> from transformers import AutoModelForSequenceClassification
 
->>> model = AutoModelForSequenceClassification.from_pretrained("bert-base-cased", num_labels=5)
+>>> model = AutoModelForSequenceClassification.from_pretrained("google-bert/bert-base-cased", num_labels=5)
 ```
 
 <Tip>
@@ -146,13 +146,13 @@ todos os modelos de 🤗 Transformers retornam logits).
 ...     return metric.compute(predictions=predictions, references=labels)
 ```
 
-Se quiser controlar as suas métricas de avaliação durante o fine-tuning, especifique o parâmetro `evaluation_strategy`
+Se quiser controlar as suas métricas de avaliação durante o fine-tuning, especifique o parâmetro `eval_strategy`
 nos seus argumentos de treinamento para que o modelo considere a métrica de avaliação ao final de cada época:
 
 ```py
 >>> from transformers import TrainingArguments
 
->>> training_args = TrainingArguments(output_dir="test_trainer", evaluation_strategy="epoch")
+>>> training_args = TrainingArguments(output_dir="test_trainer", eval_strategy="epoch")
 ```
 
 ### Trainer
@@ -232,7 +232,7 @@ Carregue um modelo do TensorFlow com o número esperado de rótulos:
 >>> import tensorflow as tf
 >>> from transformers import TFAutoModelForSequenceClassification
 
->>> model = TFAutoModelForSequenceClassification.from_pretrained("bert-base-cased", num_labels=5)
+>>> model = TFAutoModelForSequenceClassification.from_pretrained("google-bert/bert-base-cased", num_labels=5)
 ```
 
 A seguir, compile e ajuste o fine-tuning a seu modelo com [`fit`](https://keras.io/api/models/model_training_apis/) como
@@ -311,7 +311,7 @@ Carregue seu modelo com o número de labels esperados:
 ```py
 >>> from transformers import AutoModelForSequenceClassification
 
->>> model = AutoModelForSequenceClassification.from_pretrained("bert-base-cased", num_labels=5)
+>>> model = AutoModelForSequenceClassification.from_pretrained("google-bert/bert-base-cased", num_labels=5)
 ```
 
 ### Otimização e configuração do Learning Rate

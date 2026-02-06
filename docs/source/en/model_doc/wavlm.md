@@ -13,12 +13,17 @@ specific language governing permissions and limitations under the License.
 rendered properly in your Markdown viewer.
 
 -->
+*This model was released on 2021-10-26 and added to Hugging Face Transformers on 2021-12-16.*
 
 # WavLM
 
+<div class="flex flex-wrap space-x-1">
+<img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-DE3412?style=flat&logo=pytorch&logoColor=white">
+</div>
+
 ## Overview
 
-The WavLM model was proposed in [WavLM: Large-Scale Self-Supervised Pre-Training for Full Stack Speech Processing](https://arxiv.org/abs/2110.13900) by Sanyuan Chen, Chengyi Wang, Zhengyang Chen, Yu Wu, Shujie Liu, Zhuo Chen,
+The WavLM model was proposed in [WavLM: Large-Scale Self-Supervised Pre-Training for Full Stack Speech Processing](https://huggingface.co/papers/2110.13900) by Sanyuan Chen, Chengyi Wang, Zhengyang Chen, Yu Wu, Shujie Liu, Zhuo Chen,
 Jinyu Li, Naoyuki Kanda, Takuya Yoshioka, Xiong Xiao, Jian Wu, Long Zhou, Shuo Ren, Yanmin Qian, Yao Qian, Jian Wu,
 Michael Zeng, Furu Wei.
 
@@ -31,7 +36,7 @@ challenging. In this paper, we propose a new pre-trained model, WavLM, to solve 
 WavLM is built based on the HuBERT framework, with an emphasis on both spoken content modeling and speaker identity
 preservation. We first equip the Transformer structure with gated relative position bias to improve its capability on
 recognition tasks. For better speaker discrimination, we propose an utterance mixing training strategy, where
-additional overlapped utterances are created unsupervisely and incorporated during model training. Lastly, we scale up
+additional overlapped utterances are created unsupervisedly and incorporated during model training. Lastly, we scale up
 the training dataset from 60k hours to 94k hours. WavLM Large achieves state-of-the-art performance on the SUPERB
 benchmark, and brings significant improvements for various speech processing tasks on their representative benchmarks.*
 

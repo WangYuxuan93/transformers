@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2022 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,14 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch Bit model. """
-
+"""Testing suite for the PyTorch Bit model."""
 
 import unittest
+from functools import cached_property
 
 from transformers import BitConfig
 from transformers.testing_utils import require_torch, require_vision, slow, torch_device
-from transformers.utils import cached_property, is_torch_available, is_vision_available
+from transformers.utils import is_torch_available, is_vision_available
 
 from ...test_backbone_common import BackboneTesterMixin
 from ...test_configuration_common import ConfigTester
@@ -29,10 +28,8 @@ from ...test_pipeline_mixin import PipelineTesterMixin
 
 if is_torch_available():
     import torch
-    from torch import nn
 
     from transformers import BitBackbone, BitForImageClassification, BitImageProcessor, BitModel
-    from transformers.models.bit.modeling_bit import BIT_PRETRAINED_MODEL_ARCHIVE_LIST
 
 
 if is_vision_available():
@@ -133,6 +130,7 @@ class BitModelTester:
 
         # verify backbone works with out_features=None
         config.out_features = None
+        print(config)
         model = BitBackbone(config=config)
         model.to(torch_device)
         model.eval()
@@ -162,32 +160,22 @@ class BitModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
 
     all_model_classes = (BitModel, BitForImageClassification, BitBackbone) if is_torch_available() else ()
     pipeline_model_mapping = (
-        {"feature-extraction": BitModel, "image-classification": BitForImageClassification}
+        {"image-feature-extraction": BitModel, "image-classification": BitForImageClassification}
         if is_torch_available()
         else {}
     )
 
-    fx_compatible = False
-    test_pruning = False
     test_resize_embeddings = False
-    test_head_masking = False
     has_attentions = False
 
     def setUp(self):
         self.model_tester = BitModelTester(self)
-        self.config_tester = ConfigTester(self, config_class=BitConfig, has_text_modality=False)
+        self.config_tester = ConfigTester(
+            self, config_class=BitConfig, has_text_modality=False, common_properties=["num_channels"]
+        )
 
     def test_config(self):
-        self.create_and_test_config_common_properties()
-        self.config_tester.create_and_test_config_to_json_string()
-        self.config_tester.create_and_test_config_to_json_file()
-        self.config_tester.create_and_test_config_from_and_save_pretrained()
-        self.config_tester.create_and_test_config_with_num_labels()
-        self.config_tester.check_config_can_be_init_without_params()
-        self.config_tester.check_config_arguments_init()
-
-    def create_and_test_config_common_properties(self):
-        return
+        self.config_tester.run_common_tests()
 
     @unittest.skip(reason="Bit does not output attentions")
     def test_attention_outputs(self):
@@ -198,7 +186,7 @@ class BitModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
         pass
 
     @unittest.skip(reason="Bit does not support input and output embeddings")
-    def test_model_common_attributes(self):
+    def test_model_get_set_embeddings(self):
         pass
 
     def test_model(self):
@@ -208,22 +196,6 @@ class BitModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
     def test_backbone(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_backbone(*config_and_inputs)
-
-    def test_initialization(self):
-        config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
-
-        for model_class in self.all_model_classes:
-            model = model_class(config=config)
-            for name, module in model.named_modules():
-                if isinstance(module, (nn.BatchNorm2d, nn.GroupNorm)):
-                    self.assertTrue(
-                        torch.all(module.weight == 1),
-                        msg=f"Parameter {name} of model {model_class} seems not properly initialized",
-                    )
-                    self.assertTrue(
-                        torch.all(module.bias == 0),
-                        msg=f"Parameter {name} of model {model_class} seems not properly initialized",
-                    )
 
     def test_hidden_states_output(self):
         def check_hidden_states_output(inputs_dict, config, model_class):
@@ -269,9 +241,9 @@ class BitModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in BIT_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = BitModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "google/bit-50"
+        model = BitModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
 
 # We will verify our results on an image of cute cats
@@ -285,13 +257,11 @@ def prepare_img():
 class BitModelIntegrationTest(unittest.TestCase):
     @cached_property
     def default_image_processor(self):
-        return (
-            BitImageProcessor.from_pretrained(BIT_PRETRAINED_MODEL_ARCHIVE_LIST[0]) if is_vision_available() else None
-        )
+        return BitImageProcessor.from_pretrained("google/bit-50") if is_vision_available() else None
 
     @slow
     def test_inference_image_classification_head(self):
-        model = BitForImageClassification.from_pretrained(BIT_PRETRAINED_MODEL_ARCHIVE_LIST[0]).to(torch_device)
+        model = BitForImageClassification.from_pretrained("google/bit-50").to(torch_device)
 
         image_processor = self.default_image_processor
         image = prepare_img()
@@ -307,7 +277,7 @@ class BitModelIntegrationTest(unittest.TestCase):
 
         expected_slice = torch.tensor([[-0.6526, -0.5263, -1.4398]]).to(torch_device)
 
-        self.assertTrue(torch.allclose(outputs.logits[0, :3], expected_slice, atol=1e-4))
+        torch.testing.assert_close(outputs.logits[:, :3], expected_slice, rtol=1e-3, atol=1e-3)
 
 
 @require_torch

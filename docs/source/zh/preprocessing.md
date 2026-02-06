@@ -56,7 +56,7 @@ pip install datasets
 ```py
 >>> from transformers import AutoTokenizer
 
->>> tokenizer = AutoTokenizer.from_pretrained("bert-base-cased")
+>>> tokenizer = AutoTokenizer.from_pretrained("google-bert/bert-base-cased")
 ```
 
 然后将您的文本传递给`tokenizer`：
@@ -173,8 +173,6 @@ pip install datasets
 
 将 `return_tensors` 参数设置为 `pt`（对于PyTorch）或 `tf`（对于TensorFlow）：
 
-<frameworkcontent>
-<pt>
 
 
 ```py
@@ -195,33 +193,6 @@ pip install datasets
                            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
                            [1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]])}
 ```
-</pt>
-<tf>
-
-```py
->>> batch_sentences = [
-...     "But what about second breakfast?",
-...     "Don't think he knows about second breakfast, Pip.",
-...     "What about elevensies?",
-... ]
->>> encoded_input = tokenizer(batch_sentences, padding=True, truncation=True, return_tensors="tf")
->>> print(encoded_input)
-{'input_ids': <tf.Tensor: shape=(2, 9), dtype=int32, numpy=
-array([[101, 1252, 1184, 1164, 1248, 6462, 136, 102, 0, 0, 0, 0, 0, 0, 0],
-       [101, 1790, 112, 189, 1341, 1119, 3520, 1164, 1248, 6462, 117, 21902, 1643, 119, 102],
-       [101, 1327, 1164, 5450, 23434, 136, 102, 0, 0, 0, 0, 0, 0, 0, 0]],
-      dtype=int32)>,
- 'token_type_ids': <tf.Tensor: shape=(2, 9), dtype=int32, numpy=
-array([[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-       [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], dtype=int32)>,
- 'attention_mask': <tf.Tensor: shape=(2, 9), dtype=int32, numpy=
-array([[1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0],
-       [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-       [1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]], dtype=int32)>}
-```
-</tf>
-</frameworkcontent>
 
 ## 音频
 
@@ -352,7 +323,7 @@ array([[1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0],
 
 </Tip>
 
-加载[food101](https://huggingface.co/datasets/food101)数据集（有关如何加载数据集的更多详细信息，请参阅🤗 [Datasets教程](https://huggingface.co/docs/datasets/load_hub)）以了解如何在计算机视觉数据集中使用图像处理器：
+加载[food101](https://huggingface.co/datasets/ethz/food101)数据集（有关如何加载数据集的更多详细信息，请参阅🤗 [Datasets教程](https://huggingface.co/docs/datasets/load_hub)）以了解如何在计算机视觉数据集中使用图像处理器：
 
 <Tip>
 
@@ -364,7 +335,7 @@ array([[1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0],
 ```py
 >>> from datasets import load_dataset
 
->>> dataset = load_dataset("food101", split="train[:100]")
+>>> dataset = load_dataset("ethz/food101", split="train[:100]")
 ```
 
 接下来，使用🤗 Datasets的[`Image`](https://huggingface.co/docs/datasets/package_reference/main_classes?highlight=image#datasets.Image)功能查看图像：

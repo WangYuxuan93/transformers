@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2022 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,14 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch GPTNeoX model. """
-
+"""Testing suite for the PyTorch GPTNeoX model."""
 
 import unittest
 
-from parameterized import parameterized
-
-from transformers import AutoTokenizer, GPTNeoXConfig, is_torch_available, set_seed
+from transformers import AutoTokenizer, DynamicCache, GPTNeoXConfig, is_torch_available
 from transformers.testing_utils import require_torch, slow, torch_device
 
 from ...generation.test_utils import GenerationTesterMixin
@@ -215,6 +211,45 @@ class GPTNeoXModelTester:
         # test that outputs are equal for slice
         self.parent.assertTrue(torch.allclose(output_from_past_slice, output_from_no_past_slice, atol=1e-3))
 
+    def create_and_check_cached_forward_with_and_without_attention_mask(self, config, input_ids, *args):
+        # Relevant issue: https://github.com/huggingface/transformers/issues/31943
+        model = GPTNeoXModel(config)
+        model.to(torch_device)
+        model.eval()
+
+        # We want this for SDPA, eager works with a `None` attention mask
+        assert model.config._attn_implementation == "sdpa", (
+            "This test assumes the model to have the SDPA implementation for its attention calculations."
+        )
+
+        # Prepare cache and non_cache input, needs a full attention mask
+        cached_len = input_ids.shape[-1] // 2
+        input_mask = torch.ones(size=input_ids.size()).to(torch_device)
+        cache_inputs = {"input_ids": input_ids[:, :cached_len], "attention_mask": input_mask[:, :cached_len]}
+        non_cache_inputs = {"input_ids": input_ids[:, cached_len:], "attention_mask": input_mask}
+
+        def copy_cache(cache: DynamicCache):
+            """Deep copy a DynamicCache to reuse the same one multiple times."""
+            new_cache = cache
+            for i in range(len(cache)):
+                new_cache.layers[i].keys = cache.layers[i].keys.clone()
+                new_cache.layers[i].values = cache.layers[i].values.clone()
+
+        # Cached forward once with the attention mask provided and the other time without it (which should assume full attention)
+        # We need to run both on a copy of the cache, otherwise it is modified in-place
+        cache_outputs = model(**cache_inputs)
+        cache = cache_outputs.past_key_values
+        full_outputs_with_attention_mask = model(
+            **non_cache_inputs, past_key_values=copy_cache(cache)
+        ).last_hidden_state
+        full_outputs_without_attention_mask = model(
+            non_cache_inputs["input_ids"], past_key_values=copy_cache(cache)
+        ).last_hidden_state
+
+        self.parent.assertTrue(
+            torch.allclose(full_outputs_with_attention_mask, full_outputs_without_attention_mask, atol=1e-5)
+        )
+
     def prepare_config_and_inputs_for_common(self):
         config_and_inputs = self.prepare_config_and_inputs()
         config, input_ids, input_mask, token_labels = config_and_inputs
@@ -235,7 +270,6 @@ class GPTNeoXModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMi
         if is_torch_available()
         else ()
     )
-    all_generative_model_classes = (GPTNeoXForCausalLM,) if is_torch_available() else ()
     pipeline_model_mapping = (
         {
             "feature-extraction": GPTNeoXModel,
@@ -248,10 +282,8 @@ class GPTNeoXModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMi
         if is_torch_available()
         else {}
     )
-    test_pruning = False
+
     test_missing_keys = False
-    test_model_parallel = False
-    test_head_masking = False
 
     def setUp(self):
         self.model_tester = GPTNeoXModelTester(self)
@@ -269,7 +301,6 @@ class GPTNeoXModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMi
         self.model_tester.create_and_check_model_as_decoder(config, input_ids, input_mask)
 
     def test_model_as_decoder_with_default_input_mask(self):
-        # This regression test was failing with PyTorch < 1.3
         config, input_ids, input_mask, token_labels = self.model_tester.prepare_config_and_inputs_for_decoder()
 
         input_mask = None
@@ -296,40 +327,13 @@ class GPTNeoXModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMi
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_for_token_classification(*config_and_inputs)
 
+    def test_cached_forward_with_and_without_attention_mask(self):
+        config_and_inputs = self.model_tester.prepare_config_and_inputs()
+        self.model_tester.create_and_check_cached_forward_with_and_without_attention_mask(*config_and_inputs)
+
     @unittest.skip(reason="Feed forward chunking is not implemented")
     def test_feed_forward_chunking(self):
         pass
-
-    @parameterized.expand([("linear",), ("dynamic",)])
-    def test_model_rope_scaling(self, scaling_type):
-        config, _ = self.model_tester.prepare_config_and_inputs_for_common()
-        short_input = ids_tensor([1, 10], config.vocab_size)
-        long_input = ids_tensor([1, int(config.max_position_embeddings * 1.5)], config.vocab_size)
-
-        set_seed(42)  # Fixed seed at init time so the two models get the same random weights
-        original_model = GPTNeoXModel(config)
-        original_model.to(torch_device)
-        original_model.eval()
-        original_short_output = original_model(short_input).last_hidden_state
-        original_long_output = original_model(long_input).last_hidden_state
-
-        set_seed(42)  # Fixed seed at init time so the two models get the same random weights
-        config.rope_scaling = {"type": scaling_type, "factor": 10.0}
-        scaled_model = GPTNeoXModel(config)
-        scaled_model.to(torch_device)
-        scaled_model.eval()
-        scaled_short_output = scaled_model(short_input).last_hidden_state
-        scaled_long_output = scaled_model(long_input).last_hidden_state
-
-        # Dynamic scaling does not change the RoPE embeddings until it receives an input longer than the original
-        # maximum sequence length, so the outputs for the short input should match.
-        if scaling_type == "dynamic":
-            self.assertTrue(torch.allclose(original_short_output, scaled_short_output, atol=1e-5))
-        else:
-            self.assertFalse(torch.allclose(original_short_output, scaled_short_output, atol=1e-5))
-
-        # The output should be different for long inputs
-        self.assertFalse(torch.allclose(original_long_output, scaled_long_output, atol=1e-5))
 
 
 @require_torch
@@ -355,3 +359,38 @@ class GPTNeoXLanguageGenerationTest(unittest.TestCase):
             output_str = tokenizer.batch_decode(output_ids)[0]
 
             self.assertEqual(output_str, expected_output)
+
+    @slow
+    def test_lm_generate_flex_attn_gptneox(self):
+        tokenizer = AutoTokenizer.from_pretrained("EleutherAI/pythia-410m-deduped")
+        for checkpointing in [True, False]:
+            model = GPTNeoXForCausalLM.from_pretrained(
+                "EleutherAI/pythia-410m-deduped", attn_implementation="flex_attention"
+            )
+            self.assertTrue(model.config._attn_implementation == "flex_attention")
+
+            if checkpointing:
+                model.gradient_checkpointing_enable()
+            else:
+                model.gradient_checkpointing_disable()
+            model.to(torch_device)
+
+            inputs = tokenizer("My favorite food is", return_tensors="pt").to(torch_device)
+            # The hub repo. is updated on 2023-04-04, resulting in poor outputs.
+            # See: https://github.com/huggingface/transformers/pull/24193
+            expected_output = "My favorite food is a good old-fashioned, old-fashioned, old-fashioned.\n\nI'm not sure"
+
+            output_ids = model.generate(**inputs, do_sample=False, max_new_tokens=20)
+            output_str = tokenizer.batch_decode(output_ids)[0]
+
+            self.assertEqual(output_str, expected_output)
+
+    def pythia_integration_test(self):
+        model_name_or_path = "EleutherAI/pythia-70m"
+        model = GPTNeoXForCausalLM.from_pretrained(model_name_or_path, dtype=torch.float16).to(torch_device)
+        EXPECTED_LOGITS = torch.tensor([1069.0000,  228.7500, 1072.0000, 1072.0000, 1069.0000, 1068.0000, 1068.0000, 1071.0000, 1071.0000, 1071.0000, 1073.0000, 1070.0000, 1071.0000, 1075.0000, 1073.0000, 1075.0000, 1074.0000, 1069.0000, 1072.0000, 1071.0000, 1071.0000, 1071.0000, 1070.0000, 1069.0000, 1069.0000, 1069.0000, 1070.0000, 1075.0000, 1073.0000, 1074.0000])  # fmt: skip
+        input_ids = [29, 93, 303, 64, 5478, 49651, 10394, 187, 34, 12939, 875]
+        # alternative: tokenizer('<|im_start|>system\nA chat between')
+        input_ids = torch.as_tensor(input_ids)[None].to(torch_device)
+        outputs = model(input_ids)["logits"][:, -1][0, :30]
+        torch.testing.assert_close(EXPECTED_LOGITS, outputs, rtol=1e-5, atol=1e-5)

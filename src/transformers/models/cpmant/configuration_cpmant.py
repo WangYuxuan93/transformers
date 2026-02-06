@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2022 The OpenBMB Team and The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,29 +11,24 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" CPMAnt model configuration"""
+"""CPMAnt model configuration"""
 
-from ...configuration_utils import PretrainedConfig
+from ...configuration_utils import PreTrainedConfig
 from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
 
-CPMANT_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "openbmb/cpm-ant-10b": "https://huggingface.co/openbmb/cpm-ant-10b/blob/main/config.json"
-    # See all CPMAnt models at https://huggingface.co/models?filter=cpmant
-}
 
-
-class CpmAntConfig(PretrainedConfig):
+class CpmAntConfig(PreTrainedConfig):
     r"""
     This is the configuration class to store the configuration of a [`CpmAntModel`]. It is used to instantiate an
     CPMAnt model according to the specified arguments, defining the model architecture. Instantiating a configuration
     with the defaults will yield a similar configuration to that of the CPMAnt
     [openbmb/cpm-ant-10b](https://huggingface.co/openbmb/cpm-ant-10b) architecture.
 
-    Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
-    documentation from [`PretrainedConfig`] for more information.
+    Configuration objects inherit from [`PreTrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PreTrainedConfig`] for more information.
 
     Args:
         vocab_size (`int`, *optional*, defaults to 30720):
@@ -51,7 +45,7 @@ class CpmAntConfig(PretrainedConfig):
         num_hidden_layers (`int`, *optional*, defaults to 48):
             Number of layers of the Transformer encoder.
         dropout_p (`float`, *optional*, defaults to 0.0):
-            The dropout probabilitiy for all fully connected layers in the embeddings, encoder.
+            The dropout probability for all fully connected layers in the embeddings, encoder.
         position_bias_num_buckets (`int`, *optional*, defaults to 512):
             The number of position_bias buckets.
         position_bias_max_distance (`int`, *optional*, defaults to 2048):
@@ -69,6 +63,8 @@ class CpmAntConfig(PretrainedConfig):
             The type of segment.
         use_cache (`bool`, *optional*, defaults to `True`):
             Whether to use cache.
+        tie_word_embeddings (`bool`, *optional*, defaults to `True`):
+            Whether to tie weight embeddings
 
     Example:
 
@@ -104,9 +100,11 @@ class CpmAntConfig(PretrainedConfig):
         prompt_length: int = 32,
         segment_types: int = 32,
         use_cache: bool = True,
+        tie_word_embeddings=True,
         **kwargs,
     ):
         super().__init__(**kwargs)
+        self.tie_word_embeddings = tie_word_embeddings
         self.prompt_types = prompt_types
         self.prompt_length = prompt_length
         self.segment_types = segment_types
@@ -122,3 +120,6 @@ class CpmAntConfig(PretrainedConfig):
         self.use_cache = use_cache
         self.vocab_size = vocab_size
         self.init_std = init_std
+
+
+__all__ = ["CpmAntConfig"]

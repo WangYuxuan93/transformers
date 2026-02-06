@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023 The Intel AIA Team Authors, and HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License=, Version 2.0 (the "License");
@@ -16,53 +15,41 @@
 
 import math
 from dataclasses import dataclass
-from typing import Optional, Tuple
 
 import torch
-import torch.utils.checkpoint
 from torch import nn
 
+from ... import initialization as init
 from ...activations import ACT2FN
-from ...file_utils import add_start_docstrings, add_start_docstrings_to_model_forward, replace_return_docstrings
+from ...backbone_utils import load_backbone
+from ...modeling_layers import GradientCheckpointingLayer
 from ...modeling_outputs import BaseModelOutput, BaseModelOutputWithPooling, ModelOutput
 from ...modeling_utils import PreTrainedModel
-from ...pytorch_utils import prune_linear_layer
-from ...utils import logging
-from ..auto import AutoBackbone
+from ...utils import auto_docstring, logging
 from .configuration_tvp import TvpConfig
 
 
 logger = logging.get_logger(__name__)
 
-TVP_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "Intel/tvp-base",
-    "Intel/tvp-base-ANet",
-    # See all Tvp models at https://huggingface.co/models?filter=tvp
-]
-
 
 @dataclass
+@auto_docstring
 class TvpVideoGroundingOutput(ModelOutput):
-    """
-    Args:
-        loss (`torch.FloatTensor` of shape `(1,)`, *optional*, returned when `return_loss` is `True`):
-            Temporal-Distance IoU loss for video grounding.
-        logits (`torch.FloatTensor` of shape `(batch_size, 2)`):
-            Contains start_time/duration and end_time/duration. It is the time slot of the videos corresponding to the
-            input texts.
-        hidden_states (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed or when `config.output_hidden_states=True`):
-            Tuple of `torch.FloatTensor` (one for the output of the embeddings, if the model has an embedding layer, +
-            one for the output of each layer) of shape `(batch_size, sequence_length, hidden_size)`. Hidden-states of
-            the model at the output of each layer plus the optional initial embedding outputs.
-        attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
-            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
-            sequence_length)`.
+    r"""
+    loss (`torch.FloatTensor` of shape `(1,)`, *optional*, returned when `return_loss` is `True`):
+        Temporal-Distance IoU loss for video grounding.
+    logits (`torch.FloatTensor` of shape `(batch_size, 2)`):
+        Contains start_time/duration and end_time/duration. It is the time slot of the videos corresponding to the
+        input texts.
+    attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
+        Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
+        sequence_length)`.
     """
 
-    loss: Optional[torch.FloatTensor] = None
-    logits: torch.FloatTensor = None
-    hidden_states: Optional[Tuple[torch.FloatTensor]] = None
-    attentions: Optional[Tuple[torch.FloatTensor]] = None
+    loss: torch.FloatTensor | None = None
+    logits: torch.FloatTensor | None = None
+    hidden_states: tuple[torch.FloatTensor, ...] | None = None
+    attentions: tuple[torch.FloatTensor, ...] | None = None
 
 
 class TvpLoss(nn.Module):
@@ -72,7 +59,7 @@ class TvpLoss(nn.Module):
     ground-truth / prediction (supervise class and box).
 
     Args:
-        losses (`List[str]`):
+        losses (`list[str]`):
             List of all the losses to be applied.
     """
 
@@ -129,7 +116,7 @@ class TvpLoss(nn.Module):
         Args:
             logits (`torch.FloatTensor`):
                 The output logits of head module.
-            labels (`List[torch.FloatTensor]`):
+            labels (`list[torch.FloatTensor]`):
                 List of tensors ([start, end, duration]), which contains start time, end time of the video corresponding to the text, and also the duration.
         """
         duration, start_time, end_time = labels
@@ -148,9 +135,19 @@ class TvpLoss(nn.Module):
 class TvpVisionModel(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.backbone = AutoBackbone.from_config(config.backbone_config)
+        self.backbone = load_backbone(config)
+
+        if config.backbone_config is not None:
+            in_channels = config.backbone_config.hidden_sizes[-1]
+        elif hasattr(self.backbone, "config") and hasattr(self.backbone.config, "hidden_sizes"):
+            in_channels = self.backbone.config.hidden_sizes[-1]
+        elif hasattr(self.backbone, "config") and hasattr(self.backbone.config, "hidden_size"):
+            in_channels = self.backbone.config.hidden_size
+        else:
+            raise ValueError("Backbone config not found")
+
         self.grid_encoder_conv = nn.Conv2d(
-            config.backbone_config.hidden_sizes[-1],
+            in_channels,
             config.hidden_size,
             kernel_size=3,
             stride=1,
@@ -189,34 +186,81 @@ class TvpVisualInputEmbedding(nn.Module):
         self.token_type_embeddings = nn.Embedding(1, config.hidden_size)
         self.layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.max_grid_row_position_embeddings = config.max_grid_row_position_embeddings
+        self.max_grid_col_position_embeddings = config.max_grid_col_position_embeddings
 
-    def add_2d_positional_embeddings(self, grid):
+    def interpolate_pos_encoding(self, embedding: torch.Tensor, height: int, width: int) -> torch.Tensor:
+        """
+        This method allows to interpolate the pre-trained pad weights , to be able to use the model on collection of high
+        resolution images (high resolution videos).
+
+        """
+        h0 = w0 = 1
+        # if height dimension is to be interpolated
+        if height > self.max_grid_row_position_embeddings:
+            h0 = height / self.max_grid_row_position_embeddings
+        # if width dimension is to be interpolated
+        if width > self.max_grid_col_position_embeddings:
+            w0 = width / self.max_grid_col_position_embeddings
+        embedding = embedding.permute(0, 3, 1, 2)  # (batch_size, hidden_dim, height, width)
+        embedding = nn.functional.interpolate(
+            embedding,
+            scale_factor=(h0, w0),
+            mode="bicubic",
+            align_corners=False,
+        )
+        embedding = embedding.permute(0, 2, 3, 1)  # (batch_size, height, width, hidden_dim)
+        return embedding
+
+    def add_2d_positional_embeddings(self, grid, interpolate_pos_encoding: bool = False):
         """
         Args:
             grid: (batch_size, height, width, hidden_dim)
+            interpolate_pos_encoding: (`bool`, *optional*, defaults to `False`):
+                Whether to interpolate the pre-trained position encodings.
         Returns:
             grid + col_position_embeddings.view(*col_shape): (batch_size, *, height, width, hidden_dim)
         """
         batch_size, height, width, hidden_dim = grid.shape
 
         # add row-wise position embeddings
-        row_position_ids = torch.arange(height, dtype=torch.long, device=grid.device)  # (height, )
-        row_position_embeddings = self.row_position_embeddings(row_position_ids)  # (height, hidden_dim)
-        row_shape = (1,) * (len(grid.shape) - 3) + (height, 1, hidden_dim)  # (1, height, 1, hidden_dim)
-        grid = grid + row_position_embeddings.view(*row_shape)  # broadcast automatically
+        # (height, )
+        row_height = min(self.max_grid_row_position_embeddings, height)
+        row_position_ids = torch.arange(row_height, dtype=torch.long, device=grid.device)
+        # (height, hidden_dim)
+        row_position_embeddings = self.row_position_embeddings(row_position_ids)
+        row_shape = (1,) * (len(grid.shape) - 3) + (row_height, 1, hidden_dim)
+        # (batch_size, height, 1, hidden_dim)
+        row_position_embeddings = row_position_embeddings.view(*row_shape)
 
         # add column-wise position embeddings
-        col_position_ids = torch.arange(width, dtype=torch.long, device=grid.device)  # (width, )
-        col_position_embeddings = self.col_position_embeddings(col_position_ids)  # (width, hidden_dim)
-        col_shape = (batch_size, 1, width, hidden_dim)  # (1, 1, width, hidden_dim)
-        return grid + col_position_embeddings.view(*col_shape)  # broadcast automatically
+        row_width = min(self.max_grid_col_position_embeddings, width)
+        col_position_ids = torch.arange(row_width, dtype=torch.long, device=grid.device)
+        # (width, hidden_dim)
+        col_position_embeddings = self.col_position_embeddings(col_position_ids)
+        col_shape = (batch_size, 1, row_width, hidden_dim)
+        # (batch_size, 1, width, hidden_dim)
+        col_position_embeddings = col_position_embeddings.view(*col_shape)
+        # (batch_size, height, width, hidden_dim)
+        positional_embeddings = row_position_embeddings + col_position_embeddings
 
-    def forward(self, grid):
+        # This interpolation gets triggered ONLY when the input image dim is larger in any dimension than the original position embeddings
+        if interpolate_pos_encoding and (
+            height > self.max_grid_row_position_embeddings or width > self.max_grid_col_position_embeddings
+        ):
+            grid = grid + self.interpolate_pos_encoding(positional_embeddings, height, width)
+        else:
+            grid = grid + positional_embeddings
+        return grid
+
+    def forward(self, grid, interpolate_pos_encoding: bool = False):
         """
         Args:
             grid: Array of shape (batch_size, num_frames, height, width, num_channels).
                 It contains processed frames extracted from videos, and is generated by Tvp image preprocessor. Note,
                 num_frames can be 1
+            interpolate_pos_encoding: (bool, *optional*, defaults to `False`):
+                Whether to interpolate the pre-trained position encodings.
 
         Returns:
             embeddings: The embedding of grid with size (batch_size, height*width, num_channels)
@@ -225,7 +269,7 @@ class TvpVisualInputEmbedding(nn.Module):
         batch_size, num_frames, height, width, num_channels = grid.shape
         # temporal mean pooling, (batch_size, height, width, hidden_size)
         grid = grid.mean(1)
-        grid = self.add_2d_positional_embeddings(grid)
+        grid = self.add_2d_positional_embeddings(grid, interpolate_pos_encoding=interpolate_pos_encoding)
         # image token sequence, (batch_size, height*width, num_channels)
         visual_tokens = grid.view(batch_size, -1, num_channels)
         visual_tokens_shape = visual_tokens.shape[:-1]
@@ -297,30 +341,6 @@ class TvpAttention(nn.Module):
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
         self.layer_norm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.pruned_heads = set()
-
-    def prune_heads(self, heads):
-        if len(heads) == 0:
-            return
-        mask = torch.ones(self.num_attention_heads, self.attention_head_size)
-        heads = set(heads) - self.pruned_heads  # Convert to set and remove already pruned heads
-        for head in heads:
-            # Compute how many pruned heads are before the head and move the index accordingly
-            head = head - sum(1 if h < head else 0 for h in self.pruned_heads)
-            mask[head] = 0
-        mask = mask.view(-1).contiguous().eq(1)
-        index = torch.arange(len(mask))[mask].long()
-
-        # Prune linear layers
-        self.query = prune_linear_layer(self.query, index)
-        self.key = prune_linear_layer(self.key, index)
-        self.value = prune_linear_layer(self.value, index)
-        self.dense = prune_linear_layer(self.dense, index, dim=1)
-
-        # Update hyper params and store pruned heads
-        self.num_attention_heads = self.num_attention_heads - len(heads)
-        self.all_head_size = self.attention_head_size * self.num_attention_heads
-        self.pruned_heads = self.pruned_heads.union(heads)
 
     def _reshape(self, tensor: torch.Tensor, sequence_length: int, batch_size: int):
         return (
@@ -333,8 +353,7 @@ class TvpAttention(nn.Module):
         self,
         hidden_states,
         attention_mask=None,
-        head_mask=None,
-        output_attentions: Optional[bool] = None,
+        output_attentions: bool | None = None,
     ):
         batch_size, sequence_length = hidden_states.shape[:2]
         mixed_query_layer = self.query(hidden_states)
@@ -358,10 +377,6 @@ class TvpAttention(nn.Module):
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.
         attention_probs = self.attn_dropout(attention_probs)
-
-        # Mask heads if we want to
-        if head_mask is not None:
-            attention_probs = attention_probs * head_mask
 
         attn_output = torch.matmul(attention_probs, value_layer)
         attn_output = attn_output.transpose(1, 2).contiguous()
@@ -405,7 +420,7 @@ class TvpOutputLayer(nn.Module):
         return hidden_states
 
 
-class TvpEncodeLayer(nn.Module):
+class TvpEncodeLayer(GradientCheckpointingLayer):
     def __init__(self, config):
         super().__init__()
         self.attention = TvpAttention(config)
@@ -416,13 +431,11 @@ class TvpEncodeLayer(nn.Module):
         self,
         hidden_states,
         attention_mask=None,
-        head_mask=None,
-        output_attentions: Optional[bool] = None,
+        output_attentions: bool | None = None,
     ):
         self_attention_outputs = self.attention(
             hidden_states,
             attention_mask,
-            head_mask,
             output_attentions=output_attentions,
         )
         attention_output = self_attention_outputs[0]
@@ -444,11 +457,10 @@ class TvpEncoder(nn.Module):
         self,
         hidden_states,
         attention_mask=None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ):
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        return_dict: bool | None = None,
+    ) -> tuple | BaseModelOutput:
         return_dict = return_dict if return_dict is not None else self.config.return_dict
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -461,16 +473,7 @@ class TvpEncoder(nn.Module):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
-            if self.gradient_checkpointing and self.training:
-                layer_outputs = self._gradient_checkpointing_func(
-                    layer_module.__call__,
-                    hidden_states,
-                    attention_mask,
-                    (head_mask[i] if head_mask is not None else None),
-                    output_attentions,
-                )
-            else:
-                layer_outputs = layer_module(hidden_states, attention_mask, head_mask[i], output_attentions)
+            layer_outputs = layer_module(hidden_states, attention_mask, output_attentions)
 
             hidden_states = layer_outputs[0]
             if output_attentions:
@@ -511,78 +514,38 @@ class TvpPooler(nn.Module):
         return pooled_output
 
 
+@auto_docstring
 class TvpPreTrainedModel(PreTrainedModel):
-    """An abstract class to handle weights initialization and
-    a simple interface for downloading and loading pretrained models.
-    """
-
-    config_class = TvpConfig
+    config: TvpConfig
     base_model_prefix = "model"
+    input_modalities = ("video", "text")
     supports_gradient_checkpointing = True
 
-    def _init_weights(self, module):
+    @torch.no_grad()
+    def _init_weights(self, module: nn.Module):
         """Initialize the weights"""
         if isinstance(module, (nn.Linear, nn.Embedding)):
-            # Slightly different from the TF version which uses truncated_normal for initialization
-            # cf https://github.com/pytorch/pytorch/pull/5617
-            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+            init.normal_(module.weight, mean=0.0, std=self.config.initializer_range)
         elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
+            init.zeros_(module.bias)
+            init.ones_(module.weight)
+        elif isinstance(module, nn.Conv2d):
+            init.kaiming_normal_(module.weight, mode="fan_out", nonlinearity="relu")
+            if module.bias is not None:
+                init.constant_(module.bias, 0)
+        elif isinstance(module, TvpModel):
+            init.normal_(module.text_prompt)
 
         if isinstance(module, nn.Linear) and module.bias is not None:
-            module.bias.data.zero_()
-
-        if isinstance(module, nn.Conv2d):
-            nn.init.kaiming_normal_(module.weight, mode="fan_out", nonlinearity="relu")
-            if module.bias is not None:
-                nn.init.constant_(module.bias, 0)
-
-
-TVP_START_DOCSTRING = r"""
-    This model is a PyTorch [torch.nn.Module](https://pytorch.org/docs/stable/nn.html#torch.nn.Module) subclass. Use it
-    as a regular PyTorch Module and refer to the PyTorch documentation for all matter related to general usage and
-    behavior.
-
-    Parameters:
-        config ([`TvpConfig`]): Model configuration class with all the parameters of the model.
-            Initializing with a config file does not load the weights associated with the model, only the
-            configuration. Check out the [`~PreTrainedModel.from_pretrained`] method to load the model weights.
-"""
-
-TVP_INPUTS_DOCSTRING = r"""
-    Args:
-        input_ids (`torch.LongTensor` of shape `(batch_size, sequence_length)`):
-            Indices of input sequence tokens in the vocabulary. Indices can be obtained using [`AutoTokenizer`]. See
-            [`PreTrainedTokenizer.encode`] and [`PreTrainedTokenizer.__call__`] for details. [What are input
-            IDs?](../glossary#input-ids)
-
-        pixel_values (`torch.FloatTensor` of shape `(batch_size, num_frames, num_channels, height, width)`):
-            Pixel values. Pixel values can be obtained using [`TvpImageProcessor`]. See [`TvpImageProcessor.__call__`]
-            for details.
-
-        attention_mask (`torch.FloatTensor` of shape `(batch_size, sequence_length)`, *optional*):
-            Mask to avoid performing attention on padding token indices. Mask values selected in `[0, 1]`:
-            - 1 for tokens that are **not masked**,
-            - 0 for tokens that are **masked**.
-            [What are attention masks?](../glossary#attention-mask)
-
-        head_mask (`torch.FloatTensor` of shape `(num_heads,)` or `(num_layers, num_heads)`, *optional*):
-            Mask to nullify selected heads of the self-attention modules. Mask values selected in `[0, 1]`:
-            - 1 indicates the head is **not masked**,
-            - 0 indicates the head is **masked**.
-
-        output_attentions (`bool`, *optional*):
-            Whether or not to return the attentions tensors of all attention layers. See `attentions` under returned
-            tensors for more detail.
-
-        output_hidden_states (`bool`, *optional*):
-            Whether or not to return the hidden states of all layers. See `hidden_states` under returned tensors for
-            more detail.
-
-        return_dict (`bool`, *optional*):
-            Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
-"""
+            init.zeros_(module.bias)
+        if hasattr(module, "pad_up"):
+            init.normal_(module.pad_up)
+        if hasattr(module, "pad_down"):
+            init.normal_(module.pad_down)
+        if hasattr(module, "pad_left"):
+            init.normal_(module.pad_left)
+        if hasattr(module, "pad_right"):
+            init.normal_(module.pad_right)
 
 
 class TvpFrameDownPadPrompter(nn.Module):
@@ -635,7 +598,6 @@ class TvpFramePadPrompter(nn.Module):
         self.num_frames = config.num_frames
         self.max_img_size = config.max_img_size
         self.visual_prompter_apply = config.visual_prompter_apply
-
         self.base_size = config.max_img_size - config.visual_prompt_size * 2
         self.pad_up = nn.Parameter(
             torch.randn([1, config.num_frames, 3, config.visual_prompt_size, config.max_img_size])
@@ -666,20 +628,50 @@ class TvpFramePadPrompter(nn.Module):
             )
         )
 
-    def forward(self, pixel_values):
+    def interpolate_pad_encoding(self, prompt: torch.Tensor, height: int, width: int) -> torch.Tensor:
+        """
+        This method allows to interpolate the pre-trained pad weights, to be able to use the model on collection of high
+        resolution images (high resolution videos).
+
+        """
+
+        # creates scale factor from height and width of original image wrt to the config.max_img_size
+        h0, w0 = height / self.max_img_size, width / self.max_img_size
+
+        batch, num_frames, channels, prompt_height, prompt_width = prompt.shape
+
+        # reshaping the batch and num_frames dimension into a single one (i.e (b,frames,c,h,w)-->(b*frames,c,h,w)), to apply bicubic interpolation
+        prompt = prompt.reshape(batch * num_frames, channels, prompt_height, prompt_width)
+        prompt = nn.functional.interpolate(
+            prompt,
+            scale_factor=(h0, w0),
+            mode="bicubic",
+            align_corners=False,
+        )
+        # reversing back to (batch,frames,channels,height,width), where height and width is the new interpolated height and width
+        prompt = prompt.reshape(batch, num_frames, channels, height, width)
+        return prompt
+
+    def forward(self, pixel_values, interpolate_pad_encoding: bool = False):
+        height, width = (
+            (pixel_values.shape[-2], pixel_values.shape[-1])
+            if interpolate_pad_encoding
+            else (self.max_img_size, self.max_img_size)
+        )
         if self.visual_prompter_apply not in ("add", "remove", "replace"):
             raise ValueError(f"Invalid visual_prompter_apply value {self.visual_prompter_apply}")
         if self.visual_prompter_apply in ("replace", "remove"):
-            visual_prompt_mask = torch.ones(
-                [self.max_img_size, self.max_img_size], dtype=pixel_values.dtype, device=pixel_values.device
-            )
+            visual_prompt_mask = torch.ones([height, width], dtype=pixel_values.dtype, device=pixel_values.device)
             pixel_values *= visual_prompt_mask
         if self.visual_prompter_apply in ("replace", "add"):
             base = torch.zeros(1, self.num_frames, 3, self.base_size, self.base_size, device=pixel_values.device)
+
             prompt = torch.cat([self.pad_left, base, self.pad_right], dim=4)
             prompt = torch.cat([self.pad_up, prompt, self.pad_down], dim=3)
             prompt = torch.cat(pixel_values.size(0) * [prompt])
-            pixel_values += prompt.to(pixel_values.dtype)
+            if interpolate_pad_encoding:
+                prompt = self.interpolate_pad_encoding(prompt, height, width)
+            pixel_values = pixel_values + prompt.to(pixel_values.dtype)
         return pixel_values
 
 
@@ -689,9 +681,10 @@ TVP_PROMPTER_CLASSES_MAPPING = {
 }
 
 
-@add_start_docstrings(
-    "The bare Tvp Model transformer outputting BaseModelOutputWithPooling object without any specific head on" " top.",
-    TVP_START_DOCSTRING,
+@auto_docstring(
+    custom_intro="""
+    The bare Tvp Model transformer outputting BaseModelOutputWithPooling object without any specific head on top.
+    """
 )
 class TvpModel(TvpPreTrainedModel):
     def __init__(self, config):
@@ -716,28 +709,19 @@ class TvpModel(TvpPreTrainedModel):
     def set_input_embeddings(self, value):
         self.embeddings.word_embeddings = value
 
-    def _prune_heads(self, heads_to_prune):
-        """Prunes heads of the model.
-        heads_to_prune: dict of {layer_num: list of heads to prune in this layer} See base class PreTrainedModel
-        """
-        for layer, heads in heads_to_prune.items():
-            self.encoder.layer[layer].attention.prune_heads(heads)
-
-    @add_start_docstrings_to_model_forward(TVP_INPUTS_DOCSTRING)
-    @replace_return_docstrings(output_type=BaseModelOutputWithPooling, config_class=TvpConfig)
+    @auto_docstring
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
-        pixel_values: Optional[torch.FloatTensor] = None,
-        attention_mask: Optional[torch.LongTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ):
+        input_ids: torch.LongTensor | None = None,
+        pixel_values: torch.FloatTensor | None = None,
+        attention_mask: torch.LongTensor | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        return_dict: bool | None = None,
+        interpolate_pos_encoding: bool = False,
+        **kwargs,
+    ) -> tuple | BaseModelOutputWithPooling:
         r"""
-        Returns:
-
         Examples:
         ```python
         >>> import torch
@@ -752,13 +736,17 @@ class TvpModel(TvpPreTrainedModel):
         >>> output = model(text_inputs.input_ids, pixel_values, text_inputs.attention_mask)
         ```"""
         return_dict = return_dict if return_dict is not None else self.config.return_dict
-
         # Add visual prompt, it compensates for the spatiotemporal information loss in 2D visual features.
-        pixel_values = self.vision_model(self.visual_prompter(pixel_values))
+        pixel_values = self.vision_model(
+            self.visual_prompter(pixel_values, interpolate_pad_encoding=interpolate_pos_encoding)
+        )
         # (batch_size, sequence_length, hidden_size)
         text_embedding_output = self.embeddings(input_ids=input_ids)
         # (batch_size, visual_sequence_length, hidden_size)
-        visual_embedding_output = self.visual_embeddings(pixel_values)
+        visual_embedding_output = self.visual_embeddings(
+            pixel_values, interpolate_pos_encoding=interpolate_pos_encoding
+        )
+
         if attention_mask is not None:
             # (batch_size, visual_sequence_length)
             visual_attention_mask = attention_mask.new_ones(visual_embedding_output.shape[:2])
@@ -776,7 +764,6 @@ class TvpModel(TvpPreTrainedModel):
         encoder_outputs = self.encoder(
             embedding_output,
             attention_mask=attention_mask,
-            head_mask=self.get_head_mask(head_mask, self.config.num_hidden_layers),
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
@@ -787,7 +774,6 @@ class TvpModel(TvpPreTrainedModel):
         pooled_output = self.dropout(pooled_output)
         if not return_dict:
             return (last_hidden_state, pooled_output) + encoder_outputs[1:]
-
         return BaseModelOutputWithPooling(
             last_hidden_state=last_hidden_state,
             pooler_output=pooled_output,
@@ -810,11 +796,10 @@ class TvpVideoGroundingHead(nn.Module):
         return logits
 
 
-@add_start_docstrings(
-    """
+@auto_docstring(
+    custom_intro="""
     Tvp Model with a video grounding head on top computing IoU, distance, and duration loss.
-    """,
-    TVP_START_DOCSTRING,
+    """
 )
 class TvpForVideoGrounding(TvpPreTrainedModel):
     def __init__(self, config):
@@ -825,23 +810,22 @@ class TvpForVideoGrounding(TvpPreTrainedModel):
 
         self.post_init()
 
-    @add_start_docstrings_to_model_forward(TVP_INPUTS_DOCSTRING)
-    @replace_return_docstrings(output_type=TvpVideoGroundingOutput, config_class=TvpConfig)
+    @auto_docstring
     def forward(
         self,
-        input_ids: Optional[torch.LongTensor] = None,
-        pixel_values: Optional[torch.FloatTensor] = None,
-        attention_mask: Optional[torch.LongTensor] = None,
-        labels: Tuple[torch.Tensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ):
+        input_ids: torch.LongTensor | None = None,
+        pixel_values: torch.FloatTensor | None = None,
+        attention_mask: torch.LongTensor | None = None,
+        labels: tuple[torch.Tensor] | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        return_dict: bool | None = None,
+        interpolate_pos_encoding: bool = False,
+        **kwargs,
+    ) -> tuple | TvpVideoGroundingOutput:
         r"""
         labels (`torch.FloatTensor` of shape `(batch_size, 3)`, *optional*):
             The labels contains duration, start time, and end time of the video corresponding to the text.
-        Returns:
 
         Examples:
         ```python
@@ -861,13 +845,12 @@ class TvpForVideoGrounding(TvpPreTrainedModel):
             input_ids,
             pixel_values,
             attention_mask,
-            head_mask=head_mask,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
+            interpolate_pos_encoding=interpolate_pos_encoding,
         )
         pooler_output = outputs[1]
-
         logits = self.video_grounding_head(pooler_output)
 
         loss = None
@@ -880,7 +863,6 @@ class TvpForVideoGrounding(TvpPreTrainedModel):
                 + self.config.distance_loss_weight * loss_dict["distance"]
                 + self.config.duration_loss_weight * loss_dict["duration"]
             )
-
         if not return_dict:
             outputs = (logits,) + outputs[2:]
             if loss is not None:
@@ -893,3 +875,6 @@ class TvpForVideoGrounding(TvpPreTrainedModel):
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
         )
+
+
+__all__ = ["TvpModel", "TvpPreTrainedModel", "TvpForVideoGrounding"]

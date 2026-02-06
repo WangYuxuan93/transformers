@@ -13,21 +13,17 @@ specific language governing permissions and limitations under the License.
 rendered properly in your Markdown viewer.
 
 -->
+*This model was released on 2020-01-13 and added to Hugging Face Transformers on 2020-11-16.*
 
 # ProphetNet
 
 <div class="flex flex-wrap space-x-1">
-<a href="https://huggingface.co/models?filter=prophetnet">
-<img alt="Models" src="https://img.shields.io/badge/All_model_pages-prophetnet-blueviolet">
-</a>
-<a href="https://huggingface.co/spaces/docs-demos/prophetnet-large-uncased">
-<img alt="Spaces" src="https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue">
-</a>
+<img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-DE3412?style=flat&logo=pytorch&logoColor=white">
 </div>
 
 ## Overview
 
-The ProphetNet model was proposed in [ProphetNet: Predicting Future N-gram for Sequence-to-Sequence Pre-training,](https://arxiv.org/abs/2001.04063) by Yu Yan, Weizhen Qi, Yeyun Gong, Dayiheng Liu, Nan Duan, Jiusheng Chen, Ruofei
+The ProphetNet model was proposed in [ProphetNet: Predicting Future N-gram for Sequence-to-Sequence Pre-training,](https://huggingface.co/papers/2001.04063) by Yu Yan, Weizhen Qi, Yeyun Gong, Dayiheng Liu, Nan Duan, Jiusheng Chen, Ruofei
 Zhang, Ming Zhou on 13 Jan, 2020.
 
 ProphetNet is an encoder-decoder model and can predict n-future tokens for "ngram" language modeling instead of just
@@ -51,7 +47,7 @@ The Authors' code can be found [here](https://github.com/microsoft/ProphetNet).
 
 - ProphetNet is a model with absolute position embeddings so it's usually advised to pad the inputs on the right rather than
   the left.
-- The model architecture is based on the original Transformer, but replaces the “standard” self-attention mechanism in the decoder by a a main self-attention mechanism and a self and n-stream (predict) self-attention mechanism.
+- The model architecture is based on the original Transformer, but replaces the “standard” self-attention mechanism in the decoder by a main self-attention mechanism and a self and n-stream (predict) self-attention mechanism.
 
 ## Resources
 

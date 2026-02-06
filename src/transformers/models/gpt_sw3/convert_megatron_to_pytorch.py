@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Convert GPT-SW3 megatron checkpoints to pytorch"""
+"""Convert GPT-SW3 megatron checkpoints to pytorch"""
 
 import argparse
 import os
@@ -34,7 +34,7 @@ def recursive_print(name, val, spaces=0):
     if isinstance(val, dict):
         if msg is not None:
             print(msg)
-        for k in val.keys():
+        for k in val:
             recursive_print(k, val[k], spaces + 2)
     elif isinstance(val, torch.Tensor):
         print(msg, ":", val.size())
@@ -153,7 +153,7 @@ def main(args):
         raise FileNotFoundError(f"ERROR! could not find file {checkpoint_path}")
 
     # Load the model.
-    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
 
     # Load the config.
     config_megatron = checkpoint["hyper_parameters"]["cfg"]

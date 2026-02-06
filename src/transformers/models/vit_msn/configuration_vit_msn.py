@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2022 Facebook AI and The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,30 +11,24 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" ViT MSN model configuration"""
+"""ViT MSN model configuration"""
 
-
-from ...configuration_utils import PretrainedConfig
+from ...configuration_utils import PreTrainedConfig
 from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
 
-VIT_MSN_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "sayakpaul/vit-msn-base": "https://huggingface.co/sayakpaul/vit-msn-base/resolve/main/config.json",
-    # See all ViT MSN models at https://huggingface.co/models?filter=vit_msn
-}
 
-
-class ViTMSNConfig(PretrainedConfig):
+class ViTMSNConfig(PreTrainedConfig):
     r"""
     This is the configuration class to store the configuration of a [`ViTMSNModel`]. It is used to instantiate an ViT
     MSN model according to the specified arguments, defining the model architecture. Instantiating a configuration with
     the defaults will yield a similar configuration to that of the ViT
     [facebook/vit_msn_base](https://huggingface.co/facebook/vit_msn_base) architecture.
 
-    Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
-    documentation from [`PretrainedConfig`] for more information.
+    Configuration objects inherit from [`PreTrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PreTrainedConfig`] for more information.
 
 
     Args:
@@ -116,3 +109,6 @@ class ViTMSNConfig(PretrainedConfig):
         self.patch_size = patch_size
         self.num_channels = num_channels
         self.qkv_bias = qkv_bias
+
+
+__all__ = ["ViTMSNConfig"]

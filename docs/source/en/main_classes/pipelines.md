@@ -43,7 +43,7 @@ If you want to use a specific model from the [hub](https://huggingface.co) you c
 the hub already defines it:
 
 ```python
->>> pipe = pipeline(model="roberta-large-mnli")
+>>> pipe = pipeline(model="FacebookAI/roberta-large-mnli")
 >>> pipe("This restaurant is awesome")
 [{'label': 'NEUTRAL', 'score': 0.7313136458396912}]
 ```
@@ -80,7 +80,6 @@ for out in tqdm(pipe(KeyDataset(dataset, "file"))):
 ```
 
 For ease of use, a generator is also possible:
-
 
 ```python
 from transformers import pipeline
@@ -160,7 +159,7 @@ for batch_size in [1, 8, 64, 256]:
         pass
 ```
 
-```
+```text
 # On GTX 970
 ------------------------------
 Streaming no batching
@@ -196,8 +195,7 @@ This is a occasional very long sentence compared to the other. In that case, the
 tokens long, so the whole batch will be [64, 400] instead of [64, 4], leading to the high slowdown. Even worse, on
 bigger batches, the program simply crashes.
 
-
-```
+```text
 ------------------------------
 Streaming no batching
 100%|█████████████████████████████████████████████████████████████████████| 1000/1000 [00:05<00:00, 183.69it/s]
@@ -245,7 +243,6 @@ multiple forward pass of a model. Under normal circumstances, this would yield i
 In order to circumvent this issue, both of these pipelines are a bit specific, they are `ChunkPipeline` instead of
 regular `Pipeline`. In short:
 
-
 ```python
 preprocessed = pipe.preprocess(inputs)
 model_outputs = pipe.forward(preprocessed)
@@ -253,7 +250,6 @@ outputs = pipe.postprocess(model_outputs)
 ```
 
 Now becomes:
-
 
 ```python
 all_model_outputs = []
@@ -270,13 +266,18 @@ This is a simplified view, since the pipeline can handle automatically the batch
 about how many forward passes you inputs are actually going to trigger, you can optimize the `batch_size`
 independently of the inputs. The caveats from the previous section still apply.
 
+## Pipeline FP16 inference
+
+Models can be run in FP16 which can be significantly faster on GPU while saving memory. Most models will not suffer noticeable performance loss from this. The larger the model, the less likely that it will.
+
+To enable FP16 inference, you can simply pass `dtype=torch.float16` or `dtype='float16'` to the pipeline constructor. Note that this only works for models with a PyTorch backend. Your inputs will be converted to FP16 internally.
+
 ## Pipeline custom code
 
 If you want to override a specific pipeline.
 
 Don't hesitate to create an issue for your task at hand, the goal of the pipeline is to be easy to use and support most
 cases, so `transformers` could maybe support your use case.
-
 
 If you want to try simply you can:
 
@@ -296,7 +297,6 @@ my_pipeline = pipeline(model="xxxx", pipeline_class=MyPipeline)
 ```
 
 That should enable you to do all the custom code you want.
-
 
 ## Implementing a pipeline
 
@@ -324,7 +324,6 @@ Pipelines available for audio tasks include the following.
     - __call__
     - all
 
-
 ### ZeroShotAudioClassificationPipeline
 
 [[autodoc]] ZeroShotAudioClassificationPipeline
@@ -336,6 +335,7 @@ Pipelines available for audio tasks include the following.
 Pipelines available for computer vision tasks include the following.
 
 ### DepthEstimationPipeline
+
 [[autodoc]] DepthEstimationPipeline
     - __call__
     - all
@@ -355,6 +355,12 @@ Pipelines available for computer vision tasks include the following.
 ### ImageToImagePipeline
 
 [[autodoc]] ImageToImagePipeline
+    - __call__
+    - all
+
+### KeypointMatchingPipeline
+
+[[autodoc]] KeypointMatchingPipeline
     - __call__
     - all
 
@@ -386,14 +392,6 @@ Pipelines available for computer vision tasks include the following.
 
 Pipelines available for natural language processing tasks include the following.
 
-### ConversationalPipeline
-
-[[autodoc]] Conversation
-
-[[autodoc]] ConversationalPipeline
-    - __call__
-    - all
-
 ### FillMaskPipeline
 
 [[autodoc]] FillMaskPipeline
@@ -403,12 +401,6 @@ Pipelines available for natural language processing tasks include the following.
 ### QuestionAnsweringPipeline
 
 [[autodoc]] QuestionAnsweringPipeline
-    - __call__
-    - all
-
-### SummarizationPipeline
-
-[[autodoc]] SummarizationPipeline
     - __call__
     - all
 
@@ -429,21 +421,9 @@ Pipelines available for natural language processing tasks include the following.
     - __call__
     - all
 
-### Text2TextGenerationPipeline
-
-[[autodoc]] Text2TextGenerationPipeline
-    - __call__
-    - all
-
 ### TokenClassificationPipeline
 
 [[autodoc]] TokenClassificationPipeline
-    - __call__
-    - all
-
-### TranslationPipeline
-
-[[autodoc]] TranslationPipeline
     - __call__
     - all
 
@@ -469,9 +449,21 @@ Pipelines available for multimodal tasks include the following.
     - __call__
     - all
 
-### ImageToTextPipeline
+### ImageFeatureExtractionPipeline
 
-[[autodoc]] ImageToTextPipeline
+[[autodoc]] ImageFeatureExtractionPipeline
+    - __call__
+    - all
+
+### ImageTextToTextPipeline
+
+[[autodoc]] ImageTextToTextPipeline
+    - __call__
+    - all
+
+### AnyToAnyPipeline
+
+[[autodoc]] AnyToAnyPipeline
     - __call__
     - all
 

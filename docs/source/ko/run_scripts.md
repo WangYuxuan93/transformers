@@ -18,7 +18,7 @@ rendered properly in your Markdown viewer.
 
 🤗 Transformers 노트북과 함께 [PyTorch](https://github.com/huggingface/transformers/tree/main/examples/pytorch), [TensorFlow](https://github.com/huggingface/transformers/tree/main/examples/tensorflow), 또는 [JAX/Flax](https://github.com/huggingface/transformers/tree/main/examples/flax)를 사용해 특정 태스크에 대한 모델을 훈련하는 방법을 보여주는 예제 스크립트도 있습니다.
 
-또한 [연구 프로젝트](https://github.com/huggingface/transformers/tree/main/examples/research_projects) 및 [레거시 예제](https://github.com/huggingface/transformers/tree/main/examples/legacy)에서 대부분 커뮤니티에서 제공한 스크립트를 찾을 수 있습니다. 
+또한 [연구 프로젝트](https://github.com/huggingface/transformers-research-projects/) 및 [레거시 예제](https://github.com/huggingface/transformers/tree/main/examples/legacy)에서 대부분 커뮤니티에서 제공한 스크립트를 찾을 수 있습니다. 
 이러한 스크립트는 적극적으로 유지 관리되지 않으며 최신 버전의 라이브러리와 호환되지 않을 가능성이 높은 특정 버전의 🤗 Transformers를 필요로 합니다.
 
 예제 스크립트가 모든 문제에서 바로 작동하는 것은 아니며, 해결하려는 문제에 맞게 스크립트를 변경해야 할 수도 있습니다.
@@ -90,16 +90,14 @@ pip install -r requirements.txt
 
 ## 스크립트 실행하기[[run-a-script]]
 
-<frameworkcontent>
-<pt>
 예제 스크립트는 🤗 [Datasets](https://huggingface.co/docs/datasets/) 라이브러리에서 데이터 세트를 다운로드하고 전처리합니다.
 그런 다음 스크립트는 요약 기능을 지원하는 아키텍처에서 [Trainer](https://huggingface.co/docs/transformers/main_classes/trainer)를 사용하여 데이터 세트를 미세 조정합니다.
-다음 예는 [CNN/DailyMail](https://huggingface.co/datasets/cnn_dailymail) 데이터 세트에서 [T5-small](https://huggingface.co/t5-small)을 미세 조정합니다.
+다음 예는 [CNN/DailyMail](https://huggingface.co/datasets/cnn_dailymail) 데이터 세트에서 [T5-small](https://huggingface.co/google-t5/t5-small)을 미세 조정합니다.
 T5 모델은 훈련 방식에 따라 추가 `source_prefix` 인수가 필요하며, 이 프롬프트는 요약 작업임을 T5에 알려줍니다.
 
 ```bash
 python examples/pytorch/summarization/run_summarization.py \
-    --model_name_or_path t5-small \
+    --model_name_or_path google-t5/t5-small \
     --do_train \
     --do_eval \
     --dataset_name cnn_dailymail \
@@ -108,29 +106,8 @@ python examples/pytorch/summarization/run_summarization.py \
     --output_dir /tmp/tst-summarization \
     --per_device_train_batch_size=4 \
     --per_device_eval_batch_size=4 \
-    --overwrite_output_dir \
     --predict_with_generate
 ```
-</pt>
-<tf>
-예제 스크립트는 🤗 [Datasets](https://huggingface.co/docs/datasets/) 라이브러리에서 데이터 세트를 다운로드하고 전처리합니다.
-그런 다음 스크립트는 요약 기능을 지원하는 아키텍처에서 Keras를 사용하여 데이터 세트를 미세 조정합니다. 
-다음 예는 [CNN/DailyMail](https://huggingface.co/datasets/cnn_dailymail) 데이터 세트에서 [T5-small](https://huggingface.co/t5-small)을 미세 조정합니다.
-T5 모델은 훈련 방식에 따라 추가 `source_prefix` 인수가 필요하며, 이 프롬프트는 요약 작업임을 T5에 알려줍니다.
-```bash
-python examples/tensorflow/summarization/run_summarization.py  \
-    --model_name_or_path t5-small \
-    --dataset_name cnn_dailymail \
-    --dataset_config "3.0.0" \
-    --output_dir /tmp/tst-summarization  \
-    --per_device_train_batch_size 8 \
-    --per_device_eval_batch_size 16 \
-    --num_train_epochs 3 \
-    --do_train \
-    --do_eval
-```
-</tf>
-</frameworkcontent>
 
 ## 혼합 정밀도(mixed precision)로 분산 훈련하기[[distributed-training-and-mixed-precision]]
 
@@ -144,7 +121,7 @@ python examples/tensorflow/summarization/run_summarization.py  \
 torchrun \
     --nproc_per_node 8 pytorch/summarization/run_summarization.py \
     --fp16 \
-    --model_name_or_path t5-small \
+    --model_name_or_path google-t5/t5-small \
     --do_train \
     --do_eval \
     --dataset_name cnn_dailymail \
@@ -153,7 +130,6 @@ torchrun \
     --output_dir /tmp/tst-summarization \
     --per_device_train_batch_size=4 \
     --per_device_eval_batch_size=4 \
-    --overwrite_output_dir \
     --predict_with_generate
 ```
 
@@ -162,8 +138,6 @@ TensorFlow 스크립트는 분산 훈련을 위해 [`MirroredStrategy`](https://
 
 ## TPU 위에서 스크립트 실행하기[[run-a-script-on-a-tpu]]
 
-<frameworkcontent>
-<pt>
 Tensor Processing Units (TPUs)는 성능을 가속화하기 위해 특별히 설계되었습니다.
 PyTorch는 [XLA](https://www.tensorflow.org/xla) 딥러닝 컴파일러와 함께 TPU를 지원합니다(자세한 내용은 [여기](https://github.com/pytorch/xla/blob/master/README.md) 참조). 
 TPU를 사용하려면 `xla_spawn.py` 스크립트를 실행하고 `num_cores` 인수를 사용하여 사용하려는 TPU 코어 수를 설정합니다.
@@ -171,7 +145,7 @@ TPU를 사용하려면 `xla_spawn.py` 스크립트를 실행하고 `num_cores` �
 ```bash
 python xla_spawn.py --num_cores 8 \
     summarization/run_summarization.py \
-    --model_name_or_path t5-small \
+    --model_name_or_path google-t5/t5-small \
     --do_train \
     --do_eval \
     --dataset_name cnn_dailymail \
@@ -180,30 +154,8 @@ python xla_spawn.py --num_cores 8 \
     --output_dir /tmp/tst-summarization \
     --per_device_train_batch_size=4 \
     --per_device_eval_batch_size=4 \
-    --overwrite_output_dir \
     --predict_with_generate
 ```
-</pt>
-<tf>
-Tensor Processing Units (TPUs)는 성능을 가속화하기 위해 특별히 설계되었습니다.
-TensorFlow 스크립트는 TPU를 훈련에 사용하기 위해 [`TPUStrategy`](https://www.tensorflow.org/guide/distributed_training#tpustrategy)를 활용합니다.
-TPU를 사용하려면 TPU 리소스의 이름을 `tpu` 인수에 전달합니다.
-
-```bash
-python run_summarization.py  \
-    --tpu name_of_tpu_resource \
-    --model_name_or_path t5-small \
-    --dataset_name cnn_dailymail \
-    --dataset_config "3.0.0" \
-    --output_dir /tmp/tst-summarization  \
-    --per_device_train_batch_size 8 \
-    --per_device_eval_batch_size 16 \
-    --num_train_epochs 3 \
-    --do_train \
-    --do_eval
-```
-</tf>
-</frameworkcontent>
 
 ## 🤗 Accelerate로 스크립트 실행하기[[run-a-script-with-accelerate]]
 
@@ -232,7 +184,7 @@ accelerate test
 
 ```bash
 accelerate launch run_summarization_no_trainer.py \
-    --model_name_or_path t5-small \
+    --model_name_or_path google-t5/t5-small \
     --dataset_name cnn_dailymail \
     --dataset_config "3.0.0" \
     --source_prefix "summarize: " \
@@ -252,7 +204,7 @@ accelerate launch run_summarization_no_trainer.py \
 
 ```bash
 python examples/pytorch/summarization/run_summarization.py \
-    --model_name_or_path t5-small \
+    --model_name_or_path google-t5/t5-small \
     --do_train \
     --do_eval \
     --train_file path_to_csv_or_jsonlines_file \
@@ -261,7 +213,6 @@ python examples/pytorch/summarization/run_summarization.py \
     --summary_column summary_column_name \
     --source_prefix "summarize: " \
     --output_dir /tmp/tst-summarization \
-    --overwrite_output_dir \
     --per_device_train_batch_size=4 \
     --per_device_eval_batch_size=4 \
     --predict_with_generate
@@ -278,7 +229,7 @@ python examples/pytorch/summarization/run_summarization.py \
 
 ```bash
 python examples/pytorch/summarization/run_summarization.py \
-    --model_name_or_path t5-small \
+    --model_name_or_path google-t5/t5-small \
     --max_train_samples 50 \
     --max_eval_samples 50 \
     --max_predict_samples 50 \
@@ -290,7 +241,6 @@ python examples/pytorch/summarization/run_summarization.py \
     --output_dir /tmp/tst-summarization \
     --per_device_train_batch_size=4 \
     --per_device_eval_batch_size=4 \
-    --overwrite_output_dir \
     --predict_with_generate
 ```
 
@@ -307,11 +257,9 @@ examples/pytorch/summarization/run_summarization.py -h
 이렇게 하면 훈련이 중단되더라도 처음부터 다시 시작하지 않고 중단한 부분부터 다시 시작할 수 있습니다.
 체크포인트에서 훈련을 재개하는 방법에는 두 가지가 있습니다.
 
-첫 번째는 `output_dir previous_output_dir` 인수를 사용하여 `output_dir`에 저장된 최신 체크포인트부터 훈련을 재개하는 방법입니다.
-이 경우 `overwrite_output_dir`을 제거해야 합니다:
 ```bash
 python examples/pytorch/summarization/run_summarization.py
-    --model_name_or_path t5-small \
+    --model_name_or_path google-t5/t5-small \
     --do_train \
     --do_eval \
     --dataset_name cnn_dailymail \
@@ -320,24 +268,6 @@ python examples/pytorch/summarization/run_summarization.py
     --output_dir /tmp/tst-summarization \
     --per_device_train_batch_size=4 \
     --per_device_eval_batch_size=4 \
-    --output_dir previous_output_dir \
-    --predict_with_generate
-```
-
-두 번째는 `resume_from_checkpoint path_to_specific_checkpoint` 인수를 사용하여 특정 체크포인트 폴더에서 훈련을 재개하는 방법입니다.
-
-```bash
-python examples/pytorch/summarization/run_summarization.py
-    --model_name_or_path t5-small \
-    --do_train \
-    --do_eval \
-    --dataset_name cnn_dailymail \
-    --dataset_config "3.0.0" \
-    --source_prefix "summarize: " \
-    --output_dir /tmp/tst-summarization \
-    --per_device_train_batch_size=4 \
-    --per_device_eval_batch_size=4 \
-    --overwrite_output_dir \
     --resume_from_checkpoint path_to_specific_checkpoint \
     --predict_with_generate
 ```
@@ -347,7 +277,7 @@ python examples/pytorch/summarization/run_summarization.py
 모든 스크립트는 최종 모델을 [Model Hub](https://huggingface.co/models)에 업로드할 수 있습니다.
 시작하기 전에 Hugging Face에 로그인했는지 확인하세요:
 ```bash
-huggingface-cli login
+hf auth login
 ```
 
 그런 다음 스크립트에 `push_to_hub` 인수를 추가합니다.
@@ -359,7 +289,7 @@ huggingface-cli login
 
 ```bash
 python examples/pytorch/summarization/run_summarization.py
-    --model_name_or_path t5-small \
+    --model_name_or_path google-t5/t5-small \
     --do_train \
     --do_eval \
     --dataset_name cnn_dailymail \
@@ -370,6 +300,5 @@ python examples/pytorch/summarization/run_summarization.py
     --output_dir /tmp/tst-summarization \
     --per_device_train_batch_size=4 \
     --per_device_eval_batch_size=4 \
-    --overwrite_output_dir \
     --predict_with_generate
 ```

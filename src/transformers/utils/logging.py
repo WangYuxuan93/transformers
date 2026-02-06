@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2020 Optuna, Hugging Face
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,8 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Logging utilities."""
-
+"""Logging utilities."""
 
 import functools
 import logging
@@ -22,23 +20,22 @@ import sys
 import threading
 from logging import (
     CRITICAL,  # NOQA
-    DEBUG,  # NOQA
-    ERROR,  # NOQA
+    DEBUG,
+    ERROR,
     FATAL,  # NOQA
-    INFO,  # NOQA
+    INFO,
     NOTSET,  # NOQA
     WARN,  # NOQA
-    WARNING,  # NOQA
+    WARNING,
 )
 from logging import captureWarnings as _captureWarnings
-from typing import Optional
 
 import huggingface_hub.utils as hf_hub_utils
 from tqdm import auto as tqdm_lib
 
 
 _lock = threading.Lock()
-_default_handler: Optional[logging.Handler] = None
+_default_handler: logging.Handler | None = None
 
 log_levels = {
     "detail": logging.DEBUG,  # will also print filename and line number
@@ -51,7 +48,7 @@ log_levels = {
 
 _default_log_level = logging.WARNING
 
-_tqdm_active = True
+_tqdm_active = not hf_hub_utils.are_progress_bars_disabled()
 
 
 def _get_default_logging_level():
@@ -66,7 +63,7 @@ def _get_default_logging_level():
         else:
             logging.getLogger().warning(
                 f"Unknown option TRANSFORMERS_VERBOSITY={env_level_str}, "
-                f"has to be one of: { ', '.join(log_levels.keys()) }"
+                f"has to be one of: {', '.join(log_levels.keys())}"
             )
     return _default_log_level
 
@@ -102,7 +99,8 @@ def _configure_library_root_logger() -> None:
             formatter = logging.Formatter("[%(levelname)s|%(pathname)s:%(lineno)s] %(asctime)s >> %(message)s")
             _default_handler.setFormatter(formatter)
 
-        library_root_logger.propagate = False
+        is_ci = os.getenv("CI") is not None and os.getenv("CI").upper() in {"1", "ON", "YES", "TRUE"}
+        library_root_logger.propagate = is_ci
 
 
 def _reset_library_root_logger() -> None:
@@ -145,7 +143,7 @@ def captureWarnings(capture):
     _captureWarnings(capture)
 
 
-def get_logger(name: Optional[str] = None) -> logging.Logger:
+def get_logger(name: str | None = None) -> logging.Logger:
     """
     Return a logger with the specified name.
 
@@ -308,7 +306,7 @@ def warning_advice(self, *args, **kwargs):
     This method is identical to `logger.warning()`, but if env var TRANSFORMERS_NO_ADVISORY_WARNINGS=1 is set, this
     warning will not be printed
     """
-    no_advisory_warnings = os.getenv("TRANSFORMERS_NO_ADVISORY_WARNINGS", False)
+    no_advisory_warnings = os.getenv("TRANSFORMERS_NO_ADVISORY_WARNINGS")
     if no_advisory_warnings:
         return
     self.warning(*args, **kwargs)
@@ -330,6 +328,21 @@ def warning_once(self, *args, **kwargs):
 
 
 logging.Logger.warning_once = warning_once
+
+
+@functools.lru_cache(None)
+def info_once(self, *args, **kwargs):
+    """
+    This method is identical to `logger.info()`, but will emit the info with the same message only once
+
+    Note: The cache is for the function arguments, so 2 different callers using the same arguments will hit the cache.
+    The assumption here is that all warning messages are unique across the code. If they aren't then need to switch to
+    another type of cache that includes the caller frame information in the hashing function.
+    """
+    self.info(*args, **kwargs)
+
+
+logging.Logger.info_once = info_once
 
 
 class EmptyTqdm:
@@ -378,7 +391,6 @@ tqdm = _tqdm_cls()
 
 def is_progress_bar_enabled() -> bool:
     """Return a boolean indicating whether tqdm progress bars are enabled."""
-    global _tqdm_active
     return bool(_tqdm_active)
 
 

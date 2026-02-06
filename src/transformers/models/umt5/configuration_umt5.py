@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023, The T5 Authors and HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,36 +11,29 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" UMT5 model configuration"""
-from typing import Mapping
+"""UMT5 model configuration"""
 
-from ...configuration_utils import PretrainedConfig
-from ...onnx import OnnxSeq2SeqConfigWithPast
+from ...configuration_utils import PreTrainedConfig
 from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
 
-UMT5_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "google/umt5-small": "https://huggingface.co/google/umt5-small/resolve/main/config.json",
-    # See all umt5 models at https://huggingface.co/models?filter=umt5
-}
 
-
-class UMT5Config(PretrainedConfig):
+class UMT5Config(PreTrainedConfig):
     r"""
     This is the configuration class to store the configuration of a [`UMT5Model`]. It is used to instantiate a UMT5
     model according to the specified arguments, defining the model architecture. Instantiating a configuration with the
     defaults will yield a similar configuration to that of the UMT5
     [google/umt5-small](https://huggingface.co/google/umt5-small) architecture.
 
-    Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
-    documentation from [`PretrainedConfig`] for more information.
+    Configuration objects inherit from [`PreTrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PreTrainedConfig`] for more information.
 
     Arguments:
         vocab_size (`int`, *optional*, defaults to 250112):
             Vocabulary size of the UMT5 model. Defines the number of different tokens that can be represented by the
-            `inputs_ids` passed when calling [`UMT5Model`] or [`TFUMT5Model`].
+            `inputs_ids` passed when calling [`UMT5Model`].
         d_model (`int`, *optional*, defaults to 512):
             Size of the encoder layers and the pooler layer.
         d_kv (`int`, *optional*, defaults to 64):
@@ -76,6 +68,12 @@ class UMT5Config(PretrainedConfig):
 
     model_type = "umt5"
     keys_to_ignore_at_inference = ["past_key_values"]
+    attribute_map = {
+        "hidden_size": "d_model",
+        "num_attention_heads": "num_heads",
+        "num_hidden_layers": "num_layers",
+        "head_dim": "d_kv",
+    }
 
     def __init__(
         self,
@@ -95,22 +93,14 @@ class UMT5Config(PretrainedConfig):
         is_encoder_decoder=True,
         use_cache=True,
         tokenizer_class="T5Tokenizer",
-        tie_word_embeddings=True,
         pad_token_id=0,
         eos_token_id=1,
         decoder_start_token_id=0,
         classifier_dropout=0.0,
+        is_decoder=False,
         **kwargs,
     ):
-        super().__init__(
-            is_encoder_decoder=is_encoder_decoder,
-            tokenizer_class=tokenizer_class,
-            tie_word_embeddings=tie_word_embeddings,
-            pad_token_id=pad_token_id,
-            eos_token_id=eos_token_id,
-            decoder_start_token_id=decoder_start_token_id,
-            **kwargs,
-        )
+        self.is_decoder = is_decoder
         self.vocab_size = vocab_size
         self.d_model = d_model
         self.d_kv = d_kv
@@ -143,45 +133,16 @@ class UMT5Config(PretrainedConfig):
         if feed_forward_proj == "gated-gelu":
             self.dense_act_fn = "gelu_new"
 
-    @property
-    def hidden_size(self):
-        return self.d_model
+        self.tokenizer_class = tokenizer_class
+        self.pad_token_id = pad_token_id
+        self.eos_token_id = eos_token_id
+        self.decoder_start_token_id = decoder_start_token_id
+        self.tie_word_embeddings = True  # force it for T5 family
 
-    @property
-    def num_attention_heads(self):
-        return self.num_heads
-
-    @property
-    def num_hidden_layers(self):
-        return self.num_layers
+        super().__init__(
+            is_encoder_decoder=is_encoder_decoder,
+            **kwargs,
+        )
 
 
-class UMT5OnnxConfig(OnnxSeq2SeqConfigWithPast):
-    @property
-    # Copied from transformers.models.t5.configuration_t5.T5OnnxConfig.inputs
-    def inputs(self) -> Mapping[str, Mapping[int, str]]:
-        common_inputs = {
-            "input_ids": {0: "batch", 1: "encoder_sequence"},
-            "attention_mask": {0: "batch", 1: "encoder_sequence"},
-        }
-        if self.use_past:
-            common_inputs["attention_mask"][1] = "past_encoder_sequence + sequence"
-            common_inputs["decoder_input_ids"] = {0: "batch"}
-            common_inputs["decoder_attention_mask"] = {0: "batch", 1: "past_decoder_sequence + sequence"}
-        else:
-            common_inputs["decoder_input_ids"] = {0: "batch", 1: "decoder_sequence"}
-            common_inputs["decoder_attention_mask"] = {0: "batch", 1: "decoder_sequence"}
-
-        if self.use_past:
-            self.fill_with_past_key_values_(common_inputs, direction="inputs")
-
-        return common_inputs
-
-    @property
-    # Copied from transformers.models.t5.configuration_t5.T5OnnxConfig.default_onnx_opset
-    def default_onnx_opset(self) -> int:
-        return 13
-
-    @property
-    def atol_for_validation(self) -> float:
-        return 5e-4
+__all__ = ["UMT5Config"]

@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# coding=utf-8
 # Copyright 2020 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,16 +12,29 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Finetuning the library models for text classification."""
+
+# /// script
+# dependencies = [
+#     "transformers @ git+https://github.com/huggingface/transformers.git",
+#     "accelerate >= 0.12.0",
+#     "datasets >= 1.8.0",
+#     "sentencepiece != 0.1.92",
+#     "scipy",
+#     "scikit-learn",
+#     "protobuf",
+#     "torch >= 1.3",
+#     "evaluate",
+# ]
+# ///
+
+"""Finetuning the library models for text classification."""
 # You can also adapt this script on your own text classification task. Pointers for this are left as comments.
 
 import logging
 import os
 import random
 import sys
-import warnings
 from dataclasses import dataclass, field
-from typing import List, Optional
 
 import datasets
 import evaluate
@@ -42,13 +54,12 @@ from transformers import (
     default_data_collator,
     set_seed,
 )
-from transformers.trainer_utils import get_last_checkpoint
-from transformers.utils import check_min_version, send_example_telemetry
+from transformers.utils import check_min_version
 from transformers.utils.versions import require_version
 
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
-check_min_version("4.37.0.dev0")
+check_min_version("4.57.0.dev0")
 
 require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/text-classification/requirements.txt")
 
@@ -66,10 +77,10 @@ class DataTrainingArguments:
     the command line.
     """
 
-    dataset_name: Optional[str] = field(
+    dataset_name: str | None = field(
         default=None, metadata={"help": "The name of the dataset to use (via the datasets library)."}
     )
-    dataset_config_name: Optional[str] = field(
+    dataset_config_name: str | None = field(
         default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
     )
     do_regression: bool = field(
@@ -78,50 +89,50 @@ class DataTrainingArguments:
             "help": "Whether to do regression instead of classification. If None, will be inferred from the dataset."
         },
     )
-    text_column_names: Optional[str] = field(
+    text_column_names: str | None = field(
         default=None,
         metadata={
             "help": (
                 "The name of the text column in the input dataset or a CSV/JSON file. "
-                'If not specified, will use the "sentence" column for single/multi-label classifcation task.'
+                'If not specified, will use the "sentence" column for single/multi-label classification task.'
             )
         },
     )
-    text_column_delimiter: Optional[str] = field(
-        default=" ", metadata={"help": "THe delimiter to use to join text columns into a single sentence."}
+    text_column_delimiter: str | None = field(
+        default=" ", metadata={"help": "The delimiter to use to join text columns into a single sentence."}
     )
-    train_split_name: Optional[str] = field(
+    train_split_name: str | None = field(
         default=None,
         metadata={
             "help": 'The name of the train split in the input dataset. If not specified, will use the "train" split when do_train is enabled'
         },
     )
-    validation_split_name: Optional[str] = field(
+    validation_split_name: str | None = field(
         default=None,
         metadata={
             "help": 'The name of the validation split in the input dataset. If not specified, will use the "validation" split when do_eval is enabled'
         },
     )
-    test_split_name: Optional[str] = field(
+    test_split_name: str | None = field(
         default=None,
         metadata={
             "help": 'The name of the test split in the input dataset. If not specified, will use the "test" split when do_predict is enabled'
         },
     )
-    remove_splits: Optional[str] = field(
+    remove_splits: str | None = field(
         default=None,
         metadata={"help": "The splits to remove from the dataset. Multiple splits should be separated by commas."},
     )
-    remove_columns: Optional[str] = field(
+    remove_columns: str | None = field(
         default=None,
         metadata={"help": "The columns to remove from the dataset. Multiple columns should be separated by commas."},
     )
-    label_column_name: Optional[str] = field(
+    label_column_name: str | None = field(
         default=None,
         metadata={
             "help": (
                 "The name of the label column in the input dataset or a CSV/JSON file. "
-                'If not specified, will use the "label" column for single/multi-label classifcation task'
+                'If not specified, will use the "label" column for single/multi-label classification task'
             )
         },
     )
@@ -133,6 +144,10 @@ class DataTrainingArguments:
                 "than this will be truncated, sequences shorter will be padded."
             )
         },
+    )
+    preprocessing_num_workers: int | None = field(
+        default=None,
+        metadata={"help": "The number of processes to use for the preprocessing."},
     )
     overwrite_cache: bool = field(
         default=False, metadata={"help": "Overwrite the cached preprocessed datasets or not."}
@@ -152,7 +167,7 @@ class DataTrainingArguments:
     shuffle_seed: int = field(
         default=42, metadata={"help": "Random seed that will be used to shuffle the train dataset."}
     )
-    max_train_samples: Optional[int] = field(
+    max_train_samples: int | None = field(
         default=None,
         metadata={
             "help": (
@@ -161,7 +176,7 @@ class DataTrainingArguments:
             )
         },
     )
-    max_eval_samples: Optional[int] = field(
+    max_eval_samples: int | None = field(
         default=None,
         metadata={
             "help": (
@@ -170,7 +185,7 @@ class DataTrainingArguments:
             )
         },
     )
-    max_predict_samples: Optional[int] = field(
+    max_predict_samples: int | None = field(
         default=None,
         metadata={
             "help": (
@@ -179,14 +194,14 @@ class DataTrainingArguments:
             )
         },
     )
-    metric_name: Optional[str] = field(default=None, metadata={"help": "The metric to use for evaluation."})
-    train_file: Optional[str] = field(
+    metric_name: str | None = field(default=None, metadata={"help": "The metric to use for evaluation."})
+    train_file: str | None = field(
         default=None, metadata={"help": "A csv or a json file containing the training data."}
     )
-    validation_file: Optional[str] = field(
+    validation_file: str | None = field(
         default=None, metadata={"help": "A csv or a json file containing the validation data."}
     )
-    test_file: Optional[str] = field(default=None, metadata={"help": "A csv or a json file containing the test data."})
+    test_file: str | None = field(default=None, metadata={"help": "A csv or a json file containing the test data."})
 
     def __post_init__(self):
         if self.dataset_name is None:
@@ -196,9 +211,9 @@ class DataTrainingArguments:
             train_extension = self.train_file.split(".")[-1]
             assert train_extension in ["csv", "json"], "`train_file` should be a csv or a json file."
             validation_extension = self.validation_file.split(".")[-1]
-            assert (
-                validation_extension == train_extension
-            ), "`validation_file` should have the same extension (csv or json) as `train_file`."
+            assert validation_extension == train_extension, (
+                "`validation_file` should have the same extension (csv or json) as `train_file`."
+            )
 
 
 @dataclass
@@ -210,13 +225,13 @@ class ModelArguments:
     model_name_or_path: str = field(
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
-    config_name: Optional[str] = field(
+    config_name: str | None = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
-    tokenizer_name: Optional[str] = field(
+    tokenizer_name: str | None = field(
         default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
     )
-    cache_dir: Optional[str] = field(
+    cache_dir: str | None = field(
         default=None,
         metadata={"help": "Where do you want to store the pretrained models downloaded from huggingface.co"},
     )
@@ -233,23 +248,17 @@ class ModelArguments:
         metadata={
             "help": (
                 "The token to use as HTTP bearer authorization for remote files. If not specified, will use the token "
-                "generated when running `huggingface-cli login` (stored in `~/.huggingface`)."
+                "generated when running `hf auth login` (stored in `~/.huggingface`)."
             )
-        },
-    )
-    use_auth_token: bool = field(
-        default=None,
-        metadata={
-            "help": "The `use_auth_token` argument is deprecated and will be removed in v4.34. Please use `token` instead."
         },
     )
     trust_remote_code: bool = field(
         default=False,
         metadata={
             "help": (
-                "Whether or not to allow for custom models defined on the Hub in their own modeling files. This option"
-                "should only be set to `True` for repositories you trust and in which you have read the code, as it will "
-                "execute code present on the Hub on your local machine."
+                "Whether to trust the execution of code from datasets/models defined on the Hub."
+                " This option should only be set to `True` for repositories you trust and in which you have read the"
+                " code, as it will execute code present on the Hub on your local machine."
             )
         },
     )
@@ -259,8 +268,8 @@ class ModelArguments:
     )
 
 
-def get_label_list(raw_dataset, split="train") -> List[str]:
-    """Get the list of labels from a mutli-label dataset"""
+def get_label_list(raw_dataset, split="train") -> list[str]:
+    """Get the list of labels from a multi-label dataset"""
 
     if isinstance(raw_dataset[split]["label"][0], list):
         label_list = [label for sample in raw_dataset[split]["label"] for label in sample]
@@ -285,19 +294,6 @@ def main():
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    if model_args.use_auth_token is not None:
-        warnings.warn(
-            "The `use_auth_token` argument is deprecated and will be removed in v4.34. Please use `token` instead.",
-            FutureWarning,
-        )
-        if model_args.token is not None:
-            raise ValueError("`token` and `use_auth_token` are both specified. Please set only the argument `token`.")
-        model_args.token = model_args.use_auth_token
-
-    # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
-    # information sent is the one passed as arguments along with your Python/PyTorch versions.
-    send_example_telemetry("run_classification", model_args, data_args)
-
     # Setup logging
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -318,32 +314,17 @@ def main():
 
     # Log on each process the small summary:
     logger.warning(
-        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}, "
+        f"Process rank: {training_args.local_process_index}, device: {training_args.device}, n_gpu: {training_args.n_gpu}, "
         + f"distributed training: {training_args.parallel_mode.value == 'distributed'}, 16-bits training: {training_args.fp16}"
     )
     logger.info(f"Training/evaluation parameters {training_args}")
-
-    # Detecting last checkpoint.
-    last_checkpoint = None
-    if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
-        last_checkpoint = get_last_checkpoint(training_args.output_dir)
-        if last_checkpoint is None and len(os.listdir(training_args.output_dir)) > 0:
-            raise ValueError(
-                f"Output directory ({training_args.output_dir}) already exists and is not empty. "
-                "Use --overwrite_output_dir to overcome."
-            )
-        elif last_checkpoint is not None and training_args.resume_from_checkpoint is None:
-            logger.info(
-                f"Checkpoint detected, resuming training at {last_checkpoint}. To avoid this behavior, change "
-                "the `--output_dir` or add `--overwrite_output_dir` to train from scratch."
-            )
 
     # Set seed before initializing model.
     set_seed(training_args.seed)
 
     # Get the datasets: you can either provide your own CSV/JSON training and evaluation files, or specify a dataset name
     # to load from huggingface/datasets. In ether case, you can specify a the key of the column(s) containing the text and
-    # the key of the column containing the label. If multiple columns are specified for the text, they will be joined togather
+    # the key of the column containing the label. If multiple columns are specified for the text, they will be joined together
     # for the actual text value.
     # In distributed training, the load_dataset function guarantee that only one local process can concurrently
     # download the dataset.
@@ -354,6 +335,7 @@ def main():
             data_args.dataset_config_name,
             cache_dir=model_args.cache_dir,
             token=model_args.token,
+            trust_remote_code=model_args.trust_remote_code,
         )
         # Try print some info about the dataset
         logger.info(f"Dataset loaded: {raw_datasets}")
@@ -368,14 +350,14 @@ def main():
             if data_args.test_file is not None:
                 train_extension = data_args.train_file.split(".")[-1]
                 test_extension = data_args.test_file.split(".")[-1]
-                assert (
-                    test_extension == train_extension
-                ), "`test_file` should have the same extension (csv or json) as `train_file`."
+                assert test_extension == train_extension, (
+                    "`test_file` should have the same extension (csv or json) as `train_file`."
+                )
                 data_files["test"] = data_args.test_file
             else:
                 raise ValueError("Need either a dataset name or a test file for `do_predict`.")
 
-        for key in data_files.keys():
+        for key in data_files:
             logger.info(f"load a local file for {key}: {data_files[key]}")
 
         if data_args.train_file.endswith(".csv"):
@@ -404,7 +386,7 @@ def main():
             raw_datasets.pop(split)
 
     if data_args.train_split_name is not None:
-        logger.info(f"using {data_args.validation_split_name} as validation set")
+        logger.info(f"using {data_args.train_split_name} as train set")
         raw_datasets["train"] = raw_datasets[data_args.train_split_name]
         raw_datasets.pop(data_args.train_split_name)
 
@@ -419,13 +401,13 @@ def main():
         raw_datasets.pop(data_args.test_split_name)
 
     if data_args.remove_columns is not None:
-        for split in raw_datasets.keys():
+        for split in raw_datasets:
             for column in data_args.remove_columns.split(","):
                 logger.info(f"removing column {column} from split {split}")
-                raw_datasets[split].remove_columns(column)
+                raw_datasets[split] = raw_datasets[split].remove_columns(column)
 
     if data_args.label_column_name is not None and data_args.label_column_name != "label":
-        for key in raw_datasets.keys():
+        for key in raw_datasets:
             raw_datasets[key] = raw_datasets[key].rename_column(data_args.label_column_name, "label")
 
     # Trying to have good defaults here, don't hesitate to tweak to your needs.
@@ -440,8 +422,8 @@ def main():
     if is_regression:
         label_list = None
         num_labels = 1
-        # regession requires float as label type, let's cast it if needed
-        for split in raw_datasets.keys():
+        # regression requires float as label type, let's cast it if needed
+        for split in raw_datasets:
             if raw_datasets[split].features["label"].dtype not in ["float32", "float64"]:
                 logger.warning(
                     f"Label type for {split} set to float32, was {raw_datasets[split].features['label'].dtype}"
@@ -545,10 +527,10 @@ def main():
                 "run. You can ignore this if you are doing finetuning."
             )
         model.config.label2id = label_to_id
-        model.config.id2label = {id: label for label, id in config.label2id.items()}
+        model.config.id2label = {id: label for label, id in label_to_id.items()}
     elif not is_regression:  # classification, but not training
         logger.info("using label infos in the model config")
-        logger.info("label2id: {}".format(model.config.label2id))
+        logger.info(f"label2id: {model.config.label2id}")
         label_to_id = model.config.label2id
     else:  # regression
         label_to_id = None
@@ -560,7 +542,7 @@ def main():
         )
     max_seq_length = min(data_args.max_seq_length, tokenizer.model_max_length)
 
-    def multi_labels_to_ids(labels: List[str]) -> List[float]:
+    def multi_labels_to_ids(labels: list[str]) -> list[float]:
         ids = [0.0] * len(label_to_id)  # BCELoss requires float as target type
         for label in labels:
             ids[label_to_id[label]] = 1.0
@@ -588,6 +570,7 @@ def main():
         raw_datasets = raw_datasets.map(
             preprocess_function,
             batched=True,
+            num_proc=data_args.preprocessing_num_workers,
             load_from_cache_file=not data_args.overwrite_cache,
             desc="Running tokenizer on dataset",
         )
@@ -684,7 +667,7 @@ def main():
         train_dataset=train_dataset if training_args.do_train else None,
         eval_dataset=eval_dataset if training_args.do_eval else None,
         compute_metrics=compute_metrics,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         data_collator=data_collator,
     )
 
@@ -693,8 +676,6 @@ def main():
         checkpoint = None
         if training_args.resume_from_checkpoint is not None:
             checkpoint = training_args.resume_from_checkpoint
-        elif last_checkpoint is not None:
-            checkpoint = last_checkpoint
         train_result = trainer.train(resume_from_checkpoint=checkpoint)
         metrics = train_result.metrics
         max_train_samples = (
@@ -745,7 +726,7 @@ def main():
                     else:
                         item = label_list[item]
                         writer.write(f"{index}\t{item}\n")
-        logger.info("Predict results saved at {}".format(output_predict_file))
+        logger.info(f"Predict results saved at {output_predict_file}")
     kwargs = {"finetuned_from": model_args.model_name_or_path, "tasks": "text-classification"}
 
     if training_args.push_to_hub:

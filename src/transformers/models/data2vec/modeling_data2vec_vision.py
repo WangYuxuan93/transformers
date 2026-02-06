@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2022 Meta Platforms and The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,20 +11,20 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch Data2VecVision model."""
-
+"""PyTorch Data2VecVision model."""
 
 import collections.abc
 import math
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Union
+from typing import Optional
 
 import torch
-import torch.utils.checkpoint
 from torch import nn
-from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
+from torch.nn import CrossEntropyLoss
 
+from ... import initialization as init
 from ...activations import ACT2FN
+from ...modeling_layers import GradientCheckpointingLayer
 from ...modeling_outputs import (
     BaseModelOutput,
     BaseModelOutputWithPooling,
@@ -33,60 +32,27 @@ from ...modeling_outputs import (
     SemanticSegmenterOutput,
 )
 from ...modeling_utils import PreTrainedModel
-from ...pytorch_utils import find_pruneable_heads_and_indices, meshgrid, prune_linear_layer
-from ...utils import (
-    add_code_sample_docstrings,
-    add_start_docstrings,
-    add_start_docstrings_to_model_forward,
-    logging,
-    replace_return_docstrings,
-)
+from ...pytorch_utils import compile_compatible_method_lru_cache
+from ...utils import auto_docstring, logging, torch_int
 from .configuration_data2vec_vision import Data2VecVisionConfig
 
 
 logger = logging.get_logger(__name__)
 
-# General docstring
-_CONFIG_FOR_DOC = "Data2VecVisionConfig"
-
-# Base docstring
-_CHECKPOINT_FOR_DOC = "facebook/data2vec-vision-base"
-_EXPECTED_OUTPUT_SHAPE = [1, 197, 768]
-
-# Image classification docstring
-_IMAGE_CLASS_CHECKPOINT = "facebook/data2vec-vision-base-ft1k"
-_IMAGE_CLASS_EXPECTED_OUTPUT = "remote control, remote"
-
-DATA2VEC_VISION_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "facebook/data2vec-vision-base-ft1k",
-    # See all Data2VecVision models at https://huggingface.co/models?filter=data2vec-vision
-]
-
 
 @dataclass
+@auto_docstring(
+    custom_intro="""
+    Class for outputs of [`Data2VecVisionModel`].
+    """
+)
 # Copied from transformers.models.beit.modeling_beit.BeitModelOutputWithPooling with Beit->Data2VecVision
 class Data2VecVisionModelOutputWithPooling(BaseModelOutputWithPooling):
-    """
-    Class for outputs of [`Data2VecVisionModel`].
-
-    Args:
-        last_hidden_state (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`):
-            Sequence of hidden-states at the output of the last layer of the model.
-        pooler_output (`torch.FloatTensor` of shape `(batch_size, hidden_size)`):
-            Average of the last layer hidden states of the patch tokens (excluding the *[CLS]* token) if
-            *config.use_mean_pooling* is set to True. If set to False, then the final hidden state of the *[CLS]* token
-            will be returned.
-        hidden_states (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed or when `config.output_hidden_states=True`):
-            Tuple of `torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer) of
-            shape `(batch_size, sequence_length, hidden_size)`.
-
-            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
-            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
-            sequence_length)`.
-
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
-            heads.
+    r"""
+    pooler_output (`torch.FloatTensor` of shape `(batch_size, hidden_size)`):
+        Average of the last layer hidden states of the patch tokens (excluding the *[CLS]* token) if
+        *config.use_mean_pooling* is set to True. If set to False, then the final hidden state of the *[CLS]* token
+        will be returned.
     """
 
 
@@ -95,11 +61,6 @@ def drop_path(input: torch.Tensor, drop_prob: float = 0.0, training: bool = Fals
     """
     Drop paths (Stochastic Depth) per sample (when applied in main path of residual blocks).
 
-    Comment by Ross Wightman: This is the same as the DropConnect impl I created for EfficientNet, etc networks,
-    however, the original name is misleading as 'Drop Connect' is a different form of dropout in a separate paper...
-    See discussion: https://github.com/tensorflow/tpu/issues/494#issuecomment-532968956 ... I've opted for changing the
-    layer and argument names to 'drop path' rather than mix DropConnect as a layer name and use 'survival rate' as the
-    argument.
     """
     if drop_prob == 0.0 or not training:
         return input
@@ -115,7 +76,7 @@ def drop_path(input: torch.Tensor, drop_prob: float = 0.0, training: bool = Fals
 class Data2VecVisionDropPath(nn.Module):
     """Drop paths (Stochastic Depth) per sample (when applied in main path of residual blocks)."""
 
-    def __init__(self, drop_prob: Optional[float] = None) -> None:
+    def __init__(self, drop_prob: float | None = None) -> None:
         super().__init__()
         self.drop_prob = drop_prob
 
@@ -123,7 +84,7 @@ class Data2VecVisionDropPath(nn.Module):
         return drop_path(hidden_states, self.drop_prob, self.training)
 
     def extra_repr(self) -> str:
-        return "p={}".format(self.drop_prob)
+        return f"p={self.drop_prob}"
 
 
 # Copied from transformers.models.beit.modeling_beit.BeitEmbeddings with Beit->Data2VecVision
@@ -142,6 +103,12 @@ class Data2VecVisionEmbeddings(nn.Module):
         else:
             self.mask_token = None
         self.patch_embeddings = Data2VecVisionPatchEmbeddings(config)
+        self.patch_size = config.patch_size
+        self.image_size = (
+            config.image_size
+            if isinstance(config.image_size, collections.abc.Iterable)
+            else (config.image_size, config.image_size)
+        )
         num_patches = self.patch_embeddings.num_patches
         if config.use_absolute_position_embeddings:
             self.position_embeddings = nn.Parameter(torch.zeros(1, num_patches + 1, config.hidden_size))
@@ -149,10 +116,54 @@ class Data2VecVisionEmbeddings(nn.Module):
             self.position_embeddings = None
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
-    def forward(self, pixel_values: torch.Tensor, bool_masked_pos: Optional[torch.BoolTensor] = None) -> torch.Tensor:
-        embeddings, (patch_height, patch_width) = self.patch_embeddings(
-            pixel_values, self.position_embeddings[:, 1:, :] if self.position_embeddings is not None else None
+    # Copied from transformers.models.vit.modeling_vit.ViTEmbeddings.interpolate_pos_encoding
+    def interpolate_pos_encoding(self, embeddings: torch.Tensor, height: int, width: int) -> torch.Tensor:
+        """
+        This method allows to interpolate the pre-trained position encodings, to be able to use the model on higher resolution
+        images. This method is also adapted to support torch.jit tracing.
+
+        Adapted from:
+        - https://github.com/facebookresearch/dino/blob/de9ee3df6cf39fac952ab558447af1fa1365362a/vision_transformer.py#L174-L194, and
+        - https://github.com/facebookresearch/dinov2/blob/e1277af2ba9496fbadf7aec6eba56e8d882d1e35/dinov2/models/vision_transformer.py#L179-L211
+        """
+
+        num_patches = embeddings.shape[1] - 1
+        num_positions = self.position_embeddings.shape[1] - 1
+
+        # always interpolate when tracing to ensure the exported model works for dynamic input shapes
+        if not torch.jit.is_tracing() and num_patches == num_positions and height == width:
+            return self.position_embeddings
+
+        class_pos_embed = self.position_embeddings[:, :1]
+        patch_pos_embed = self.position_embeddings[:, 1:]
+
+        dim = embeddings.shape[-1]
+
+        new_height = height // self.patch_size
+        new_width = width // self.patch_size
+
+        sqrt_num_positions = torch_int(num_positions**0.5)
+        patch_pos_embed = patch_pos_embed.reshape(1, sqrt_num_positions, sqrt_num_positions, dim)
+        patch_pos_embed = patch_pos_embed.permute(0, 3, 1, 2)
+
+        patch_pos_embed = nn.functional.interpolate(
+            patch_pos_embed,
+            size=(new_height, new_width),
+            mode="bicubic",
+            align_corners=False,
         )
+
+        patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
+
+        return torch.cat((class_pos_embed, patch_pos_embed), dim=1)
+
+    def forward(
+        self,
+        pixel_values: torch.Tensor,
+        bool_masked_pos: torch.BoolTensor | None = None,
+    ) -> torch.Tensor:
+        _, _, height, width = pixel_values.shape
+        embeddings, (patch_height, patch_width) = self.patch_embeddings(pixel_values)
         batch_size, seq_len, _ = embeddings.size()
 
         if bool_masked_pos is not None:
@@ -162,10 +173,10 @@ class Data2VecVisionEmbeddings(nn.Module):
             embeddings = embeddings * (1 - w) + mask_tokens * w
 
         cls_tokens = self.cls_token.expand(batch_size, -1, -1)
-        if self.position_embeddings is not None:
-            cls_tokens = cls_tokens + self.position_embeddings[:, :1, :]
-
         embeddings = torch.cat((cls_tokens, embeddings), dim=1)
+
+        if self.position_embeddings is not None:
+            embeddings = embeddings + self.interpolate_pos_encoding(embeddings, height, width)
 
         embeddings = self.dropout(embeddings)
 
@@ -197,26 +208,15 @@ class Data2VecVisionPatchEmbeddings(nn.Module):
 
         self.projection = nn.Conv2d(num_channels, hidden_size, kernel_size=patch_size, stride=patch_size)
 
-    def forward(self, pixel_values: torch.Tensor, position_embedding: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
         batch_size, num_channels, height, width = pixel_values.shape
         if num_channels != self.num_channels:
             raise ValueError(
                 "Make sure that the channel dimension of the pixel values match with the one set in the configuration."
             )
 
-        embeddings = self.projection(pixel_values)
+        embeddings = self.projection(pixel_values.to(self.projection.weight.dtype))
         patch_height, patch_width = embeddings.shape[2], embeddings.shape[3]
-
-        if position_embedding is not None:
-            # interpolate the position embedding to the corresponding size
-            position_embedding = position_embedding.view(1, self.patch_shape[0], self.patch_shape[1], -1).permute(
-                0, 3, 1, 2
-            )
-            position_embedding = nn.functional.interpolate(
-                position_embedding, size=(patch_height, patch_width), mode="bicubic"
-            )
-            embeddings = embeddings + position_embedding
-
         embeddings = embeddings.flatten(2).transpose(1, 2)
 
         return embeddings, (patch_height, patch_width)
@@ -224,11 +224,12 @@ class Data2VecVisionPatchEmbeddings(nn.Module):
 
 # Copied from transformers.models.beit.modeling_beit.BeitSelfAttention with Beit->Data2VecVision
 class Data2VecVisionSelfAttention(nn.Module):
-    def __init__(self, config: Data2VecVisionConfig, window_size: Optional[tuple] = None) -> None:
+    def __init__(self, config: Data2VecVisionConfig, window_size: tuple | None = None) -> None:
         super().__init__()
+        self.config = config
         if config.hidden_size % config.num_attention_heads != 0 and not hasattr(config, "embedding_size"):
             raise ValueError(
-                f"The hidden size {config.hidden_size,} is not a multiple of the number of attention "
+                f"The hidden size {config.hidden_size} is not a multiple of the number of attention "
                 f"heads {config.num_attention_heads}."
             )
 
@@ -242,28 +243,34 @@ class Data2VecVisionSelfAttention(nn.Module):
 
         self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
 
-        if window_size:
+        self.has_relative_position_bias = bool(window_size)
+        if self.has_relative_position_bias:
             self.relative_position_bias = Data2VecVisionRelativePositionBias(config, window_size=window_size)
-        else:
-            self.relative_position_bias = None
-
-    def transpose_for_scores(self, x):
-        new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
-        x = x.view(*new_x_shape)
-        return x.permute(0, 2, 1, 3)
 
     def forward(
         self,
         hidden_states: torch.Tensor,
-        head_mask: Optional[torch.Tensor] = None,
         output_attentions: bool = False,
-        relative_position_bias: Optional["Data2VecVisionRelativePositionBias"] = None,
-    ) -> Union[Tuple[torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
-        mixed_query_layer = self.query(hidden_states)
-
-        key_layer = self.transpose_for_scores(self.key(hidden_states))
-        value_layer = self.transpose_for_scores(self.value(hidden_states))
-        query_layer = self.transpose_for_scores(mixed_query_layer)
+        relative_position_bias: torch.Tensor | None = None,
+        interpolate_pos_encoding: bool = False,
+        resolution: tuple[int] | None = None,
+    ) -> tuple[torch.Tensor] | tuple[torch.Tensor, torch.Tensor]:
+        batch_size, seq_length, _ = hidden_states.shape
+        query_layer = (
+            self.query(hidden_states)
+            .view(batch_size, -1, self.num_attention_heads, self.attention_head_size)
+            .transpose(1, 2)
+        )
+        key_layer = (
+            self.key(hidden_states)
+            .view(batch_size, -1, self.num_attention_heads, self.attention_head_size)
+            .transpose(1, 2)
+        )
+        value_layer = (
+            self.value(hidden_states)
+            .view(batch_size, -1, self.num_attention_heads, self.attention_head_size)
+            .transpose(1, 2)
+        )
 
         # Take the dot product between "query" and "key" to get the raw attention scores.
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
@@ -271,8 +278,12 @@ class Data2VecVisionSelfAttention(nn.Module):
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
 
         # Add relative position bias if present.
-        if self.relative_position_bias is not None:
-            attention_scores = attention_scores + self.relative_position_bias().unsqueeze(0)
+        if self.has_relative_position_bias:
+            height, width = resolution
+            window_size = (height // self.config.patch_size, width // self.config.patch_size)
+            attention_scores = attention_scores + self.relative_position_bias(
+                window_size, interpolate_pos_encoding, dim_size=hidden_states.shape[1]
+            )
 
         # Add shared relative position bias if provided.
         if relative_position_bias is not None:
@@ -285,10 +296,6 @@ class Data2VecVisionSelfAttention(nn.Module):
         # seem a bit unusual, but is taken from the original Transformer paper.
         attention_probs = self.dropout(attention_probs)
 
-        # Mask heads if we want to
-        if head_mask is not None:
-            attention_probs = attention_probs * head_mask
-
         context_layer = torch.matmul(attention_probs, value_layer)
 
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
@@ -298,6 +305,69 @@ class Data2VecVisionSelfAttention(nn.Module):
         outputs = (context_layer, attention_probs) if output_attentions else (context_layer,)
 
         return outputs
+
+
+# Copied from transformers.models.beit.modeling_beit.BeitSdpaSelfAttention with Beit->Data2VecVision
+class Data2VecVisionSdpaSelfAttention(Data2VecVisionSelfAttention):
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        output_attentions: bool = False,
+        relative_position_bias: torch.Tensor | None = None,
+        interpolate_pos_encoding: bool = False,
+        resolution: tuple[int] | None = None,
+    ) -> tuple[torch.Tensor] | tuple[torch.Tensor, torch.Tensor]:
+        if output_attentions:
+            logger.warning_once(
+                f"{self.__class__.__name__} does not support `output_attentions=True`. The returned attention weights will "
+                "be `None`. If you want to get attention weights, please set `attn_implementation='eager'` when loading the model."
+            )
+        batch_size, seq_length, _ = hidden_states.shape
+        query_layer = (
+            self.query(hidden_states)
+            .view(batch_size, -1, self.num_attention_heads, self.attention_head_size)
+            .transpose(1, 2)
+        )
+        key_layer = (
+            self.key(hidden_states)
+            .view(batch_size, -1, self.num_attention_heads, self.attention_head_size)
+            .transpose(1, 2)
+        )
+        value_layer = (
+            self.value(hidden_states)
+            .view(batch_size, -1, self.num_attention_heads, self.attention_head_size)
+            .transpose(1, 2)
+        )
+
+        attn_bias = None
+        if self.has_relative_position_bias:
+            height, width = resolution
+            window_size = (height // self.config.patch_size, width // self.config.patch_size)
+            attn_bias = self.relative_position_bias(
+                window_size, interpolate_pos_encoding, dim_size=hidden_states.shape[1]
+            )
+
+        # Add shared relative position bias if provided.
+        if relative_position_bias is not None:
+            if attn_bias is None:
+                attn_bias = relative_position_bias
+            else:
+                attn_bias += relative_position_bias
+
+        scaling = 1 / math.sqrt(self.attention_head_size)
+        context_layer = torch.nn.functional.scaled_dot_product_attention(
+            query_layer,
+            key_layer,
+            value_layer,
+            attn_mask=attn_bias,
+            dropout_p=self.config.attention_probs_dropout_prob if self.training else 0.0,
+            is_causal=False,
+            scale=scaling,
+        )
+        context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
+        new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
+        context_layer = context_layer.view(*new_context_layer_shape)
+        return context_layer, None
 
 
 # Copied from transformers.models.beit.modeling_beit.BeitSelfOutput with Beit->Data2VecVision
@@ -319,40 +389,32 @@ class Data2VecVisionSelfOutput(nn.Module):
         return hidden_states
 
 
-# Copied from transformers.models.beit.modeling_beit.BeitAttention with Beit->Data2VecVision
+DATA2VEC_VISION_SELF_ATTENTION_CLASSES = {
+    "eager": Data2VecVisionSelfAttention,
+    "sdpa": Data2VecVisionSdpaSelfAttention,
+}
+
+
+# Copied from tests.models.beit.modeling_beit.BeitAttention with Beit->Data2VecVision, BEIT->DATA2VEC_VISION
 class Data2VecVisionAttention(nn.Module):
-    def __init__(self, config: Data2VecVisionConfig, window_size: Optional[tuple] = None) -> None:
+    def __init__(self, config: Data2VecVisionConfig, window_size: tuple | None = None) -> None:
         super().__init__()
-        self.attention = Data2VecVisionSelfAttention(config, window_size=window_size)
-        self.output = Data2VecVisionSelfOutput(config)
-        self.pruned_heads = set()
-
-    def prune_heads(self, heads):
-        if len(heads) == 0:
-            return
-        heads, index = find_pruneable_heads_and_indices(
-            heads, self.attention.num_attention_heads, self.attention.attention_head_size, self.pruned_heads
+        self.attention = DATA2VEC_VISION_SELF_ATTENTION_CLASSES[config._attn_implementation](
+            config, window_size=window_size
         )
-
-        # Prune linear layers
-        self.attention.query = prune_linear_layer(self.attention.query, index)
-        self.attention.key = prune_linear_layer(self.attention.key, index)
-        self.attention.value = prune_linear_layer(self.attention.value, index)
-        self.output.dense = prune_linear_layer(self.output.dense, index, dim=1)
-
-        # Update hyper params and store pruned heads
-        self.attention.num_attention_heads = self.attention.num_attention_heads - len(heads)
-        self.attention.all_head_size = self.attention.attention_head_size * self.attention.num_attention_heads
-        self.pruned_heads = self.pruned_heads.union(heads)
+        self.output = Data2VecVisionSelfOutput(config)
 
     def forward(
         self,
         hidden_states: torch.Tensor,
-        head_mask: Optional[torch.Tensor] = None,
         output_attentions: bool = False,
         relative_position_bias: Optional["Data2VecVisionRelativePositionBias"] = None,
-    ) -> Union[Tuple[torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
-        self_outputs = self.attention(hidden_states, head_mask, output_attentions, relative_position_bias)
+        interpolate_pos_encoding: bool = False,
+        resolution: tuple[int] | None = None,
+    ) -> tuple[torch.Tensor] | tuple[torch.Tensor, torch.Tensor]:
+        self_outputs = self.attention(
+            hidden_states, output_attentions, relative_position_bias, interpolate_pos_encoding, resolution
+        )
 
         attention_output = self.output(self_outputs[0], hidden_states)
 
@@ -392,11 +454,11 @@ class Data2VecVisionOutput(nn.Module):
 
 
 # Copied from transformers.models.beit.modeling_beit.BeitLayer with Beit->Data2VecVision,BEiT->Data2VecVision
-class Data2VecVisionLayer(nn.Module):
+class Data2VecVisionLayer(GradientCheckpointingLayer):
     """This corresponds to the Block class in the timm implementation."""
 
     def __init__(
-        self, config: Data2VecVisionConfig, window_size: Optional[tuple] = None, drop_path_rate: float = 0.0
+        self, config: Data2VecVisionConfig, window_size: tuple | None = None, drop_path_rate: float = 0.0
     ) -> None:
         super().__init__()
         self.chunk_size_feed_forward = config.chunk_size_feed_forward
@@ -410,23 +472,25 @@ class Data2VecVisionLayer(nn.Module):
 
         init_values = config.layer_scale_init_value
         if init_values > 0:
-            self.lambda_1 = nn.Parameter(init_values * torch.ones((config.hidden_size)), requires_grad=True)
-            self.lambda_2 = nn.Parameter(init_values * torch.ones((config.hidden_size)), requires_grad=True)
+            self.lambda_1 = nn.Parameter(init_values * torch.ones(config.hidden_size), requires_grad=True)
+            self.lambda_2 = nn.Parameter(init_values * torch.ones(config.hidden_size), requires_grad=True)
         else:
             self.lambda_1, self.lambda_2 = None, None
 
     def forward(
         self,
         hidden_states: torch.Tensor,
-        head_mask: Optional[torch.Tensor] = None,
         output_attentions: bool = False,
-        relative_position_bias: Optional["Data2VecVisionRelativePositionBias"] = None,
-    ) -> Union[Tuple[torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
+        relative_position_bias: torch.Tensor | None = None,
+        interpolate_pos_encoding: bool = False,
+        resolution: tuple[int, int] | None = None,
+    ) -> tuple[torch.Tensor] | tuple[torch.Tensor, torch.Tensor]:
         self_attention_outputs = self.attention(
             self.layernorm_before(hidden_states),  # in Data2VecVision, layernorm is applied before self-attention
-            head_mask,
             output_attentions=output_attentions,
             relative_position_bias=relative_position_bias,
+            interpolate_pos_encoding=interpolate_pos_encoding,
+            resolution=resolution,
         )
         attention_output = self_attention_outputs[0]
         outputs = self_attention_outputs[1:]  # add self attentions if we output attention weights
@@ -466,46 +530,90 @@ class Data2VecVisionRelativePositionBias(nn.Module):
         )  # 2*Wh-1 * 2*Ww-1, nH
         # cls to token & token 2 cls & cls to cls
 
+    @compile_compatible_method_lru_cache(maxsize=10)
+    def generate_relative_position_index(self, window_size: tuple[int, int]) -> torch.Tensor:
+        """
+        This method creates the relative position index, modified to support arbitrary window sizes,
+        as introduced in [MiDaS v3.1](https://huggingface.co/papers/2307.14460).
+        """
+        num_relative_distance = (2 * window_size[0] - 1) * (2 * window_size[1] - 1) + 3
+        # cls to token & token 2 cls & cls to cls
         # get pair-wise relative position index for each token inside the window
-        coords_h = torch.arange(window_size[0])
-        coords_w = torch.arange(window_size[1])
-        coords = torch.stack(meshgrid([coords_h, coords_w], indexing="ij"))  # 2, Wh, Ww
+        window_area = window_size[0] * window_size[1]
+        grid = torch.meshgrid(torch.arange(window_size[0]), torch.arange(window_size[1]), indexing="ij")
+        coords = torch.stack(grid)  # 2, Wh, Ww
         coords_flatten = torch.flatten(coords, 1)  # 2, Wh*Ww
         relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  # 2, Wh*Ww, Wh*Ww
         relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # Wh*Ww, Wh*Ww, 2
         relative_coords[:, :, 0] += window_size[0] - 1  # shift to start from 0
         relative_coords[:, :, 1] += window_size[1] - 1
         relative_coords[:, :, 0] *= 2 * window_size[1] - 1
-        relative_position_index = torch.zeros(
-            size=(window_size[0] * window_size[1] + 1,) * 2, dtype=relative_coords.dtype
-        )
+        relative_position_index = torch.zeros(size=(window_area + 1,) * 2, dtype=relative_coords.dtype)
         relative_position_index[1:, 1:] = relative_coords.sum(-1)  # Wh*Ww, Wh*Ww
-        relative_position_index[0, 0:] = self.num_relative_distance - 3
-        relative_position_index[0:, 0] = self.num_relative_distance - 2
-        relative_position_index[0, 0] = self.num_relative_distance - 1
+        relative_position_index[0, 0:] = num_relative_distance - 3
+        relative_position_index[0:, 0] = num_relative_distance - 2
+        relative_position_index[0, 0] = num_relative_distance - 1
+        return relative_position_index
 
-        self.register_buffer("relative_position_index", relative_position_index, persistent=False)
+    def forward(self, window_size, interpolate_pos_encoding: bool = False, dim_size=None) -> torch.Tensor:
+        """
+        Modification of timm.models.beit.py: Attention._get_rel_pos_bias to support arbitrary window sizes.
+        """
+        old_height = 2 * self.window_size[0] - 1
+        old_width = 2 * self.window_size[1] - 1
 
-    def forward(self) -> torch.Tensor:
-        relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
-            self.window_size[0] * self.window_size[1] + 1, self.window_size[0] * self.window_size[1] + 1, -1
-        )  # Wh*Ww,Wh*Ww,nH
+        new_height = 2 * window_size[0] - 1
+        new_width = 2 * window_size[1] - 1
 
-        return relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
+        old_relative_position_bias_table = self.relative_position_bias_table
+
+        old_num_relative_distance = self.num_relative_distance
+        new_num_relative_distance = new_height * new_width + 3
+
+        old_sub_table = old_relative_position_bias_table[: old_num_relative_distance - 3]
+
+        old_sub_table = old_sub_table.reshape(1, old_width, old_height, -1).permute(0, 3, 1, 2)
+        new_sub_table = nn.functional.interpolate(
+            old_sub_table, size=(torch_int(new_height), torch_int(new_width)), mode="bilinear"
+        )
+        new_sub_table = new_sub_table.permute(0, 2, 3, 1).reshape(new_num_relative_distance - 3, -1)
+
+        new_relative_position_bias_table = torch.cat(
+            [new_sub_table, old_relative_position_bias_table[old_num_relative_distance - 3 :]]
+        )
+
+        relative_position_index = self.generate_relative_position_index(window_size)
+        relative_position_bias = new_relative_position_bias_table[relative_position_index.view(-1)]
+
+        # patch_size*num_patches_height, patch_size*num_patches_width, num_attention_heads
+        relative_position_bias = relative_position_bias.view(
+            window_size[0] * window_size[1] + 1, window_size[0] * window_size[1] + 1, -1
+        )
+        # num_attention_heads, patch_size*num_patches_width, patch_size*num_patches_height
+        relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()
+
+        if interpolate_pos_encoding:
+            relative_position_bias = nn.functional.interpolate(
+                relative_position_bias.unsqueeze(1),
+                size=(dim_size, dim_size),
+                mode="bilinear",
+                align_corners=False,
+            ).squeeze(1)
+
+        return relative_position_bias.unsqueeze(0)
 
 
 # Copied from transformers.models.beit.modeling_beit.BeitEncoder with Beit->Data2VecVision
 class Data2VecVisionEncoder(nn.Module):
-    def __init__(self, config: Data2VecVisionConfig, window_size: Optional[tuple] = None) -> None:
+    def __init__(self, config: Data2VecVisionConfig, window_size: tuple | None = None) -> None:
         super().__init__()
         self.config = config
-        if config.use_shared_relative_position_bias:
+        self.has_relative_position_bias = config.use_shared_relative_position_bias
+        if self.has_relative_position_bias:
             self.relative_position_bias = Data2VecVisionRelativePositionBias(config, window_size=window_size)
-        else:
-            self.relative_position_bias = None
 
         # stochastic depth decay rule
-        dpr = [x.item() for x in torch.linspace(0, config.drop_path_rate, config.num_hidden_layers)]
+        dpr = [x.item() for x in torch.linspace(0, config.drop_path_rate, config.num_hidden_layers, device="cpu")]
         self.layer = nn.ModuleList(
             [
                 Data2VecVisionLayer(
@@ -521,11 +629,12 @@ class Data2VecVisionEncoder(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        head_mask: Optional[torch.Tensor] = None,
         output_attentions: bool = False,
         output_hidden_states: bool = False,
+        interpolate_pos_encoding: bool = False,
+        resolution: tuple[int, int] | None = None,
         return_dict: bool = True,
-    ) -> Union[tuple, BaseModelOutput]:
+    ) -> tuple | BaseModelOutput:
         all_hidden_states = () if output_hidden_states else None
         all_self_attentions = () if output_attentions else None
 
@@ -533,20 +642,22 @@ class Data2VecVisionEncoder(nn.Module):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
-            layer_head_mask = head_mask[i] if head_mask is not None else None
-
-            if self.gradient_checkpointing and self.training:
-                layer_outputs = self._gradient_checkpointing_func(
-                    layer_module.__call__,
-                    hidden_states,
-                    layer_head_mask,
-                    output_attentions,
+            if self.has_relative_position_bias:
+                height, width = resolution
+                window_size = (height // self.config.patch_size, width // self.config.patch_size)
+                relative_position_bias = self.relative_position_bias(
+                    window_size, interpolate_pos_encoding=interpolate_pos_encoding, dim_size=hidden_states.shape[1]
                 )
             else:
-                relative_position_bias = (
-                    self.relative_position_bias() if self.relative_position_bias is not None else None
-                )
-                layer_outputs = layer_module(hidden_states, layer_head_mask, output_attentions, relative_position_bias)
+                relative_position_bias = None
+
+            layer_outputs = layer_module(
+                hidden_states,
+                output_attentions=output_attentions,
+                relative_position_bias=relative_position_bias,
+                interpolate_pos_encoding=interpolate_pos_encoding,
+                resolution=resolution,
+            )
 
             hidden_states = layer_outputs[0]
 
@@ -565,76 +676,44 @@ class Data2VecVisionEncoder(nn.Module):
         )
 
 
+@auto_docstring
 # Copied from transformers.models.beit.modeling_beit.BeitPreTrainedModel with Beit->Data2VecVision,beit->data2vec_vision
 class Data2VecVisionPreTrainedModel(PreTrainedModel):
-    """
-    An abstract class to handle weights initialization and a simple interface for downloading and loading pretrained
-    models.
-    """
-
-    config_class = Data2VecVisionConfig
+    config: Data2VecVisionConfig
     base_model_prefix = "data2vec_vision"
+    input_modalities = ("image",)
     main_input_name = "pixel_values"
     supports_gradient_checkpointing = True
+    _no_split_modules = ["Data2VecVisionLayer"]
+    _keys_to_ignore_on_load_unexpected = [r".*relative_position_index.*"]
+    _supports_sdpa = True
 
+    @torch.no_grad()
     def _init_weights(self, module):
         """Initialize the weights"""
-        if isinstance(module, (nn.Linear, nn.Conv2d, nn.ConvTranspose2d)):
-            # Slightly different from the TF version which uses truncated_normal for initialization
-            # cf https://github.com/pytorch/pytorch/pull/5617
-            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-            if module.bias is not None:
-                module.bias.data.zero_()
-        elif isinstance(module, nn.Embedding):
-            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-            if module.padding_idx is not None:
-                module.weight.data[module.padding_idx].zero_()
-        elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
+        super()._init_weights(module)
+        if isinstance(module, Data2VecVisionEmbeddings):
+            init.zeros_(module.cls_token)
+            if module.mask_token is not None:
+                init.zeros_(module.mask_token)
+            if module.position_embeddings is not None:
+                init.zeros_(module.position_embeddings)
+        elif isinstance(module, Data2VecVisionRelativePositionBias):
+            init.zeros_(module.relative_position_bias_table)
+        elif isinstance(module, Data2VecVisionLayer):
+            if module.lambda_1 is not None:
+                init.constant_(module.lambda_1, self.config.layer_scale_init_value)
+                init.constant_(module.lambda_2, self.config.layer_scale_init_value)
 
 
-DATA2VEC_VISION_START_DOCSTRING = r"""
-    This model is a PyTorch [torch.nn.Module](https://pytorch.org/docs/stable/nn.html#torch.nn.Module) subclass. Use it
-    as a regular PyTorch Module and refer to the PyTorch documentation for all matter related to general usage and
-    behavior.
-
-    Parameters:
-        config ([`Data2VecVisionConfig`]): Model configuration class with all the parameters of the model.
-            Initializing with a config file does not load the weights associated with the model, only the
-            configuration. Check out the [`~PreTrainedModel.from_pretrained`] method to load the model weights.
-"""
-
-DATA2VEC_VISION_INPUTS_DOCSTRING = r"""
-    Args:
-        pixel_values (`torch.FloatTensor` of shape `(batch_size, num_channels, height, width)`):
-            Pixel values. Pixel values can be obtained using [`AutoImageProcessor`]. See
-            [`BeitImageProcessor.__call__`] for details.
-
-        head_mask (`torch.FloatTensor` of shape `(num_heads,)` or `(num_layers, num_heads)`, *optional*):
-            Mask to nullify selected heads of the self-attention modules. Mask values selected in `[0, 1]`:
-
-            - 1 indicates the head is **not masked**,
-            - 0 indicates the head is **masked**.
-
-        output_attentions (`bool`, *optional*):
-            Whether or not to return the attentions tensors of all attention layers. See `attentions` under returned
-            tensors for more detail.
-        output_hidden_states (`bool`, *optional*):
-            Whether or not to return the hidden states of all layers. See `hidden_states` under returned tensors for
-            more detail.
-        return_dict (`bool`, *optional*):
-            Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
-"""
-
-
-@add_start_docstrings(
-    "The bare Data2VecVision Model transformer outputting raw hidden-states without any specific head on top.",
-    DATA2VEC_VISION_START_DOCSTRING,
-)
+@auto_docstring
 # Copied from transformers.models.beit.modeling_beit.BeitModel with BEIT->DATA2VEC_VISION,Beit->Data2VecVision,True->False
 class Data2VecVisionModel(Data2VecVisionPreTrainedModel):
     def __init__(self, config: Data2VecVisionConfig, add_pooling_layer: bool = False) -> None:
+        r"""
+        add_pooling_layer (bool, *optional*, defaults to `False`):
+            Whether to add a pooling layer
+        """
         super().__init__(config)
         self.config = config
 
@@ -652,31 +731,17 @@ class Data2VecVisionModel(Data2VecVisionPreTrainedModel):
     def get_input_embeddings(self):
         return self.embeddings.patch_embeddings
 
-    def _prune_heads(self, heads_to_prune):
-        """
-        Prunes heads of the model. heads_to_prune: dict of {layer_num: list of heads to prune in this layer} See base
-        class PreTrainedModel
-        """
-        for layer, heads in heads_to_prune.items():
-            self.encoder.layer[layer].attention.prune_heads(heads)
-
-    @add_start_docstrings_to_model_forward(DATA2VEC_VISION_INPUTS_DOCSTRING)
-    @add_code_sample_docstrings(
-        checkpoint=_CHECKPOINT_FOR_DOC,
-        output_type=Data2VecVisionModelOutputWithPooling,
-        config_class=_CONFIG_FOR_DOC,
-        modality="vision",
-        expected_output=_EXPECTED_OUTPUT_SHAPE,
-    )
+    @auto_docstring
     def forward(
         self,
-        pixel_values: Optional[torch.Tensor] = None,
-        bool_masked_pos: Optional[torch.BoolTensor] = None,
-        head_mask: Optional[torch.Tensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> Union[tuple, Data2VecVisionModelOutputWithPooling]:
+        pixel_values: torch.Tensor,
+        bool_masked_pos: torch.BoolTensor | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        interpolate_pos_encoding: bool = False,
+        return_dict: bool | None = None,
+        **kwargs,
+    ) -> tuple | Data2VecVisionModelOutputWithPooling:
         r"""
         bool_masked_pos (`torch.BoolTensor` of shape `(batch_size, num_patches)`, *optional*):
             Boolean masked positions. Indicates which patches are masked (1) and which aren't (0).
@@ -687,24 +752,16 @@ class Data2VecVisionModel(Data2VecVisionPreTrainedModel):
         )
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        if pixel_values is None:
-            raise ValueError("You have to specify pixel_values")
-
-        # Prepare head mask if needed
-        # 1.0 in head_mask indicate we keep the head
-        # attention_probs has shape bsz x n_heads x N x N
-        # input head_mask has shape [num_heads] or [num_hidden_layers x num_heads]
-        # and head_mask is converted to shape [num_hidden_layers x batch x num_heads x seq_length x seq_length]
-        head_mask = self.get_head_mask(head_mask, self.config.num_hidden_layers)
-
-        embedding_output, (patch_height, patch_width) = self.embeddings(pixel_values, bool_masked_pos)
+        embedding_output, _ = self.embeddings(pixel_values, bool_masked_pos=bool_masked_pos)
+        resolution = pixel_values.shape[2:]
 
         encoder_outputs = self.encoder(
             embedding_output,
-            head_mask=head_mask,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            resolution=resolution,
             return_dict=return_dict,
+            interpolate_pos_encoding=interpolate_pos_encoding,
         )
         sequence_output = encoder_outputs[0]
         sequence_output = self.layernorm(sequence_output)
@@ -742,12 +799,11 @@ class Data2VecVisionPooler(nn.Module):
         return pooled_output
 
 
-@add_start_docstrings(
-    """
+@auto_docstring(
+    custom_intro="""
     Data2VecVision Model transformer with an image classification head on top (a linear layer on top of the average of
     the final hidden states of the patch tokens) e.g. for ImageNet.
-    """,
-    DATA2VEC_VISION_START_DOCSTRING,
+    """
 )
 # Copied from transformers.models.beit.modeling_beit.BeitForImageClassification with BEIT->DATA2VEC_VISION,Beit->Data2VecVision,beit->data2vec_vision
 class Data2VecVisionForImageClassification(Data2VecVisionPreTrainedModel):
@@ -763,22 +819,17 @@ class Data2VecVisionForImageClassification(Data2VecVisionPreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
-    @add_start_docstrings_to_model_forward(DATA2VEC_VISION_INPUTS_DOCSTRING)
-    @add_code_sample_docstrings(
-        checkpoint=_IMAGE_CLASS_CHECKPOINT,
-        output_type=ImageClassifierOutput,
-        config_class=_CONFIG_FOR_DOC,
-        expected_output=_IMAGE_CLASS_EXPECTED_OUTPUT,
-    )
+    @auto_docstring
     def forward(
         self,
-        pixel_values: Optional[torch.Tensor] = None,
-        head_mask: Optional[torch.Tensor] = None,
-        labels: Optional[torch.Tensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> Union[tuple, ImageClassifierOutput]:
+        pixel_values: torch.Tensor | None = None,
+        labels: torch.Tensor | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        interpolate_pos_encoding: bool = False,
+        return_dict: bool | None = None,
+        **kwargs,
+    ) -> tuple | ImageClassifierOutput:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
             Labels for computing the image classification/regression loss. Indices should be in `[0, ...,
@@ -788,9 +839,9 @@ class Data2VecVisionForImageClassification(Data2VecVisionPreTrainedModel):
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         outputs = self.data2vec_vision(
             pixel_values,
-            head_mask=head_mask,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            interpolate_pos_encoding=interpolate_pos_encoding,
             return_dict=return_dict,
         )
 
@@ -800,26 +851,8 @@ class Data2VecVisionForImageClassification(Data2VecVisionPreTrainedModel):
 
         loss = None
         if labels is not None:
-            if self.config.problem_type is None:
-                if self.num_labels == 1:
-                    self.config.problem_type = "regression"
-                elif self.num_labels > 1 and (labels.dtype == torch.long or labels.dtype == torch.int):
-                    self.config.problem_type = "single_label_classification"
-                else:
-                    self.config.problem_type = "multi_label_classification"
+            loss = self.loss_function(labels, logits, self.config)
 
-            if self.config.problem_type == "regression":
-                loss_fct = MSELoss()
-                if self.num_labels == 1:
-                    loss = loss_fct(logits.squeeze(), labels.squeeze())
-                else:
-                    loss = loss_fct(logits, labels)
-            elif self.config.problem_type == "single_label_classification":
-                loss_fct = CrossEntropyLoss()
-                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
-            elif self.config.problem_type == "multi_label_classification":
-                loss_fct = BCEWithLogitsLoss()
-                loss = loss_fct(logits, labels)
         if not return_dict:
             output = (logits,) + outputs[2:]
             return ((loss,) + output) if loss is not None else output
@@ -845,10 +878,10 @@ class Data2VecVisionConvModule(nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        kernel_size: Union[int, Tuple[int, int]],
-        padding: Union[int, Tuple[int, int], str] = 0,
+        kernel_size: int | tuple[int, int],
+        padding: int | tuple[int, int] | str = 0,
         bias: bool = False,
-        dilation: Union[int, Tuple[int, int]] = 1,
+        dilation: int | tuple[int, int] = 1,
     ) -> None:
         super().__init__()
         self.conv = nn.Conv2d(
@@ -903,7 +936,7 @@ class Data2VecVisionPyramidPoolingModule(nn.Module):
     Based on OpenMMLab's implementation, found in https://github.com/open-mmlab/mmsegmentation.
     """
 
-    def __init__(self, pool_scales: Tuple[int, ...], in_channels: int, channels: int, align_corners: bool) -> None:
+    def __init__(self, pool_scales: tuple[int, ...], in_channels: int, channels: int, align_corners: bool) -> None:
         super().__init__()
         self.pool_scales = pool_scales
         self.align_corners = align_corners
@@ -917,7 +950,7 @@ class Data2VecVisionPyramidPoolingModule(nn.Module):
             self.blocks.append(block)
             self.add_module(str(i), block)
 
-    def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> list[torch.Tensor]:
         ppm_outs = []
         for ppm in self.blocks:
             ppm_out = ppm(x)
@@ -932,7 +965,7 @@ class Data2VecVisionPyramidPoolingModule(nn.Module):
 class Data2VecVisionUperHead(nn.Module):
     """
     Unified Perceptual Parsing for Scene Understanding. This head is the implementation of
-    [UPerNet](https://arxiv.org/abs/1807.10221).
+    [UPerNet](https://huggingface.co/papers/1807.10221).
 
     Based on OpenMMLab's implementation, found in https://github.com/open-mmlab/mmsegmentation.
     """
@@ -1018,7 +1051,7 @@ class Data2VecVisionUperHead(nn.Module):
 class Data2VecVisionFCNHead(nn.Module):
     """
     Fully Convolution Networks for Semantic Segmentation. This head is implemented of
-    [FCNNet](https://arxiv.org/abs/1411.4038>).
+    [FCNNet](https://huggingface.co/papers/1411.4038>).
 
     Args:
         config (Data2VecVisionConfig): Configuration.
@@ -1035,7 +1068,7 @@ class Data2VecVisionFCNHead(nn.Module):
         config: Data2VecVisionConfig,
         in_index: int = 2,
         kernel_size: int = 3,
-        dilation: Union[int, Tuple[int, int]] = 1,
+        dilation: int | tuple[int, int] = 1,
     ) -> None:
         super().__init__()
         self.in_channels = config.hidden_size
@@ -1078,12 +1111,7 @@ class Data2VecVisionFCNHead(nn.Module):
         return output
 
 
-@add_start_docstrings(
-    """
-    Data2VecVision Model transformer with a semantic segmentation head on top e.g. for ADE20k, CityScapes.
-    """,
-    DATA2VEC_VISION_START_DOCSTRING,
-)
+@auto_docstring
 # Copied from transformers.models.beit.modeling_beit.BeitForSemanticSegmentation with BEIT->DATA2VEC_VISION,Beit->Data2VecVision,microsoft/beit-base-finetuned-ade-640-640->facebook/data2vec-vision-base,beit->data2vec_vision
 class Data2VecVisionForSemanticSegmentation(Data2VecVisionPreTrainedModel):
     def __init__(self, config: Data2VecVisionConfig) -> None:
@@ -1137,33 +1165,33 @@ class Data2VecVisionForSemanticSegmentation(Data2VecVisionPreTrainedModel):
 
         return loss
 
-    @add_start_docstrings_to_model_forward(DATA2VEC_VISION_INPUTS_DOCSTRING)
-    @replace_return_docstrings(output_type=SemanticSegmenterOutput, config_class=_CONFIG_FOR_DOC)
+    @auto_docstring
     def forward(
         self,
-        pixel_values: Optional[torch.Tensor] = None,
-        head_mask: Optional[torch.Tensor] = None,
-        labels: Optional[torch.Tensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> Union[tuple, SemanticSegmenterOutput]:
+        pixel_values: torch.Tensor | None = None,
+        labels: torch.Tensor | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        interpolate_pos_encoding: bool = False,
+        return_dict: bool | None = None,
+        **kwargs,
+    ) -> tuple | SemanticSegmenterOutput:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size, height, width)`, *optional*):
             Ground truth semantic segmentation maps for computing the loss. Indices should be in `[0, ...,
             config.num_labels - 1]`. If `config.num_labels > 1`, a classification loss is computed (Cross-Entropy).
-
-        Returns:
 
         Examples:
 
         ```python
         >>> from transformers import AutoImageProcessor, Data2VecVisionForSemanticSegmentation
         >>> from PIL import Image
-        >>> import requests
+        >>> import httpx
+        >>> from io import BytesIO
 
         >>> url = "http://images.cocodataset.org/val2017/000000039769.jpg"
-        >>> image = Image.open(requests.get(url, stream=True).raw)
+        >>> with httpx.stream("GET", url) as response:
+        ...     image = Image.open(BytesIO(response.read()))
 
         >>> image_processor = AutoImageProcessor.from_pretrained("facebook/data2vec-vision-base")
         >>> model = Data2VecVisionForSemanticSegmentation.from_pretrained("facebook/data2vec-vision-base")
@@ -1178,11 +1206,14 @@ class Data2VecVisionForSemanticSegmentation(Data2VecVisionPreTrainedModel):
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
 
+        if labels is not None and self.config.num_labels == 1:
+            raise ValueError("The number of labels should be greater than one")
+
         outputs = self.data2vec_vision(
             pixel_values,
-            head_mask=head_mask,
             output_attentions=output_attentions,
             output_hidden_states=True,  # we need the intermediate hidden states
+            interpolate_pos_encoding=interpolate_pos_encoding,
             return_dict=return_dict,
         )
 
@@ -1210,10 +1241,7 @@ class Data2VecVisionForSemanticSegmentation(Data2VecVisionPreTrainedModel):
 
         loss = None
         if labels is not None:
-            if self.config.num_labels == 1:
-                raise ValueError("The number of labels should be greater than one")
-            else:
-                loss = self.compute_loss(logits, auxiliary_logits, labels)
+            loss = self.compute_loss(logits, auxiliary_logits, labels)
 
         if not return_dict:
             if output_hidden_states:
@@ -1228,3 +1256,11 @@ class Data2VecVisionForSemanticSegmentation(Data2VecVisionPreTrainedModel):
             hidden_states=outputs.hidden_states if output_hidden_states else None,
             attentions=outputs.attentions,
         )
+
+
+__all__ = [
+    "Data2VecVisionForImageClassification",
+    "Data2VecVisionForSemanticSegmentation",
+    "Data2VecVisionModel",
+    "Data2VecVisionPreTrainedModel",
+]

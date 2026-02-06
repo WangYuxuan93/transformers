@@ -85,14 +85,14 @@ GPU memory occupied: 1343 MB.
 
 ## 모델 로드 [[load-model]]
 
-우선, `bert-large-uncased` 모델을 로드합니다. 모델의 가중치를 직접 GPU에 로드해서 가중치만이 얼마나 많은 공간을 차지하는지 확인할 수 있습니다.
+우선, `google-bert/bert-large-uncased` 모델을 로드합니다. 모델의 가중치를 직접 GPU에 로드해서 가중치만이 얼마나 많은 공간을 차지하는지 확인할 수 있습니다.
 
 
 ```py
 >>> from transformers import AutoModelForSequenceClassification
 
 
->>> model = AutoModelForSequenceClassification.from_pretrained("bert-large-uncased").to("cuda")
+>>> model = AutoModelForSequenceClassification.from_pretrained("google-bert/bert-large-uncased").to("cuda")
 >>> print_gpu_utilization()
 GPU memory occupied: 2631 MB.
 ```
@@ -132,7 +132,7 @@ Tue Jan 11 08:58:05 2022
 ```py
 default_args = {
     "output_dir": "tmp",
-    "evaluation_strategy": "steps",
+    "eval_strategy": "steps",
     "num_train_epochs": 1,
     "log_level": "error",
     "report_to": "none",
@@ -187,7 +187,7 @@ GPU memory occupied: 14949 MB.
 
 이러한 지식은 성능 병목 현상을 분석할 때 도움이 될 수 있습니다.
 
-이 내용은 [Data Movement Is All You Need: A Case Study on Optimizing Transformers 2020](https://arxiv.org/abs/2007.00072)을 참고하였습니다.
+이 내용은 [Data Movement Is All You Need: A Case Study on Optimizing Transformers 2020](https://huggingface.co/papers/2007.00072)을 참고하였습니다.
 
 
 ## 모델의 메모리 구조 [[anatomy-of-models-memory]]

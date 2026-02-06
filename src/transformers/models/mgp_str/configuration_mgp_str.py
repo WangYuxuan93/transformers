@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,31 +11,27 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" MGP-STR model configuration"""
+"""MGP-STR model configuration"""
 
-from ...configuration_utils import PretrainedConfig
+from ...configuration_utils import PreTrainedConfig
 from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
 
-MGP_STR_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "alibaba-damo/mgp-str-base": "https://huggingface.co/alibaba-damo/mgp-str-base/resolve/main/config.json",
-}
 
-
-class MgpstrConfig(PretrainedConfig):
+class MgpstrConfig(PreTrainedConfig):
     r"""
     This is the configuration class to store the configuration of an [`MgpstrModel`]. It is used to instantiate an
     MGP-STR model according to the specified arguments, defining the model architecture. Instantiating a configuration
     with the defaults will yield a similar configuration to that of the MGP-STR
     [alibaba-damo/mgp-str-base](https://huggingface.co/alibaba-damo/mgp-str-base) architecture.
 
-    Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
-    documentation from [`PretrainedConfig`] for more information.
+    Configuration objects inherit from [`PreTrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PreTrainedConfig`] for more information.
 
     Args:
-        image_size (`List[int]`, *optional*, defaults to `[32, 128]`):
+        image_size (`list[int]`, *optional*, defaults to `[32, 128]`):
             The size (resolution) of each image.
         patch_size (`int`, *optional*, defaults to 4):
             The size (resolution) of each patch.
@@ -136,3 +131,6 @@ class MgpstrConfig(PretrainedConfig):
         self.drop_path_rate = drop_path_rate
         self.output_a3_attentions = output_a3_attentions
         self.initializer_range = initializer_range
+
+
+__all__ = ["MgpstrConfig"]

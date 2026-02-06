@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright Google AI and The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,29 +11,24 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" CANINE model configuration"""
+"""CANINE model configuration"""
 
-from ...configuration_utils import PretrainedConfig
+from ...configuration_utils import PreTrainedConfig
 from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
 
-CANINE_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "google/canine-s": "https://huggingface.co/google/canine-s/resolve/main/config.json",
-    # See all CANINE models at https://huggingface.co/models?filter=canine
-}
 
-
-class CanineConfig(PretrainedConfig):
+class CanineConfig(PreTrainedConfig):
     r"""
     This is the configuration class to store the configuration of a [`CanineModel`]. It is used to instantiate an
     CANINE model according to the specified arguments, defining the model architecture. Instantiating a configuration
     with the defaults will yield a similar configuration to that of the CANINE
     [google/canine-s](https://huggingface.co/google/canine-s) architecture.
 
-    Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
-    documentation from [`PretrainedConfig`] for more information.
+    Configuration objects inherit from [`PreTrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PreTrainedConfig`] for more information.
 
 
     Args:
@@ -50,7 +44,7 @@ class CanineConfig(PretrainedConfig):
             The non-linear activation function (function or string) in the encoder and pooler. If string, `"gelu"`,
             `"relu"`, `"selu"` and `"gelu_new"` are supported.
         hidden_dropout_prob (`float`, *optional*, defaults to 0.1):
-            The dropout probabilitiy for all fully connected layers in the embeddings, encoders, and pooler.
+            The dropout probability for all fully connected layers in the embeddings, encoders, and pooler.
         attention_probs_dropout_prob (`float`, *optional*, defaults to 0.1):
             The dropout ratio for the attention probabilities.
         max_position_embeddings (`int`, *optional*, defaults to 16384):
@@ -121,8 +115,11 @@ class CanineConfig(PretrainedConfig):
         local_transformer_stride=128,  # Good TPU/XLA memory alignment.
         **kwargs,
     ):
-        super().__init__(pad_token_id=pad_token_id, bos_token_id=bos_token_id, eos_token_id=eos_token_id, **kwargs)
+        super().__init__(**kwargs)
 
+        self.pad_token_id = pad_token_id
+        self.bos_token_id = bos_token_id
+        self.eos_token_id = eos_token_id
         self.max_position_embeddings = max_position_embeddings
         self.hidden_size = hidden_size
         self.num_hidden_layers = num_hidden_layers
@@ -141,3 +138,6 @@ class CanineConfig(PretrainedConfig):
         self.num_hash_functions = num_hash_functions
         self.num_hash_buckets = num_hash_buckets
         self.local_transformer_stride = local_transformer_stride
+
+
+__all__ = ["CanineConfig"]

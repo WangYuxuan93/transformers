@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2022 The HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -30,7 +29,7 @@ transformers = direct_transformers_import(PATH_TO_TRANSFORMERS)
 CONFIG_MAPPING = transformers.models.auto.configuration_auto.CONFIG_MAPPING
 
 # Regex pattern used to find the checkpoint mentioned in the docstring of `config_class`.
-# For example, `[bert-base-uncased](https://huggingface.co/bert-base-uncased)`
+# For example, `[google-bert/bert-base-uncased](https://huggingface.co/google-bert/bert-base-uncased)`
 _re_checkpoint = re.compile(r"\[(.+?)\]\((https://huggingface\.co/.+?)\)")
 
 
@@ -41,9 +40,15 @@ CONFIG_CLASSES_TO_IGNORE_FOR_DOCSTRING_CHECKPOINT_CHECK = {
     "RagConfig",
     "SpeechEncoderDecoderConfig",
     "TimmBackboneConfig",
+    "TimmWrapperConfig",
     "VisionEncoderDecoderConfig",
     "VisionTextDualEncoderConfig",
     "LlamaConfig",
+    "GraniteConfig",
+    "GraniteMoeConfig",
+    "GraniteMoeHybridConfig",
+    "Qwen3MoeConfig",
+    "GraniteSpeechConfig",
 }
 
 
@@ -55,11 +60,10 @@ def get_checkpoint_from_config_class(config_class):
     checkpoints = _re_checkpoint.findall(config_source)
 
     # Each `checkpoint` is a tuple of a checkpoint name and a checkpoint link.
-    # For example, `('bert-base-uncased', 'https://huggingface.co/bert-base-uncased')`
+    # For example, `('google-bert/bert-base-uncased', 'https://huggingface.co/google-bert/bert-base-uncased')`
     for ckpt_name, ckpt_link in checkpoints:
         # allow the link to end with `/`
-        if ckpt_link.endswith("/"):
-            ckpt_link = ckpt_link[:-1]
+        ckpt_link = ckpt_link.removesuffix("/")
 
         # verify the checkpoint name corresponds to the checkpoint link
         ckpt_link_from_name = f"https://huggingface.co/{ckpt_name}"

@@ -42,7 +42,7 @@ rendered properly in your Markdown viewer.
 ```py
 from transformers import AutoModel
 
-model = AutoModel.from_pretrained("bert-base-cased")
+model = AutoModel.from_pretrained("google-bert/bert-base-cased")
 ```
 
 もし[`~PreTrainedModel.save_pretrained`]を使用して保存する場合、新しいフォルダが2つのファイルを含む形で作成されます: モデルの設定情報とその重み情報です。
@@ -110,11 +110,11 @@ dict_keys(['metadata', 'weight_map'])
 ```
 
 直接モデル内で[`~PreTrainedModel.from_pretrained`]を使用せずに、
-シャーディングされたチェックポイントをロードしたい場合（フルチェックポイントの場合に`model.load_state_dict()`を使用するように行う方法）、[`~modeling_utils.load_sharded_checkpoint`]を使用する必要があります：
+シャーディングされたチェックポイントをロードしたい場合（フルチェックポイントの場合に`model.load_state_dict()`を使用するように行う方法）、[`~trainer_utils.load_sharded_checkpoint`]を使用する必要があります：
 
 
 ```py
->>> from transformers.modeling_utils import load_sharded_checkpoint
+>>> from transformers.trainer_utils import load_sharded_checkpoint
 
 >>> with tempfile.TemporaryDirectory() as tmp_dir:
 ...     model.save_pretrained(tmp_dir, max_shard_size="200MB")

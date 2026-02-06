@@ -17,7 +17,7 @@ rendered properly in your Markdown viewer.
 # CTRL
 
 <div class="flex flex-wrap space-x-1">
-<a href="https://huggingface.co/models?filter=ctrl">
+<a href="https://huggingface.co/models?filter=Salesforce/ctrl">
 <img alt="Models" src="https://img.shields.io/badge/All_model_pages-ctrl-blueviolet">
 </a>
 <a href="https://huggingface.co/spaces/docs-demos/tiny-ctrl">
@@ -27,7 +27,7 @@ rendered properly in your Markdown viewer.
 
 ## Overview
 
-CTRL モデルは、Nitish Shirish Keskar*、Bryan McCann*、Lav R. Varshney、Caiming Xiong, Richard Socher によって [CTRL: A Conditional Transformer Language Model for Controllable Generation](https://arxiv.org/abs/1909.05858) で提案されました。
+CTRL モデルは、Nitish Shirish Keskar*、Bryan McCann*、Lav R. Varshney、Caiming Xiong, Richard Socher によって [CTRL: A Conditional Transformer Language Model for Controllable Generation](https://huggingface.co/papers/1909.05858) で提案されました。
 リチャード・ソーチャー。これは、非常に大規模なコーパスの言語モデリングを使用して事前トレーニングされた因果的 (一方向) トランスフォーマーです
 最初のトークンが制御コード (リンク、書籍、Wikipedia など) として予約されている、約 140 GB のテキスト データ。
 
@@ -42,12 +42,12 @@ CTRL モデルは、Nitish Shirish Keskar*、Bryan McCann*、Lav R. Varshney、C
 モデルベースのソース帰属を介して。*
 
 このモデルは、[keskarnitishr](https://huggingface.co/keskarnitishr) によって提供されました。元のコードが見つかる
-[こちら](https://github.com/salesforce/ctrl)。
+[こちら](https://github.com/salesforce/Salesforce/ctrl)。
 
 ## Usage tips
 
 - CTRL は制御コードを利用してテキストを生成します。生成を特定の単語や文で開始する必要があります。
-  またはリンクして一貫したテキストを生成します。 [元の実装](https://github.com/salesforce/ctrl) を参照してください。
+  またはリンクして一貫したテキストを生成します。 [元の実装](https://github.com/salesforce/Salesforce/ctrl) を参照してください。
   詳しくは。
 - CTRL は絶対位置埋め込みを備えたモデルであるため、通常は入力を右側にパディングすることをお勧めします。
   左。
@@ -61,7 +61,7 @@ CTRL モデルは、Nitish Shirish Keskar*、Bryan McCann*、Lav R. Varshney、C
 
 ## Resources
 
-- [テキスト分類タスクガイド](../tasks/sequence_classification)
+- [テキスト分類タスクガイド(英語版)](../../en/tasks/sequence_classification)
 - [因果言語モデリング タスク ガイド](../tasks/language_modeling)
 
 ## CTRLConfig
@@ -73,8 +73,6 @@ CTRL モデルは、Nitish Shirish Keskar*、Bryan McCann*、Lav R. Varshney、C
 [[autodoc]] CTRLTokenizer
     - save_vocabulary
 
-<frameworkcontent>
-<pt>
 
 ## CTRLModel
 
@@ -91,23 +89,3 @@ CTRL モデルは、Nitish Shirish Keskar*、Bryan McCann*、Lav R. Varshney、C
 [[autodoc]] CTRLForSequenceClassification
     - forward
 
-</pt>
-<tf>
-
-## TFCTRLModel
-
-[[autodoc]] TFCTRLModel
-    - call
-
-## TFCTRLLMHeadModel
-
-[[autodoc]] TFCTRLLMHeadModel
-    - call
-
-## TFCTRLForSequenceClassification
-
-[[autodoc]] TFCTRLForSequenceClassification
-    - call
-
-</tf>
-</frameworkcontent>

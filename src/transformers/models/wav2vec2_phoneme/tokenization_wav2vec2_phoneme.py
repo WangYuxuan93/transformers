@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2021 The Facebook Inc. and The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,20 +15,16 @@
 
 import json
 import os
-import sys
 from dataclasses import dataclass
 from itertools import groupby
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Union
 
 import numpy as np
 
-from ...tokenization_utils import PreTrainedTokenizer
+from ...tokenization_python import PreTrainedTokenizer
 from ...tokenization_utils_base import AddedToken
 from ...utils import (
     ModelOutput,
-    is_flax_available,
-    is_tf_available,
-    is_torch_available,
     logging,
     requires_backends,
     to_py_obj,
@@ -40,12 +35,7 @@ logger = logging.get_logger(__name__)
 
 
 if TYPE_CHECKING:
-    if is_torch_available():
-        import torch
-    if is_tf_available():
-        import tensorflow as tf
-    if is_flax_available():
-        import jax.numpy as jnp  # noqa: F401
+    import torch
 
 
 VOCAB_FILES_NAMES = {
@@ -53,24 +43,11 @@ VOCAB_FILES_NAMES = {
     "tokenizer_config_file": "tokenizer_config.json",
 }
 
-PRETRAINED_VOCAB_FILES_MAP = {
-    "vocab_file": {
-        "facebook/wav2vec2-lv-60-espeak-cv-ft": (
-            "https://huggingface.co/facebook/wav2vec2-lv-60-espeak-cv-ft/resolve/main/vocab.json"
-        ),
-    },
-    "tokenizer_config_file": {
-        "facebook/wav2vec2-lv-60-espeak-cv-ft": (
-            "https://huggingface.co/facebook/wav2vec2-lv-60-espeak-cv-ft/resolve/main/tokenizer_config.json"
-        ),
-    },
-}
 
 # Wav2Vec2Phoneme has no max input length
-PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {"facebook/wav2vec2-lv-60-espeak-cv-ft": sys.maxsize}
 
 
-ListOfDict = List[Dict[str, Union[int, str]]]
+ListOfDict = list[dict[str, int | str]]
 
 
 @dataclass
@@ -81,18 +58,17 @@ class Wav2Vec2PhonemeCTCTokenizerOutput(ModelOutput):
     Args:
         text (list of `str` or `str`):
             Decoded logits in text from. Usually the speech transcription.
-        char_offsets (list of `List[Dict[str, Union[int, str]]]` or `List[Dict[str, Union[int, str]]]`):
+        char_offsets (list of `list[dict[str, Union[int, str]]]` or `list[dict[str, Union[int, str]]]`):
             Offsets of the decoded characters. In combination with sampling rate and model downsampling rate char
-            offsets can be used to compute time stamps for each charater. Total logit score of the beam associated with
+            offsets can be used to compute time stamps for each character. Total logit score of the beam associated with
             produced text.
     """
 
-    text: Union[List[str], str]
-    char_offsets: Union[List[ListOfDict], ListOfDict] = None
+    text: list[str] | str
+    char_offsets: list[ListOfDict] | ListOfDict = None
 
 
 class Wav2Vec2PhonemeCTCTokenizer(PreTrainedTokenizer):
-
     """
     Constructs a Wav2Vec2PhonemeCTC tokenizer.
 
@@ -125,8 +101,6 @@ class Wav2Vec2PhonemeCTCTokenizer(PreTrainedTokenizer):
     """
 
     vocab_files_names = VOCAB_FILES_NAMES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
-    max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
     model_input_names = ["input_ids", "attention_mask"]
 
     def __init__(
@@ -173,12 +147,12 @@ class Wav2Vec2PhonemeCTCTokenizer(PreTrainedTokenizer):
     def vocab_size(self) -> int:
         return len(self.decoder)
 
-    def get_vocab(self) -> Dict:
+    def get_vocab(self) -> dict:
         vocab = dict(self.encoder.copy())
         vocab.update(self.added_tokens_encoder)
         return vocab
 
-    def _add_tokens(self, new_tokens: Union[List[str], List[AddedToken]], special_tokens: bool = False) -> int:
+    def _add_tokens(self, new_tokens: list[str] | list[AddedToken], special_tokens: bool = False) -> int:
         # Overwritten to never strip!
         to_add = []
         for token in new_tokens:
@@ -205,9 +179,9 @@ class Wav2Vec2PhonemeCTCTokenizer(PreTrainedTokenizer):
         self,
         text: str,
         is_split_into_words: bool = False,
-        phonemizer_lang: Optional[str] = None,
-        do_phonemize: Optional[bool] = None,
-    ) -> Tuple[str, Dict[str, Any]]:
+        phonemizer_lang: str | None = None,
+        do_phonemize: bool | None = None,
+    ) -> tuple[str, dict[str, Any]]:
         """
         Performs any necessary transformations before tokenization.
 
@@ -229,7 +203,7 @@ class Wav2Vec2PhonemeCTCTokenizer(PreTrainedTokenizer):
 
 
         Returns:
-            `Tuple[str, Dict[str, Any]]`: The prepared text and the unused kwargs.
+            `tuple[str, dict[str, Any]]`: The prepared text and the unused kwargs.
         """
         if is_split_into_words:
             text = " " + text
@@ -266,7 +240,7 @@ class Wav2Vec2PhonemeCTCTokenizer(PreTrainedTokenizer):
         tokens = list(filter(lambda p: p.strip() != "", tokens))
         return tokens
 
-    def phonemize(self, text: str, phonemizer_lang: Optional[str] = None) -> str:
+    def phonemize(self, text: str, phonemizer_lang: str | None = None) -> str:
         from phonemizer.separator import Separator
 
         word_delimiter = self.word_delimiter_token + " " if self.word_delimiter_token is not None else ""
@@ -296,7 +270,7 @@ class Wav2Vec2PhonemeCTCTokenizer(PreTrainedTokenizer):
         return str(self._word_delimiter_token)
 
     @property
-    def word_delimiter_token_id(self) -> Optional[int]:
+    def word_delimiter_token_id(self) -> int | None:
         """
         `Optional[int]`: Id of the word_delimiter_token in the vocabulary. Returns `None` if the token has not been
         set.
@@ -325,7 +299,7 @@ class Wav2Vec2PhonemeCTCTokenizer(PreTrainedTokenizer):
         return str(self._phone_delimiter_token)
 
     @property
-    def phone_delimiter_token_id(self) -> Optional[int]:
+    def phone_delimiter_token_id(self) -> int | None:
         """
         `Optional[int]`: Id of the phone_delimiter_token in the vocabulary. Returns `None` if the token has not been
         set.
@@ -353,7 +327,7 @@ class Wav2Vec2PhonemeCTCTokenizer(PreTrainedTokenizer):
 
     def convert_tokens_to_string(
         self,
-        tokens: List[str],
+        tokens: list[str],
         group_tokens: bool = True,
         spaces_between_special_tokens: bool = False,
         filter_word_delimiter_token: bool = True,
@@ -403,8 +377,8 @@ class Wav2Vec2PhonemeCTCTokenizer(PreTrainedTokenizer):
 
     @staticmethod
     def _compute_offsets(
-        char_repetitions: List[int], chars: List[str], ctc_token: int, word_delimiter_token: Optional[int] = None
-    ) -> List[Dict[str, Union[str, int]]]:
+        char_repetitions: list[int], chars: list[str], ctc_token: int, word_delimiter_token: int | None = None
+    ) -> list[dict[str, str | int]]:
         end_indices = np.asarray(char_repetitions).cumsum()
         start_indices = np.concatenate(([0], end_indices[:-1]))
 
@@ -423,9 +397,9 @@ class Wav2Vec2PhonemeCTCTokenizer(PreTrainedTokenizer):
 
     def _decode(
         self,
-        token_ids: List[int],
+        token_ids: list[int],
         skip_special_tokens: bool = False,
-        clean_up_tokenization_spaces: bool = None,
+        clean_up_tokenization_spaces: bool | None = None,
         group_tokens: bool = True,
         filter_word_delimiter_token: bool = True,
         spaces_between_special_tokens: bool = False,
@@ -470,9 +444,9 @@ class Wav2Vec2PhonemeCTCTokenizer(PreTrainedTokenizer):
     # overwritten from `tokenization_utils_base.py` because we need docs for `output_char_offsets` here
     def decode(
         self,
-        token_ids: Union[int, List[int], "np.ndarray", "torch.Tensor", "tf.Tensor"],
+        token_ids: Union[int, list[int], np.ndarray, "torch.Tensor"],
         skip_special_tokens: bool = False,
-        clean_up_tokenization_spaces: bool = None,
+        clean_up_tokenization_spaces: bool | None = None,
         output_char_offsets: bool = False,
         **kwargs,
     ) -> str:
@@ -483,7 +457,7 @@ class Wav2Vec2PhonemeCTCTokenizer(PreTrainedTokenizer):
         Similar to doing `self.convert_tokens_to_string(self.convert_ids_to_tokens(token_ids))`.
 
         Args:
-            token_ids (`Union[int, List[int], np.ndarray, torch.Tensor, tf.Tensor]`):
+            token_ids (`Union[int, list[int], np.ndarray, torch.Tensor]`):
                 List of tokenized input ids. Can be obtained using the `__call__` method.
             skip_special_tokens (`bool`, *optional*, defaults to `False`):
                 Whether or not to remove special tokens in the decoding.
@@ -526,17 +500,17 @@ class Wav2Vec2PhonemeCTCTokenizer(PreTrainedTokenizer):
     # we need docs for `output_char_offsets` here
     def batch_decode(
         self,
-        sequences: Union[List[int], List[List[int]], "np.ndarray", "torch.Tensor", "tf.Tensor"],
+        sequences: Union[list[int], list[list[int]], np.ndarray, "torch.Tensor"],
         skip_special_tokens: bool = False,
-        clean_up_tokenization_spaces: bool = None,
+        clean_up_tokenization_spaces: bool | None = None,
         output_char_offsets: bool = False,
         **kwargs,
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Convert a list of lists of token ids into a list of strings by calling decode.
 
         Args:
-            sequences (`Union[List[int], List[List[int]], np.ndarray, torch.Tensor, tf.Tensor]`):
+            sequences (`Union[list[int], list[list[int]], np.ndarray, torch.Tensor]`):
                 List of tokenized input ids. Can be obtained using the `__call__` method.
             skip_special_tokens (`bool`, *optional*, defaults to `False`):
                 Whether or not to remove special tokens in the decoding.
@@ -559,7 +533,7 @@ class Wav2Vec2PhonemeCTCTokenizer(PreTrainedTokenizer):
                 Will be passed to the underlying model specific decode method.
 
         Returns:
-            `List[str]` or [`~models.wav2vec2.tokenization_wav2vec2_phoneme.Wav2Vec2PhonemeCTCTokenizerOutput`]: The
+            `list[str]` or [`~models.wav2vec2.tokenization_wav2vec2_phoneme.Wav2Vec2PhonemeCTCTokenizerOutput`]: The
             decoded sentence. Will be a
             [`~models.wav2vec2.tokenization_wav2vec2_phoneme.Wav2Vec2PhonemeCTCTokenizerOutput`] when
             `output_char_offsets == True`.
@@ -580,7 +554,7 @@ class Wav2Vec2PhonemeCTCTokenizer(PreTrainedTokenizer):
 
         return batch_decoded
 
-    def save_vocabulary(self, save_directory: str, filename_prefix: Optional[str] = None) -> Tuple[str]:
+    def save_vocabulary(self, save_directory: str, filename_prefix: str | None = None) -> tuple[str]:
         if not os.path.isdir(save_directory):
             logger.error(f"Vocabulary path ({save_directory}) should be a directory")
             return
@@ -592,3 +566,6 @@ class Wav2Vec2PhonemeCTCTokenizer(PreTrainedTokenizer):
             f.write(json.dumps(self.encoder, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
 
         return (vocab_file,)
+
+
+__all__ = ["Wav2Vec2PhonemeCTCTokenizer"]

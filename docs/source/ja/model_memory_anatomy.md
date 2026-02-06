@@ -88,14 +88,14 @@ GPU memory occupied: 1343 MB.
 
 ## Load Model
 
-まず、`bert-large-uncased` モデルを読み込みます。モデルの重みを直接GPUに読み込むことで、重みだけがどれだけのスペースを使用しているかを確認できます。
+まず、`google-bert/bert-large-uncased` モデルを読み込みます。モデルの重みを直接GPUに読み込むことで、重みだけがどれだけのスペースを使用しているかを確認できます。
 
 
 ```py
 >>> from transformers import AutoModelForSequenceClassification
 
 
->>> model = AutoModelForSequenceClassification.from_pretrained("bert-large-uncased").to("cuda")
+>>> model = AutoModelForSequenceClassification.from_pretrained("google-bert/bert-large-uncased").to("cuda")
 >>> print_gpu_utilization()
 GPU memory occupied: 2631 MB.
 ```
@@ -136,7 +136,7 @@ Tue Jan 11 08:58:05 2022
 ```py
 default_args = {
     "output_dir": "tmp",
-    "evaluation_strategy": "steps",
+    "eval_strategy": "steps",
     "num_train_epochs": 1,
     "log_level": "error",
     "report_to": "none",
@@ -193,7 +193,7 @@ Transformerアーキテクチャには、計算強度によって以下の3つ�
 
 パフォーマンスのボトルネックを分析する際に、この知識は役立つことがあります。
 
-この要約は、[Data Movement Is All You Need: Optimizing Transformers 2020に関するケーススタディ](https://arxiv.org/abs/2007.00072)から派生しています。
+この要約は、[Data Movement Is All You Need: Optimizing Transformers 2020に関するケーススタディ](https://huggingface.co/papers/2007.00072)から派生しています。
 
 ## Anatomy of Model's Memory
 

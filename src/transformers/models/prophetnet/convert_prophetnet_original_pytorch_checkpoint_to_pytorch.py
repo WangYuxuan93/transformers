@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2020 The HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Convert ProphetNet checkpoint."""
-
 
 import argparse
 
@@ -119,9 +117,9 @@ def convert_prophetnet_checkpoint_to_pytorch(prophetnet_checkpoint_path: str, py
                 is_key_init = True
                 break
             elif attribute == "position_embeddings":
-                assert (
-                    model.position_embeddings.weight.shape[-1] == old_model.embed_positions.weight.shape[-1]
-                ), "Hidden size has to match"
+                assert model.position_embeddings.weight.shape[-1] == old_model.embed_positions.weight.shape[-1], (
+                    "Hidden size has to match"
+                )
                 assert model.position_embeddings.weight.shape[0] == 512, "We want 512 position_embeddings."
                 model.position_embeddings.weight = nn.Parameter(old_model.embed_positions.weight[:512, :])
                 is_key_init = True
@@ -133,9 +131,7 @@ def convert_prophetnet_checkpoint_to_pytorch(prophetnet_checkpoint_path: str, py
             else:
                 model = getattr(model, attribute)
 
-                if old_attribute == "":
-                    old_model = old_model
-                else:
+                if old_attribute:
                     if not hasattr(old_model, old_attribute):
                         raise ValueError(f"{old_model} does not have {old_attribute}")
                     old_model = getattr(old_model, old_attribute)

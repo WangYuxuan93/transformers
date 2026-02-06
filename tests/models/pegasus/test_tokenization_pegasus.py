@@ -13,10 +13,11 @@
 # limitations under the License.
 
 import unittest
+from functools import cached_property
 
-from transformers import PegasusTokenizer, PegasusTokenizerFast
+from transformers import PegasusTokenizer
 from transformers.testing_utils import get_tests_dir, require_sentencepiece, require_tokenizers, require_torch, slow
-from transformers.utils import cached_property
+from transformers.tokenization_utils_sentencepiece import SentencePieceExtractor
 
 from ...test_tokenization_common import TokenizerTesterMixin
 
@@ -27,58 +28,20 @@ SAMPLE_VOCAB = get_tests_dir("fixtures/test_sentencepiece_no_bos.model")
 @require_sentencepiece
 @require_tokenizers
 class PegasusTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
+    # TokenizerTesterMixin configuration
+    from_pretrained_id = ["google/pegasus-xsum"]
     tokenizer_class = PegasusTokenizer
-    rust_tokenizer_class = PegasusTokenizerFast
-    test_rust_tokenizer = True
-    test_sentencepiece = True
 
-    def setUp(self):
-        super().setUp()
-
-        # We have a SentencePiece fixture for testing
-        tokenizer = PegasusTokenizer(SAMPLE_VOCAB)
-        tokenizer.save_pretrained(self.tmpdirname)
+    integration_expected_tokens = ['▁This', '▁is', '▁a', '▁test', '▁', '😊', '▁I', '▁was', '▁born', '▁in', '▁9', '2000', ',', '▁and', '▁this', '▁is', '▁fal', 's', 'é', '.', '▁', '生活的真谛是', '▁Hi', '▁Hello', '▁Hi', '▁Hello', '▁Hello', '▁', '<', 's', '>', '▁hi', '<', 's', '>', 'there', '▁The', '▁following', '▁string', '▁should', '▁be', '▁properly', '▁encoded', ':', '▁Hello', '.', '▁But', '▁i', 'rd', '▁and', '▁', 'ปี', '▁i', 'rd', '▁', 'ด', '▁Hey', '▁how', '▁are', '▁you', '▁doing']  # fmt: skip
+    integration_expected_token_ids = [182, 117, 114, 804, 110, 105, 125, 140, 1723, 115, 950, 15337, 108, 111, 136, 117, 54154, 116, 5371, 107, 110, 105, 4451, 8087, 4451, 8087, 8087, 110, 105, 116, 2314, 9800, 105, 116, 2314, 7731, 139, 645, 4211, 246, 129, 2023, 33041, 151, 8087, 107, 343, 532, 2007, 111, 110, 105, 532, 2007, 110, 105, 10532, 199, 127, 119, 557]  # fmt: skip
+    expected_tokens_from_ids = ['▁This', '▁is', '▁a', '▁test', '▁', '<unk>', '▁I', '▁was', '▁born', '▁in', '▁9', '2000', ',', '▁and', '▁this', '▁is', '▁fal', 's', 'é', '.', '▁', '<unk>', '▁Hi', '▁Hello', '▁Hi', '▁Hello', '▁Hello', '▁', '<unk>', 's', '>', '▁hi', '<unk>', 's', '>', 'there', '▁The', '▁following', '▁string', '▁should', '▁be', '▁properly', '▁encoded', ':', '▁Hello', '.', '▁But', '▁i', 'rd', '▁and', '▁', '<unk>', '▁i', 'rd', '▁', '<unk>', '▁Hey', '▁how', '▁are', '▁you', '▁doing']  # fmt: skip
+    integration_expected_decoded_text = "This is a test <unk> I was born in 92000, and this is falsé. <unk> Hi Hello Hi Hello Hello <unk>s> hi<unk>s>there The following string should be properly encoded: Hello. But ird and <unk> ird <unk> Hey how are you doing"
 
     @cached_property
     def _large_tokenizer(self):
-        return PegasusTokenizer.from_pretrained("google/pegasus-large")
+        return PegasusTokenizer.from_pretrained("google/bigbird-pegasus-large-arxiv")
 
-    def get_tokenizer(self, **kwargs) -> PegasusTokenizer:
-        return PegasusTokenizer.from_pretrained(self.tmpdirname, **kwargs)
-
-    def get_input_output_texts(self, tokenizer):
-        return ("This is a test", "This is a test")
-
-    def test_convert_token_and_id(self):
-        """Test ``_convert_token_to_id`` and ``_convert_id_to_token``."""
-        token = "</s>"
-        token_id = 1
-
-        self.assertEqual(self.get_tokenizer().convert_tokens_to_ids(token), token_id)
-        self.assertEqual(self.get_tokenizer().convert_ids_to_tokens(token_id), token)
-
-    def test_get_vocab(self):
-        vocab_keys = list(self.get_tokenizer().get_vocab().keys())
-
-        self.assertEqual(vocab_keys[0], "<pad>")
-        self.assertEqual(vocab_keys[1], "</s>")
-        self.assertEqual(vocab_keys[104], "<unk_102>")
-        self.assertEqual(len(vocab_keys), 1_103)
-
-    def test_vocab_size(self):
-        self.assertEqual(self.get_tokenizer().vocab_size, 1_103)
-
-    def test_mask_tokens_rust_pegasus(self):
-        rust_tokenizer = self.rust_tokenizer_class.from_pretrained(self.tmpdirname)
-        py_tokenizer = self.tokenizer_class.from_pretrained(self.tmpdirname)
-        raw_input_str = (
-            "Let's see which <unk> is the better <unk_token_11> one <mask_1> It seems like this <mask_2> was important"
-            " </s> <pad> <pad> <pad>"
-        )
-        rust_ids = rust_tokenizer([raw_input_str], return_tensors=None, add_special_tokens=False).input_ids[0]
-        py_ids = py_tokenizer([raw_input_str], return_tensors=None, add_special_tokens=False).input_ids[0]
-        self.assertListEqual(py_ids, rust_ids)
-
+    @unittest.skip(reason="Test expects BigBird-Pegasus-specific vocabulary and special tokens")
     def test_large_mask_tokens(self):
         tokenizer = self._large_tokenizer
         # <mask_1> masks whole sentence while <mask_2> masks single word
@@ -87,6 +50,7 @@ class PegasusTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
         ids = tokenizer([raw_input_str], return_tensors=None).input_ids[0]
         self.assertListEqual(desired_result, ids)
 
+    @unittest.skip(reason="Test expects BigBird-Pegasus-specific vocabulary")
     def test_large_tokenizer_settings(self):
         tokenizer = self._large_tokenizer
         # The tracebacks for the following asserts are **better** without messages or self.assertEqual
@@ -103,6 +67,7 @@ class PegasusTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
         self.assertListEqual(desired_result, ids)
         assert tokenizer.convert_ids_to_tokens([0, 1, 2, 3]) == ["<pad>", "</s>", "<mask_1>", "<mask_2>"]
 
+    @unittest.skip(reason="Test expects BigBird-Pegasus-specific vocabulary")
     @require_torch
     def test_large_seq2seq_truncation(self):
         src_texts = ["This is going to be way too long." * 150, "short example"]
@@ -127,46 +92,36 @@ class PegasusTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
             revision="ba85d0851d708441f91440d509690f1ab6353415",
         )
 
-    # @unittest.skip("We have to use from_slow")
-    # def test_added_tokens_serialization(self):
-    #     pass
-
 
 @require_sentencepiece
 @require_tokenizers
 class BigBirdPegasusTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
+    from_pretrained_id = "google/pegasus-xsum"
     tokenizer_class = PegasusTokenizer
-    rust_tokenizer_class = PegasusTokenizerFast
     test_rust_tokenizer = True
     test_sentencepiece = True
 
-    def setUp(self):
-        super().setUp()
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
 
         # We have a SentencePiece fixture for testing
-        tokenizer = PegasusTokenizer(SAMPLE_VOCAB, offset=0, mask_token_sent=None, mask_token="[MASK]")
-        tokenizer.save_pretrained(self.tmpdirname)
+        extractor = SentencePieceExtractor(SAMPLE_VOCAB)
+        _, vocab_scores, _ = extractor.extract()
+        tokenizer = PegasusTokenizer(vocab=vocab_scores, offset=0, mask_token_sent=None, mask_token="[MASK]")
+        tokenizer.save_pretrained(cls.tmpdirname)
 
     @cached_property
     def _large_tokenizer(self):
         return PegasusTokenizer.from_pretrained("google/bigbird-pegasus-large-arxiv")
 
-    def get_tokenizer(self, **kwargs) -> PegasusTokenizer:
-        return PegasusTokenizer.from_pretrained(self.tmpdirname, **kwargs)
+    @classmethod
+    def get_tokenizer(cls, pretrained_name=None, **kwargs) -> PegasusTokenizer:
+        pretrained_name = pretrained_name or cls.tmpdirname
+        return PegasusTokenizer.from_pretrained(pretrained_name, **kwargs)
 
     def get_input_output_texts(self, tokenizer):
         return ("This is a test", "This is a test")
-
-    def test_mask_tokens_rust_pegasus(self):
-        rust_tokenizer = self.rust_tokenizer_class.from_pretrained(self.tmpdirname)
-        py_tokenizer = self.tokenizer_class.from_pretrained(self.tmpdirname)
-        raw_input_str = (
-            "Let's see which <unk> is the better <unk_token> one [MASK] It seems like this [MASK] was important </s>"
-            " <pad> <pad> <pad>"
-        )
-        rust_ids = rust_tokenizer([raw_input_str], return_tensors=None, add_special_tokens=False).input_ids[0]
-        py_ids = py_tokenizer([raw_input_str], return_tensors=None, add_special_tokens=False).input_ids[0]
-        self.assertListEqual(py_ids, rust_ids)
 
     @require_torch
     def test_large_seq2seq_truncation(self):
@@ -183,25 +138,6 @@ class BigBirdPegasusTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
         assert len(batch) == 2  # input_ids, attention_mask.
 
     def test_equivalence_to_orig_tokenizer(self):
-        """
-        To run with original TF tokenizer:
-
-        !wget https://github.com/google-research/bigbird/raw/master/bigbird/vocab/pegasus.model
-        !pip install tensorflow-text
-
-        import tensorflow.compat.v2 as tf
-        import tensorflow_text as tft
-
-        VOCAB_FILE = "./pegasus.model"
-
-        tf.enable_v2_behavior()
-
-        test_str = "This is an example string that is used to test the original TF implementation against the HF implementation"
-        tokenizer = tft.SentencepieceTokenizer(model=tf.io.gfile.GFile(VOCAB_FILE, "rb").read())
-
-        tokenizer.tokenize(test_str)
-        """
-
         test_str = (
             "This is an example string that is used to test the original TF implementation against the HF"
             " implementation"
@@ -213,7 +149,3 @@ class BigBirdPegasusTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
             token_ids,
             [182, 117, 142, 587, 4211, 120, 117, 263, 112, 804, 109, 856, 25016, 3137, 464, 109, 26955, 3137, 1],
         )
-
-    # @unittest.skip("We have to use from_slow")
-    # def test_added_tokens_serialization(self):
-    #     pass

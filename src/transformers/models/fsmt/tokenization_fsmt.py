@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2019 The Open AI Team Authors and The HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,14 +13,12 @@
 # limitations under the License.
 """Tokenization classes for FSMT."""
 
-
 import json
 import os
 import re
 import unicodedata
-from typing import Dict, List, Optional, Tuple
 
-from ...tokenization_utils import PreTrainedTokenizer
+from ...tokenization_python import PreTrainedTokenizer
 from ...utils import logging
 
 
@@ -31,26 +28,6 @@ VOCAB_FILES_NAMES = {
     "src_vocab_file": "vocab-src.json",
     "tgt_vocab_file": "vocab-tgt.json",
     "merges_file": "merges.txt",
-}
-
-PRETRAINED_VOCAB_FILES_MAP = {
-    "src_vocab_file": {
-        "stas/tiny-wmt19-en-de": "https://huggingface.co/stas/tiny-wmt19-en-de/resolve/main/vocab-src.json"
-    },
-    "tgt_vocab_file": {
-        "stas/tiny-wmt19-en-de": "https://huggingface.co/stas/tiny-wmt19-en-de/resolve/main/vocab-tgt.json"
-    },
-    "merges_file": {"stas/tiny-wmt19-en-de": "https://huggingface.co/stas/tiny-wmt19-en-de/resolve/main/merges.txt"},
-}
-
-PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {"stas/tiny-wmt19-en-de": 1024}
-PRETRAINED_INIT_CONFIGURATION = {
-    "stas/tiny-wmt19-en-de": {
-        "langs": ["en", "de"],
-        "model_max_length": 1024,
-        "special_tokens_map_file": None,
-        "full_tokenizer_file": None,
-    }
 }
 
 
@@ -179,9 +156,6 @@ class FSMTTokenizer(PreTrainedTokenizer):
     """
 
     vocab_files_names = VOCAB_FILES_NAMES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
-    pretrained_init_configuration = PRETRAINED_INIT_CONFIGURATION
-    max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
     model_input_names = ["input_ids", "attention_mask"]
 
     def __init__(
@@ -224,7 +198,7 @@ class FSMTTokenizer(PreTrainedTokenizer):
             raise ValueError(
                 f"arg `langs` needs to be a list of 2 langs, e.g. ['en', 'ru'], but got {langs}. "
                 "Usually that means that tokenizer can't find a mapping for the given model path "
-                "in PRETRAINED_VOCAB_FILES_MAP, and other maps of this tokenizer."
+                "in  and other maps of this tokenizer."
             )
 
         with open(src_vocab_file, encoding="utf-8") as src_vocab_handle:
@@ -251,7 +225,7 @@ class FSMTTokenizer(PreTrainedTokenizer):
         )
 
     # hack override
-    def get_vocab(self) -> Dict[str, int]:
+    def get_vocab(self) -> dict[str, int]:
         return self.get_src_vocab()
 
     # hack override
@@ -401,8 +375,8 @@ class FSMTTokenizer(PreTrainedTokenizer):
         return text
 
     def build_inputs_with_special_tokens(
-        self, token_ids_0: List[int], token_ids_1: Optional[List[int]] = None
-    ) -> List[int]:
+        self, token_ids_0: list[int], token_ids_1: list[int] | None = None
+    ) -> list[int]:
         """
         Build model inputs from a sequence or a pair of sequence for sequence classification tasks by concatenating and
         adding special tokens. A FAIRSEQ Transformer sequence has the following format:
@@ -427,8 +401,8 @@ class FSMTTokenizer(PreTrainedTokenizer):
         return token_ids_0 + sep + token_ids_1 + sep
 
     def get_special_tokens_mask(
-        self, token_ids_0: List[int], token_ids_1: Optional[List[int]] = None, already_has_special_tokens: bool = False
-    ) -> List[int]:
+        self, token_ids_0: list[int], token_ids_1: list[int] | None = None, already_has_special_tokens: bool = False
+    ) -> list[int]:
         """
         Retrieve sequence ids from a token list that has no special tokens added. This method is called when adding
         special tokens using the tokenizer `prepare_for_model` method.
@@ -454,40 +428,7 @@ class FSMTTokenizer(PreTrainedTokenizer):
             return ([0] * len(token_ids_0)) + [1] + ([0] * len(token_ids_1)) + [1]
         return ([0] * len(token_ids_0)) + [1]
 
-    def create_token_type_ids_from_sequences(
-        self, token_ids_0: List[int], token_ids_1: Optional[List[int]] = None
-    ) -> List[int]:
-        """
-        Create a mask from the two sequences passed to be used in a sequence-pair classification task. A FAIRSEQ
-        Transformer sequence pair mask has the following format:
-
-        ```
-        0 0 0 0 0 0 0 0 0 0 0 1 1 1 1 1 1 1 1 1
-        | first sequence    | second sequence |
-        ```
-
-        If `token_ids_1` is `None`, this method only returns the first portion of the mask (0s).
-
-        Args:
-            token_ids_0 (`List[int]`):
-                List of IDs.
-            token_ids_1 (`List[int]`, *optional*):
-                Optional second list of IDs for sequence pairs.
-
-        Returns:
-            `List[int]`: List of [token type IDs](../glossary#token-type-ids) according to the given sequence(s).
-
-        Creates a mask from the two sequences passed to be used in a sequence-pair classification task. An
-        FAIRSEQ_TRANSFORMER sequence pair mask has the following format:
-        """
-        sep = [self.sep_token_id]
-
-        # no bos used in fairseq
-        if token_ids_1 is None:
-            return len(token_ids_0 + sep) * [0]
-        return len(token_ids_0 + sep) * [0] + len(token_ids_1 + sep) * [1]
-
-    def save_vocabulary(self, save_directory: str, filename_prefix: Optional[str] = None) -> Tuple[str]:
+    def save_vocabulary(self, save_directory: str, filename_prefix: str | None = None) -> tuple[str]:
         if not os.path.isdir(save_directory):
             logger.error(f"Vocabulary path ({save_directory}) should be a directory")
             return
@@ -540,3 +481,6 @@ class FSMTTokenizer(PreTrainedTokenizer):
             )
 
         self.sm = sacremoses
+
+
+__all__ = ["FSMTTokenizer"]

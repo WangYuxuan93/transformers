@@ -17,10 +17,6 @@ rendered properly in your Markdown viewer.
 
 Questo documento sarà presto completato con informazioni su come effetture l'inferenza su una singola GPU. Nel frattempo è possibile consultare [la guida per l'addestramento su una singola GPU](perf_train_gpu_one) e [la guida per l'inferenza su CPU](perf_infer_cpu).
 
-## `BetterTransformer` per l'inferenza più veloce
-
-Abbiamo recentemente integrato `BetterTransformer` per velocizzare l'inferenza su GPU per modelli di testo, immagini e audio. Per maggiori dettagli, consultare la documentazione su questa integrazione [qui](https://huggingface.co/docs/optimum/bettertransformer/overview).
-
 ## Integrazione di `bitsandbytes` per Int8 mixed-precision matrix decomposition
 
 <Tip>
@@ -29,13 +25,13 @@ Nota che questa funzione può essere utilizzata anche nelle configurazioni multi
 
 </Tip>
 
-Dal paper [`LLM.int8() : 8-bit Matrix Multiplication for Transformers at Scale`](https://arxiv.org/abs/2208.07339), noi supportiamo l'integrazione di Hugging Face per tutti i modelli dell'Hub con poche righe di codice.
+Dal paper [`LLM.int8() : 8-bit Matrix Multiplication for Transformers at Scale`](https://huggingface.co/papers/2208.07339), noi supportiamo l'integrazione di Hugging Face per tutti i modelli dell'Hub con poche righe di codice.
 Il metodo `nn.Linear` riduce la dimensione di 2 per i pesi `float16` e `bfloat16` e di 4 per i pesi `float32`, con un impatto quasi nullo sulla qualità, operando sugli outlier in half-precision.
 
 ![HFxbitsandbytes.png](https://cdn-uploads.huggingface.co/production/uploads/1659861207959-62441d1d9fdefb55a0b7d12c.png)
 
 Il metodo Int8 mixed-precision matrix decomposition funziona separando la moltiplicazione tra matrici in due flussi: (1) una matrice di flusso di outlier di caratteristiche sistematiche moltiplicata in fp16, (2) in flusso regolare di moltiplicazione di matrici int8 (99,9%). Con questo metodo, è possibile effettutare inferenza int8 per modelli molto grandi senza degrado predittivo.
-Per maggiori dettagli sul metodo, consultare il [paper](https://arxiv.org/abs/2208.07339) o il nostro [blogpost sull'integrazione](https://huggingface.co/blog/hf-bitsandbytes-integration).
+Per maggiori dettagli sul metodo, consultare il [paper](https://huggingface.co/papers/2208.07339) o il nostro [blogpost sull'integrazione](https://huggingface.co/blog/hf-bitsandbytes-integration).
 
 ![MixedInt8.gif](https://cdn-uploads.huggingface.co/production/uploads/1660567469965-62441d1d9fdefb55a0b7d12c.gif)
 
@@ -55,10 +51,10 @@ Di seguito sono riportate alcune note per aiutarvi a utilizzare questo modulo, o
 Dopo aver installato le librerie necessarie, per caricare il tuo modello mixed 8-bit è il seguente:
 
 ```py
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 
 model_name = "bigscience/bloom-2b5"
-model_8bit = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", load_in_8bit=True)
+model_8bit = AutoModelForCausalLM.from_pretrained(model_name, quantization_config=BitsAndBytesConfig(load_in_8bit=True))
 ```
 
 Per la generazione di testo, si consiglia di:
@@ -69,11 +65,11 @@ Per la generazione di testo, si consiglia di:
 Ecco un semplice esempio:
 
 ```py
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 model_name = "bigscience/bloom-2b5"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
-model_8bit = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", load_in_8bit=True)
+model_8bit = AutoModelForCausalLM.from_pretrained(model_name, quantization_config=BitsAndBytesConfig(load_in_8bit=True))
 
 text = "Hello, my llama is cute"
 inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
@@ -87,7 +83,7 @@ outputs = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
 Usare il seguente modo caricare il modello mixed-8bit su più GPU (stesso comando della configurazione a GPU singola):
 ```py
 model_name = "bigscience/bloom-2b5"
-model_8bit = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto", load_in_8bit=True)
+model_8bit = AutoModelForCausalLM.from_pretrained(model_name, quantization_config=BitsAndBytesConfig(load_in_8bit=True))
 ```
 Puoi controllare la RAM della GPU che si vuole allocare su ogni GPU usando `accelerate`. Utilizzare l'argomento `max_memory` come segue:
 

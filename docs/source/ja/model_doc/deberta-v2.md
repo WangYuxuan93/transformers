@@ -18,7 +18,7 @@ rendered properly in your Markdown viewer.
 
 ## Overview
 
-DeBERTa モデルは、Pengcheng He、Xiaodong Liu、Jianfeng Gao、Weizhu Chen によって [DeBERTa: Decoding-enhanced BERT with Disentangled Attendant](https://arxiv.org/abs/2006.03654) で提案されました。Google のモデルに基づいています。
+DeBERTa モデルは、Pengcheng He、Xiaodong Liu、Jianfeng Gao、Weizhu Chen によって [DeBERTa: Decoding-enhanced BERT with Disentangled Attendant](https://huggingface.co/papers/2006.03654) で提案されました。Google のモデルに基づいています。
 2018年にリリースされたBERTモデルと2019年にリリースされたFacebookのRoBERTaモデル。
 
 これは、もつれた注意を解きほぐし、使用されるデータの半分を使用して強化されたマスク デコーダ トレーニングを備えた RoBERTa に基づいて構築されています。
@@ -38,8 +38,7 @@ DeBERTa モデルは、Pengcheng He、Xiaodong Liu、Jianfeng Gao、Weizhu Chen 
 (90.2% 対 91.1%)、SQuAD v2.0 では +2.3% (88.4% 対 90.7%)、RACE では +3.6% (83.2% 対 86.8%) でした。 DeBERTa コードと
 事前トレーニングされたモデルは https://github.com/microsoft/DeBERTa で公開されます。*
 
-次の情報は、[元の実装で直接表示されます]
-リポジトリ](https://github.com/microsoft/DeBERTa)。 DeBERTa v2 は、DeBERTa モデルの 2 番目のバージョンです。それには以下が含まれます
+次の情報は、[元の実装で直接表示されます リポジトリ](https://github.com/microsoft/DeBERTa)。 DeBERTa v2 は、DeBERTa モデルの 2 番目のバージョンです。それには以下が含まれます
 SuperGLUE 単一モデルの提出に使用された 1.5B モデルは、人間のベースライン 89.8 に対して 89.9 を達成しました。あなたはできる
 この投稿に関する詳細については、著者のドキュメントを参照してください。
 [ブログ](https://www.microsoft.com/en-us/research/blog/microsoft-deberta-surpasses-human-performance-on-the-superglue-benchmark/)
@@ -62,7 +61,7 @@ v2 の新機能:
 [kamalkraj](https://huggingface.co/kamalkraj) による投稿。元のコードは [こちら](https://github.com/microsoft/DeBERTa) にあります。
 
 ## Resources
-- [テキスト分類タスクガイド](../tasks/sequence_classification)
+- [テキスト分類タスクガイド(英語版)](../../en/tasks/sequence_classification)
 - [トークン分類タスクガイド](../tasks/token_classification)
 - [質問回答タスク ガイド](../tasks/question_answering)
 - [マスク言語モデリング タスク ガイド](../tasks/masked_language_modeling)
@@ -75,19 +74,13 @@ v2 の新機能:
 ## DebertaV2Tokenizer
 
 [[autodoc]] DebertaV2Tokenizer
-    - build_inputs_with_special_tokens
     - get_special_tokens_mask
-    - create_token_type_ids_from_sequences
     - save_vocabulary
 
 ## DebertaV2TokenizerFast
 
 [[autodoc]] DebertaV2TokenizerFast
-    - build_inputs_with_special_tokens
-    - create_token_type_ids_from_sequences
 
-<frameworkcontent>
-<pt>
 
 ## DebertaV2Model
 
@@ -124,45 +117,5 @@ v2 の新機能:
 [[autodoc]] DebertaV2ForMultipleChoice
     - forward
 
-</pt>
-<tf>
-
-## TFDebertaV2Model
-
-[[autodoc]] TFDebertaV2Model
-    - call
-
-## TFDebertaV2PreTrainedModel
-
-[[autodoc]] TFDebertaV2PreTrainedModel
-    - call
-
-## TFDebertaV2ForMaskedLM
-
-[[autodoc]] TFDebertaV2ForMaskedLM
-    - call
-
-## TFDebertaV2ForSequenceClassification
-
-[[autodoc]] TFDebertaV2ForSequenceClassification
-    - call
-
-## TFDebertaV2ForTokenClassification
-
-[[autodoc]] TFDebertaV2ForTokenClassification
-    - call
-
-## TFDebertaV2ForQuestionAnswering
-
-[[autodoc]] TFDebertaV2ForQuestionAnswering
-    - call
-
-## TFDebertaV2ForMultipleChoice
-
-[[autodoc]] TFDebertaV2ForMultipleChoice
-    - call
-
-</tf>
-</frameworkcontent>
 
 

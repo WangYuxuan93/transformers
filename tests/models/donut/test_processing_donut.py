@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2022 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,13 +17,12 @@ import unittest
 
 from transformers import DonutProcessor
 
+from ...test_processing_common import ProcessorTesterMixin
 
-DONUT_PRETRAINED_MODEL_NAME = "naver-clova-ix/donut-base"
 
-
-class DonutProcessorTest(unittest.TestCase):
-    def setUp(self):
-        self.processor = DonutProcessor.from_pretrained(DONUT_PRETRAINED_MODEL_NAME)
+class DonutProcessorTest(ProcessorTesterMixin, unittest.TestCase):
+    model_id = "naver-clova-ix/donut-base"
+    processor_class = DonutProcessor
 
     def test_token2json(self):
         expected_json = {
@@ -35,6 +33,8 @@ class DonutProcessorTest(unittest.TestCase):
             "zip": "30301",
             "phone": "123-4567",
             "nicknames": [{"nickname": "Johnny"}, {"nickname": "JD"}],
+            "multiline": "text\nwith\nnewlines",
+            "empty": "",
         }
 
         sequence = (
@@ -42,7 +42,10 @@ class DonutProcessorTest(unittest.TestCase):
             "<s_state>GA</s_state><s_zip>30301</s_zip><s_phone>123-4567</s_phone>"
             "<s_nicknames><s_nickname>Johnny</s_nickname>"
             "<sep/><s_nickname>JD</s_nickname></s_nicknames>"
+            "<s_multiline>text\nwith\nnewlines</s_multiline>"
+            "<s_empty></s_empty>"
         )
-        actual_json = self.processor.token2json(sequence)
+        processor = self.get_processor()
+        actual_json = processor.token2json(sequence)
 
         self.assertDictEqual(actual_json, expected_json)

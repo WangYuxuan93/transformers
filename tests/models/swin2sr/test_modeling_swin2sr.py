@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2022 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,15 +11,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch Swin2SR model. """
+"""Testing suite for the PyTorch Swin2SR model."""
+
 import unittest
 
 from transformers import Swin2SRConfig
-from transformers.testing_utils import require_torch, require_vision, slow, torch_device
+from transformers.testing_utils import Expectations, require_torch, require_vision, slow, torch_device
 from transformers.utils import is_torch_available, is_vision_available
 
 from ...test_configuration_common import ConfigTester
-from ...test_modeling_common import ModelTesterMixin, _config_zero_init, floats_tensor, ids_tensor
+from ...test_modeling_common import ModelTesterMixin, floats_tensor, ids_tensor
 from ...test_pipeline_mixin import PipelineTesterMixin
 
 
@@ -29,7 +29,6 @@ if is_torch_available():
     from torch import nn
 
     from transformers import Swin2SRForImageSuperResolution, Swin2SRModel
-    from transformers.models.swin2sr.modeling_swin2sr import SWIN2SR_PRETRAINED_MODEL_ARCHIVE_LIST
 
 if is_vision_available():
     from PIL import Image
@@ -162,28 +161,25 @@ class Swin2SRModelTester:
 class Swin2SRModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
     all_model_classes = (Swin2SRModel, Swin2SRForImageSuperResolution) if is_torch_available() else ()
     pipeline_model_mapping = (
-        {"feature-extraction": Swin2SRModel, "image-to-image": Swin2SRForImageSuperResolution}
+        {"image-feature-extraction": Swin2SRModel, "image-to-image": Swin2SRForImageSuperResolution}
         if is_torch_available()
         else {}
     )
 
-    fx_compatible = False
-    test_pruning = False
     test_resize_embeddings = False
-    test_head_masking = False
-    test_torchscript = False
 
     def setUp(self):
         self.model_tester = Swin2SRModelTester(self)
-        self.config_tester = ConfigTester(self, config_class=Swin2SRConfig, embed_dim=37)
+        self.config_tester = ConfigTester(
+            self,
+            config_class=Swin2SRConfig,
+            embed_dim=37,
+            has_text_modality=False,
+            common_properties=["image_size", "patch_size", "num_channels"],
+        )
 
     def test_config(self):
-        self.config_tester.create_and_test_config_to_json_string()
-        self.config_tester.create_and_test_config_to_json_file()
-        self.config_tester.create_and_test_config_from_and_save_pretrained()
-        self.config_tester.create_and_test_config_with_num_labels()
-        self.config_tester.check_config_can_be_init_without_params()
-        self.config_tester.check_config_arguments_init()
+        self.config_tester.run_common_tests()
 
     def test_model(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
@@ -202,27 +198,23 @@ class Swin2SRModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase)
     def test_inputs_embeds(self):
         pass
 
-    @unittest.skip(reason="Swin2SR does not support training yet")
+    @unittest.skip(reason="This module does not support standalone training")
     def test_training(self):
         pass
 
-    @unittest.skip(reason="Swin2SR does not support training yet")
+    @unittest.skip(reason="This module does not support standalone training")
     def test_training_gradient_checkpointing(self):
         pass
 
-    @unittest.skip(
-        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
-    )
-    def test_training_gradient_checkpointing_use_reentrant(self):
-        pass
-
-    @unittest.skip(
-        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
-    )
+    @unittest.skip(reason="This module does not support standalone training")
     def test_training_gradient_checkpointing_use_reentrant_false(self):
         pass
 
-    def test_model_common_attributes(self):
+    @unittest.skip(reason="This module does not support standalone training")
+    def test_training_gradient_checkpointing_use_reentrant_true(self):
+        pass
+
+    def test_model_get_set_embeddings(self):
         config, _ = self.model_tester.prepare_config_and_inputs_for_common()
 
         for model_class in self.all_model_classes:
@@ -233,26 +225,9 @@ class Swin2SRModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase)
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in SWIN2SR_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = Swin2SRModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
-
-    # overwriting because of `logit_scale` parameter
-    def test_initialization(self):
-        config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
-
-        configs_no_init = _config_zero_init(config)
-        for model_class in self.all_model_classes:
-            model = model_class(config=configs_no_init)
-            for name, param in model.named_parameters():
-                if "logit_scale" in name:
-                    continue
-                if param.requires_grad:
-                    self.assertIn(
-                        ((param.data.mean() * 1e9).round() / 1e9).item(),
-                        [0.0, 1.0],
-                        msg=f"Parameter {name} of model {model_class} seems not properly initialized",
-                    )
+        model_name = "caidas/swin2SR-classical-sr-x2-64"
+        model = Swin2SRModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
     def test_attention_outputs(self):
         config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
@@ -262,7 +237,8 @@ class Swin2SRModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase)
             inputs_dict["output_attentions"] = True
             inputs_dict["output_hidden_states"] = False
             config.return_dict = True
-            model = model_class(config)
+            model = model_class._from_config(config, attn_implementation="eager")
+            config = model.config
             model.to(torch_device)
             model.eval()
             with torch.no_grad():
@@ -331,4 +307,30 @@ class Swin2SRModelIntegrationTest(unittest.TestCase):
         expected_slice = torch.tensor(
             [[0.5458, 0.5546, 0.5638], [0.5526, 0.5565, 0.5651], [0.5396, 0.5426, 0.5621]]
         ).to(torch_device)
-        self.assertTrue(torch.allclose(outputs.reconstruction[0, 0, :3, :3], expected_slice, atol=1e-4))
+        torch.testing.assert_close(outputs.reconstruction[0, 0, :3, :3], expected_slice, rtol=1e-4, atol=1e-4)
+
+    def test_inference_fp16(self):
+        processor = Swin2SRImageProcessor()
+        model = Swin2SRForImageSuperResolution.from_pretrained(
+            "caidas/swin2SR-classical-sr-x2-64", dtype=torch.float16
+        ).to(torch_device)
+
+        image = Image.open("./tests/fixtures/tests_samples/COCO/000000039769.png")
+        inputs = processor(images=image, return_tensors="pt").to(model.dtype).to(torch_device)
+
+        # forward pass
+        with torch.no_grad():
+            outputs = model(**inputs)
+
+        # verify the logits
+        expected_shape = torch.Size([1, 3, 976, 1296])
+        self.assertEqual(outputs.reconstruction.shape, expected_shape)
+
+        expectations = Expectations(
+            {
+                (None, None): [[0.5454, 0.5542, 0.5640], [0.5518, 0.5562, 0.5649], [0.5391, 0.5425, 0.5620]],
+                ("cuda", 8): [[0.5454, 0.5547, 0.5640], [0.5522, 0.5562, 0.5649], [0.5391, 0.5425, 0.5620]],
+            }
+        )
+        expected_slice = torch.tensor(expectations.get_expectation()).to(torch_device, dtype=model.dtype)
+        torch.testing.assert_close(outputs.reconstruction[0, 0, :3, :3], expected_slice, rtol=2e-4, atol=2e-4)

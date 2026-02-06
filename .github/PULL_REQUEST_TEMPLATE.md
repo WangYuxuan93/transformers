@@ -17,7 +17,7 @@ Fixes # (issue)
 
 ## Before submitting
 - [ ] This PR fixes a typo or improves the docs (you can dismiss the other checks if that's the case).
-- [ ] Did you read the [contributor guideline](https://github.com/huggingface/transformers/blob/main/CONTRIBUTING.md#start-contributing-pull-requests),
+- [ ] Did you read the [contributor guideline](https://github.com/huggingface/transformers/blob/main/CONTRIBUTING.md#create-a-pull-request),
       Pull Request section?
 - [ ] Was this discussed/approved via a Github issue or the [forum](https://discuss.huggingface.co/)? Please add a link
       to it if that's the case.
@@ -39,40 +39,40 @@ members/contributors who may be interested in your PR.
 
 Models:
 
-- text models: @ArthurZucker and @younesbelkada
-- vision models: @amyeroberts
-- speech models: @sanchit-gandhi
+- text models: @ArthurZucker @Cyrilvallez
+- vision models: @yonigozlan @molbap
+- audio models: @eustlb @ebezzam @vasqu
+- multimodal models: @zucchini-nlp
 - graph models: @clefourrier
 
 Library:
 
-- flax: @sanchit-gandhi
-- generate: @gante
-- pipelines: @Narsil
-- tensorflow: @gante and @Rocketknight1
-- tokenizers: @ArthurZucker
-- trainer: @muellerzr and @pacman100
+- generate: @zucchini-nlp (visual-language models) or @gante (all others)
+- continuous batching: @remi-or @ArthurZucker @McPatate
+- pipelines: @Rocketknight1
+- tokenizers: @ArthurZucker and @itazap
+- trainer: @SunMarc
+- attention: @vasqu @ArthurZucker @CyrilVallez
+- model loading (from pretrained, etc): @CyrilVallez
+- distributed: @3outeille @ArthurZucker
+- CIs: @ydshieh
 
 Integrations:
 
-- deepspeed: HF Trainer/Accelerate: @pacman100
 - ray/raytune: @richardliaw, @amogkam
 - Big Model Inference: @SunMarc
-- quantization (bitsandbytes, autogpt): @SunMarc and @younesbelkada
+- quantization: @SunMarc @MekkCyber
+- kernels: @MekkCyber @drbh
+- peft: @BenjaminBossan @githubnemo
 
-Documentation: @stevhliu and @MKhalusova
+Devices/Backends:
 
-HF projects:
+- AMD ROCm: @ivarflakstad
+- Intel XPU: @IlyasMoutawwakil
+- Ascend NPU: @ivarflakstad 
 
-- accelerate: [different repo](https://github.com/huggingface/accelerate)
-- datasets: [different repo](https://github.com/huggingface/datasets)
-- diffusers: [different repo](https://github.com/huggingface/diffusers)
-- rust tokenizers: [different repo](https://github.com/huggingface/tokenizers)
+Documentation: @stevhliu
 
-Maintained examples (not research project or legacy):
-
-- Flax: @sanchit-gandhi
-- PyTorch: See Models above and tag the person corresponding to the modality of the example.
-- TensorFlow: @Rocketknight1
+Research projects are not maintained and should be taken as is.
 
  -->

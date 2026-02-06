@@ -21,16 +21,18 @@ import unittest
 from pathlib import Path
 
 import datasets
-import numpy as np
-from huggingface_hub import HfFolder, Repository, create_repo, delete_repo
-from requests.exceptions import HTTPError
+from huggingface_hub import delete_repo, snapshot_download
+from huggingface_hub.errors import HfHubHTTPError
 
 from transformers import (
+    AutomaticSpeechRecognitionPipeline,
     AutoModelForSequenceClassification,
     AutoTokenizer,
     DistilBertForSequenceClassification,
+    MaskGenerationPipeline,
+    T5ForConditionalGeneration,
     TextClassificationPipeline,
-    TFAutoModelForSequenceClassification,
+    TextGenerationPipeline,
     pipeline,
 )
 from transformers.pipelines import PIPELINE_REGISTRY, get_task
@@ -44,15 +46,13 @@ from transformers.testing_utils import (
     is_pipeline_test,
     is_staging_test,
     nested_simplify,
-    require_tensorflow_probability,
-    require_tf,
     require_torch,
     require_torch_accelerator,
-    require_torch_or_tf,
+    require_torch_multi_accelerator,
     slow,
     torch_device,
 )
-from transformers.utils import direct_transformers_import, is_tf_available, is_torch_available
+from transformers.utils import direct_transformers_import, is_torch_available
 from transformers.utils import logging as transformers_logging
 
 
@@ -101,9 +101,7 @@ class CommonPipelineTest(unittest.TestCase):
             def __getitem__(self, i):
                 return self.data[i]
 
-        text_classifier = pipeline(
-            task="text-classification", model="hf-internal-testing/tiny-random-distilbert", framework="pt"
-        )
+        text_classifier = pipeline(task="text-classification", model="hf-internal-testing/tiny-random-distilbert")
         dataset = MyDataset()
         for output in text_classifier(dataset):
             self.assertEqual(output, {"label": ANY(str), "score": ANY(float)})
@@ -143,7 +141,7 @@ class CommonPipelineTest(unittest.TestCase):
         self.assertIsInstance(text_classifier, MyPipeline)
 
     def test_check_task(self):
-        task = get_task("gpt2")
+        task = get_task("openai-community/gpt2")
         self.assertEqual(task, "text-generation")
 
         with self.assertRaises(RuntimeError):
@@ -172,20 +170,6 @@ class CommonPipelineTest(unittest.TestCase):
             results.append(out)
         self.assertEqual(len(results), 10)
 
-    @require_tf
-    def test_iterator_data_tf(self):
-        def data(n: int):
-            for _ in range(n):
-                yield "This is a test"
-
-        pipe = pipeline(model="hf-internal-testing/tiny-random-distilbert", framework="tf")
-        out = pipe("This is a test")
-        results = []
-        for out in pipe(data(10)):
-            self.assertEqual(nested_simplify(out), {"label": "LABEL_0", "score": 0.504})
-            results.append(out)
-        self.assertEqual(len(results), 10)
-
     @require_torch
     def test_unbatch_attentions_hidden_states(self):
         model = DistilBertForSequenceClassification.from_pretrained(
@@ -199,52 +183,79 @@ class CommonPipelineTest(unittest.TestCase):
         outputs = text_classifier(["This is great !"] * 20, batch_size=32)
         self.assertEqual(len(outputs), 20)
 
+    @require_torch
+    def test_dtype_property(self):
+        import torch
+
+        model_id = "hf-internal-testing/tiny-random-distilbert"
+
+        # If dtype is specified in the pipeline constructor, the property should return that type
+        pipe = pipeline(model=model_id, dtype=torch.float16)
+        self.assertEqual(pipe.dtype, torch.float16)
+
+        # If the underlying model changes dtype, the property should return the new type
+        pipe.model.to(torch.bfloat16)
+        self.assertEqual(pipe.dtype, torch.bfloat16)
+
+        # If dtype is NOT specified in the pipeline constructor, the property should just return
+        # the dtype of the underlying model (default)
+        pipe = pipeline(model=model_id)
+        self.assertEqual(pipe.dtype, torch.float32)
+
+        # If underlying model doesn't have dtype property, simply return None
+        pipe.model = None
+        self.assertIsNone(pipe.dtype)
+
+    @require_torch
+    def test_auto_model_pipeline_registration_from_local_dir(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            snapshot_download("hf-internal-testing/tiny-random-custom-architecture", local_dir=tmp_dir)
+            pipe = pipeline("text-generation", tmp_dir, trust_remote_code=True)
+
+            self.assertIsInstance(pipe, TextGenerationPipeline)  # Assert successful load
+
+    @require_torch
+    def test_pipeline_with_task_parameters_no_side_effects(self):
+        """
+        Regression test: certain pipeline flags, like `task`, modified the model configuration, causing unexpected
+        side-effects
+        """
+        # This checkpoint has task-specific parameters that will modify the behavior of the pipeline
+        model = T5ForConditionalGeneration.from_pretrained("t5-small")
+        self.assertTrue(model.config.num_beams == 1)
+
+        # The task-specific parameters used to cause side-effects on `model.config` -- not anymore
+        pipe = pipeline(model=model, tokenizer=AutoTokenizer.from_pretrained("t5-small"), task="translation_en_to_de")
+        self.assertTrue(model.config.num_beams == 1)
+        self.assertTrue(model.generation_config.num_beams == 1)
+
+        # Under the hood: we now store a generation config in the pipeline. This generation config stores the
+        # task-specific parameters.
+        self.assertTrue(pipe.generation_config.num_beams == 4)
+
+        # We can confirm that the task-specific parameters have an effect. (In this case, the default is `num_beams=1`,
+        # which would crash when `num_return_sequences=4` is passed.)
+        pipe("Hugging Face doesn't sell hugs.", num_return_sequences=4)
+        with self.assertRaises(ValueError):
+            pipe("Hugging Face doesn't sell hugs.", num_return_sequences=4, num_beams=1)
+
 
 @is_pipeline_test
+@require_torch
 class PipelineScikitCompatTest(unittest.TestCase):
-    @require_torch
-    def test_pipeline_predict_pt(self):
+    def test_pipeline_predict(self):
         data = ["This is a test"]
 
-        text_classifier = pipeline(
-            task="text-classification", model="hf-internal-testing/tiny-random-distilbert", framework="pt"
-        )
+        text_classifier = pipeline(task="text-classification", model="hf-internal-testing/tiny-random-distilbert")
 
         expected_output = [{"label": ANY(str), "score": ANY(float)}]
         actual_output = text_classifier.predict(data)
         self.assertEqual(expected_output, actual_output)
 
-    @require_tf
-    def test_pipeline_predict_tf(self):
+    def test_pipeline_transform(self):
         data = ["This is a test"]
 
-        text_classifier = pipeline(
-            task="text-classification", model="hf-internal-testing/tiny-random-distilbert", framework="tf"
-        )
-
-        expected_output = [{"label": ANY(str), "score": ANY(float)}]
-        actual_output = text_classifier.predict(data)
-        self.assertEqual(expected_output, actual_output)
-
-    @require_torch
-    def test_pipeline_transform_pt(self):
-        data = ["This is a test"]
-
-        text_classifier = pipeline(
-            task="text-classification", model="hf-internal-testing/tiny-random-distilbert", framework="pt"
-        )
-
-        expected_output = [{"label": ANY(str), "score": ANY(float)}]
-        actual_output = text_classifier.transform(data)
-        self.assertEqual(expected_output, actual_output)
-
-    @require_tf
-    def test_pipeline_transform_tf(self):
-        data = ["This is a test"]
-
-        text_classifier = pipeline(
-            task="text-classification", model="hf-internal-testing/tiny-random-distilbert", framework="tf"
-        )
+        text_classifier = pipeline(task="text-classification", model="hf-internal-testing/tiny-random-distilbert")
 
         expected_output = [{"label": ANY(str), "score": ANY(float)}]
         actual_output = text_classifier.transform(data)
@@ -369,8 +380,7 @@ class PipelineUtilsTest(unittest.TestCase):
         from transformers.pipelines.pt_utils import PipelineIterator
 
         def dummy_dataset():
-            for i in range(4):
-                yield i
+            yield from range(4)
 
         def add(number, extra=0):
             return number + extra
@@ -419,8 +429,7 @@ class PipelineUtilsTest(unittest.TestCase):
         from transformers.pipelines.pt_utils import PipelineChunkIterator
 
         def preprocess_chunk(n: int):
-            for i in range(n):
-                yield i
+            yield from range(n)
 
         dataset = [2, 3]
 
@@ -496,6 +505,52 @@ class PipelineUtilsTest(unittest.TestCase):
         actual_output = classifier("Test input.")
         self.assertEqual(expected_output, actual_output)
 
+    @require_torch_accelerator
+    def test_pipeline_no_device(self):
+        # Test when no device is passed to pipeline
+        import torch
+
+        from transformers import AutoModelForCausalLM
+
+        tokenizer = AutoTokenizer.from_pretrained("hf-internal-testing/tiny-random-bert")
+        # Case 1: Model is manually moved to device
+        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-bert", dtype=torch.float16).to(
+            torch_device
+        )
+        model_device = model.device
+        pipe = pipeline("text-generation", model=model, tokenizer=tokenizer)
+        self.assertEqual(pipe.model.device, model_device)
+        # Case 2: Model is loaded by accelerate
+        model = AutoModelForCausalLM.from_pretrained(
+            "hf-internal-testing/tiny-random-bert", device_map=torch_device, dtype=torch.float16
+        )
+        model_device = model.device
+        pipe = pipeline("text-generation", model=model, tokenizer=tokenizer)
+        self.assertEqual(pipe.model.device, model_device)
+        # Case 3: device_map is passed to model and device is passed to pipeline
+        model = AutoModelForCausalLM.from_pretrained(
+            "hf-internal-testing/tiny-random-bert", device_map=torch_device, dtype=torch.float16
+        )
+        with self.assertRaises(ValueError):
+            pipe = pipeline("text-generation", model=model, device="cpu", tokenizer=tokenizer)
+
+    @require_torch_multi_accelerator
+    def test_pipeline_device_not_equal_model_device(self):
+        # Test when device ids are different, pipeline should move the model to the passed device id
+        import torch
+
+        from transformers import AutoModelForCausalLM
+
+        tokenizer = AutoTokenizer.from_pretrained("hf-internal-testing/tiny-random-bert")
+        model_device = f"{torch_device}:1"
+        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-bert", dtype=torch.float16).to(
+            model_device
+        )
+        target_device = f"{torch_device}:0"
+        self.assertNotEqual(model_device, target_device)
+        pipe = pipeline("text-generation", model=model, device=target_device, tokenizer=tokenizer)
+        self.assertEqual(pipe.model.device, torch.device(target_device))
+
     @slow
     @require_torch
     def test_load_default_pipelines_pt(self):
@@ -504,34 +559,16 @@ class PipelineUtilsTest(unittest.TestCase):
         from transformers.pipelines import SUPPORTED_TASKS
 
         set_seed_fn = lambda: torch.manual_seed(0)  # noqa: E731
-        for task in SUPPORTED_TASKS.keys():
+        for task in SUPPORTED_TASKS:
             if task == "table-question-answering":
-                # test table in seperate test due to more dependencies
+                # test table in separate test due to more dependencies
                 continue
 
-            self.check_default_pipeline(task, "pt", set_seed_fn, self.check_models_equal_pt)
+            self.check_default_pipeline(task, set_seed_fn, self.check_models_equal_pt)
 
             # clean-up as much as possible GPU memory occupied by PyTorch
             gc.collect()
             backend_empty_cache(torch_device)
-
-    @slow
-    @require_tf
-    def test_load_default_pipelines_tf(self):
-        import tensorflow as tf
-
-        from transformers.pipelines import SUPPORTED_TASKS
-
-        set_seed_fn = lambda: tf.random.set_seed(0)  # noqa: E731
-        for task in SUPPORTED_TASKS.keys():
-            if task == "table-question-answering":
-                # test table in seperate test due to more dependencies
-                continue
-
-            self.check_default_pipeline(task, "tf", set_seed_fn, self.check_models_equal_tf)
-
-            # clean-up as much as possible GPU memory occupied by PyTorch
-            gc.collect()
 
     @slow
     @require_torch
@@ -539,7 +576,7 @@ class PipelineUtilsTest(unittest.TestCase):
         import torch
 
         set_seed_fn = lambda: torch.manual_seed(0)  # noqa: E731
-        self.check_default_pipeline("table-question-answering", "pt", set_seed_fn, self.check_models_equal_pt)
+        self.check_default_pipeline("table-question-answering", set_seed_fn, self.check_models_equal_pt)
 
         # clean-up as much as possible GPU memory occupied by PyTorch
         gc.collect()
@@ -560,29 +597,44 @@ class PipelineUtilsTest(unittest.TestCase):
         _ = pipe("Hello")
 
     @slow
-    @require_tf
-    @require_tensorflow_probability
-    def test_load_default_pipelines_tf_table_qa(self):
-        import tensorflow as tf
+    @require_torch
+    def test_bc_torch_device(self):
+        import torch
 
-        set_seed_fn = lambda: tf.random.set_seed(0)  # noqa: E731
-        self.check_default_pipeline("table-question-answering", "tf", set_seed_fn, self.check_models_equal_tf)
+        from transformers.pipelines import get_supported_tasks
 
-        # clean-up as much as possible GPU memory occupied by PyTorch
-        gc.collect()
+        for task in get_supported_tasks():
+            # Check that it works for all dtypes
+            for dtype in ["float16", "bfloat16", "float32", "auto", torch.float16, torch.bfloat16, torch.float32]:
+                pipe_torch_dtype = pipeline(task, torch_dtype=dtype)
+                pipe_dtype = pipeline(task, dtype=dtype)
+                # Make sure all parameters have the same dtype
+                for (k1, v1), (k2, v2) in zip(
+                    pipe_torch_dtype.model.named_parameters(), pipe_dtype.model.named_parameters()
+                ):
+                    self.assertEqual(k1, k2)
+                    self.assertEqual(v1.dtype, v2.dtype)
 
-    def check_default_pipeline(self, task, framework, set_seed_fn, check_models_equal_fn):
+                pipe_torch_dtype = pipeline(task, model_kwargs={"torch_dtype": dtype})
+                pipe_dtype = pipeline(task, model_kwargs={"dtype": dtype})
+                # Make sure all parameters have the same dtype
+                for (k1, v1), (k2, v2) in zip(
+                    pipe_torch_dtype.model.named_parameters(), pipe_dtype.model.named_parameters()
+                ):
+                    self.assertEqual(k1, k2)
+                    self.assertEqual(v1.dtype, v2.dtype)
+
+    def check_default_pipeline(self, task, set_seed_fn, check_models_equal_fn):
         from transformers.pipelines import SUPPORTED_TASKS, pipeline
 
         task_dict = SUPPORTED_TASKS[task]
         # test to compare pipeline to manually loading the respective model
         model = None
-        relevant_auto_classes = task_dict[framework]
+        relevant_auto_classes = task_dict["pt"]
 
         if len(relevant_auto_classes) == 0:
             # task has no default
-            logger.debug(f"{task} in {framework} has no default")
-            return
+            self.skipTest(f"{task} in pytorch has no default")
 
         # by default use first class
         auto_model_cls = relevant_auto_classes[0]
@@ -593,15 +645,15 @@ class PipelineUtilsTest(unittest.TestCase):
             model_ids = []
             revisions = []
             tasks = []
-            for translation_pair in task_dict["default"].keys():
-                model_id, revision = task_dict["default"][translation_pair]["model"][framework]
+            for translation_pair in task_dict["default"]:
+                model_id, revision = task_dict["default"][translation_pair]["model"]
 
                 model_ids.append(model_id)
                 revisions.append(revision)
                 tasks.append(task + f"_{'_to_'.join(translation_pair)}")
         else:
             # normal case - non-translation pipeline
-            model_id, revision = task_dict["default"]["model"][framework]
+            model_id, revision = task_dict["default"]["model"]
 
             model_ids = [model_id]
             revisions = [revision]
@@ -621,26 +673,16 @@ class PipelineUtilsTest(unittest.TestCase):
 
             # load default pipeline
             set_seed_fn()
-            default_pipeline = pipeline(task, framework=framework)
+            default_pipeline = pipeline(task)
 
             # compare pipeline model with default model
             models_are_equal = check_models_equal_fn(default_pipeline.model, model)
             self.assertTrue(models_are_equal, f"{task} model doesn't match pipeline.")
 
-            logger.debug(f"{task} in {framework} succeeded with {model_id}.")
-
     def check_models_equal_pt(self, model1, model2):
         models_are_equal = True
         for model1_p, model2_p in zip(model1.parameters(), model2.parameters()):
             if model1_p.data.ne(model2_p.data).sum() > 0:
-                models_are_equal = False
-
-        return models_are_equal
-
-    def check_models_equal_tf(self, model1, model2):
-        models_are_equal = True
-        for model1_p, model2_p in zip(model1.weights, model2.weights):
-            if np.abs(model1_p.numpy() - model2_p.numpy()).sum() > 1e-5:
                 models_are_equal = False
 
         return models_are_equal
@@ -689,29 +731,26 @@ class CustomPipelineTest(unittest.TestCase):
             "custom-text-classification",
             pipeline_class=PairClassificationPipeline,
             pt_model=AutoModelForSequenceClassification if is_torch_available() else None,
-            tf_model=TFAutoModelForSequenceClassification if is_tf_available() else None,
-            default={"pt": "hf-internal-testing/tiny-random-distilbert"},
+            default={"model": ("hf-internal-testing/tiny-random-distilbert", "2ef615d")},
             type="text",
         )
         assert "custom-text-classification" in PIPELINE_REGISTRY.get_supported_tasks()
 
         _, task_def, _ = PIPELINE_REGISTRY.check_task("custom-text-classification")
         self.assertEqual(task_def["pt"], (AutoModelForSequenceClassification,) if is_torch_available() else ())
-        self.assertEqual(task_def["tf"], (TFAutoModelForSequenceClassification,) if is_tf_available() else ())
         self.assertEqual(task_def["type"], "text")
         self.assertEqual(task_def["impl"], PairClassificationPipeline)
-        self.assertEqual(task_def["default"], {"model": {"pt": "hf-internal-testing/tiny-random-distilbert"}})
+        self.assertEqual(task_def["default"], {"model": ("hf-internal-testing/tiny-random-distilbert", "2ef615d")})
 
         # Clean registry for next tests.
         del PIPELINE_REGISTRY.supported_tasks["custom-text-classification"]
 
-    @require_torch_or_tf
+    @require_torch
     def test_dynamic_pipeline(self):
         PIPELINE_REGISTRY.register_pipeline(
             "pair-classification",
             pipeline_class=PairClassificationPipeline,
             pt_model=AutoModelForSequenceClassification if is_torch_available() else None,
-            tf_model=TFAutoModelForSequenceClassification if is_tf_available() else None,
         )
 
         classifier = pipeline("pair-classification", model="hf-internal-testing/tiny-random-bert")
@@ -728,7 +767,6 @@ class CustomPipelineTest(unittest.TestCase):
                     "pair-classification": {
                         "impl": "custom_pipeline.PairClassificationPipeline",
                         "pt": ("AutoModelForSequenceClassification",) if is_torch_available() else (),
-                        "tf": ("TFAutoModelForSequenceClassification",) if is_tf_available() else (),
                     }
                 },
             )
@@ -757,7 +795,7 @@ class CustomPipelineTest(unittest.TestCase):
             [{"label": "LABEL_0", "score": 0.505}],
         )
 
-    @require_torch_or_tf
+    @require_torch
     def test_cached_pipeline_has_minimum_calls_to_head(self):
         # Make sure we have cached the pipeline.
         _ = pipeline("text-classification", model="hf-internal-testing/tiny-random-bert")
@@ -790,6 +828,43 @@ class CustomPipelineTest(unittest.TestCase):
 
         self.assertEqual(self.COUNT, 1)
 
+    @require_torch
+    def test_custom_code_with_string_tokenizer(self):
+        # This test checks for an edge case - tokenizer loading used to fail when using a custom code model
+        # with a separate tokenizer that was passed as a repo name rather than a tokenizer object.
+        # See https://github.com/huggingface/transformers/issues/31669
+        text_generator = pipeline(
+            "text-generation",
+            model="hf-internal-testing/tiny-random-custom-architecture",
+            tokenizer="hf-internal-testing/tiny-random-custom-architecture",
+            trust_remote_code=True,
+        )
+
+        self.assertIsInstance(text_generator, TextGenerationPipeline)  # Assert successful loading
+
+    @require_torch
+    def test_custom_code_with_string_feature_extractor(self):
+        speech_recognizer = pipeline(
+            "automatic-speech-recognition",
+            model="hf-internal-testing/fake-custom-wav2vec2",
+            feature_extractor="hf-internal-testing/fake-custom-wav2vec2",
+            tokenizer="facebook/wav2vec2-base-960h",  # Test workaround - the pipeline requires a tokenizer
+            trust_remote_code=True,
+        )
+
+        self.assertIsInstance(speech_recognizer, AutomaticSpeechRecognitionPipeline)  # Assert successful loading
+
+    @require_torch
+    def test_custom_code_with_string_preprocessor(self):
+        mask_generator = pipeline(
+            "mask-generation",
+            model="hf-internal-testing/fake-custom-sam",
+            processor="hf-internal-testing/fake-custom-sam",
+            trust_remote_code=True,
+        )
+
+        self.assertIsInstance(mask_generator, MaskGenerationPipeline)  # Assert successful loading
+
 
 @require_torch
 @is_staging_test
@@ -799,15 +874,15 @@ class DynamicPipelineTester(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls._token = TOKEN
-        HfFolder.save_token(TOKEN)
 
     @classmethod
     def tearDownClass(cls):
         try:
             delete_repo(token=cls._token, repo_id="test-dynamic-pipeline")
-        except HTTPError:
+        except HfHubHTTPError:
             pass
 
+    @unittest.skip("Broken, TODO @Yih-Dar")
     def test_push_to_hub_dynamic_pipeline(self):
         from transformers import BertConfig, BertForSequenceClassification, BertTokenizer
 
@@ -823,9 +898,6 @@ class DynamicPipelineTester(unittest.TestCase):
         model = BertForSequenceClassification(config).eval()
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            create_repo(f"{USER}/test-dynamic-pipeline", token=self._token)
-            repo = Repository(tmp_dir, clone_from=f"{USER}/test-dynamic-pipeline", token=self._token)
-
             vocab_file = os.path.join(tmp_dir, "vocab.txt")
             with open(vocab_file, "w", encoding="utf-8") as vocab_writer:
                 vocab_writer.write("".join([x + "\n" for x in self.vocab_tokens]))
@@ -837,19 +909,18 @@ class DynamicPipelineTester(unittest.TestCase):
             del PIPELINE_REGISTRY.supported_tasks["pair-classification"]
 
             classifier.save_pretrained(tmp_dir)
-            # checks
+            # checks if the configuration has been added after calling the save_pretrained method
             self.assertDictEqual(
                 classifier.model.config.custom_pipelines,
                 {
                     "pair-classification": {
                         "impl": "custom_pipeline.PairClassificationPipeline",
                         "pt": ("AutoModelForSequenceClassification",),
-                        "tf": (),
                     }
                 },
             )
-
-            repo.push_to_hub()
+            # use push_to_hub method to push the pipeline
+            classifier.push_to_hub(f"{USER}/test-dynamic-pipeline", token=self._token)
 
         # Fails if the user forget to pass along `trust_remote_code=True`
         with self.assertRaises(ValueError):
@@ -859,6 +930,23 @@ class DynamicPipelineTester(unittest.TestCase):
         # Can't make an isinstance check because the new_classifier is from the PairClassificationPipeline class of a
         # dynamic module
         self.assertEqual(new_classifier.__class__.__name__, "PairClassificationPipeline")
+        # check for tag exitence, tag needs to be added when we are calling a custom pipeline from the hub
+        # useful for cases such as finetuning
+        self.assertDictEqual(
+            new_classifier.model.config.custom_pipelines,
+            {
+                "pair-classification": {
+                    "impl": f"{USER}/test-dynamic-pipeline--custom_pipeline.PairClassificationPipeline",
+                    "pt": ("AutoModelForSequenceClassification",),
+                }
+            },
+        )
+        # test if the pipeline still works after the model is finetuned
+        # (we are actually testing if the pipeline still works from the final repo)
+        # this is where the user/repo--module.class is used for
+        new_classifier.model.push_to_hub(repo_name=f"{USER}/test-pipeline-for-a-finetuned-model", token=self._token)
+        del new_classifier  # free up memory
+        new_classifier = pipeline(model=f"{USER}/test-pipeline-for-a-finetuned-model", trust_remote_code=True)
 
         results = classifier("I hate you", second_text="I love you")
         new_results = new_classifier("I hate you", second_text="I love you")

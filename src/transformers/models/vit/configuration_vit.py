@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2021 Google AI and The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,35 +11,24 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" ViT model configuration"""
+"""ViT model configuration"""
 
-from collections import OrderedDict
-from typing import Mapping
-
-from packaging import version
-
-from ...configuration_utils import PretrainedConfig
-from ...onnx import OnnxConfig
+from ...configuration_utils import PreTrainedConfig
 from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
 
-VIT_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "google/vit-base-patch16-224": "https://huggingface.co/vit-base-patch16-224/resolve/main/config.json",
-    # See all ViT models at https://huggingface.co/models?filter=vit
-}
 
-
-class ViTConfig(PretrainedConfig):
+class ViTConfig(PreTrainedConfig):
     r"""
     This is the configuration class to store the configuration of a [`ViTModel`]. It is used to instantiate an ViT
     model according to the specified arguments, defining the model architecture. Instantiating a configuration with the
     defaults will yield a similar configuration to that of the ViT
     [google/vit-base-patch16-224](https://huggingface.co/google/vit-base-patch16-224) architecture.
 
-    Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
-    documentation from [`PretrainedConfig`] for more information.
+    Configuration objects inherit from [`PreTrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PreTrainedConfig`] for more information.
 
 
     Args:
@@ -73,6 +61,10 @@ class ViTConfig(PretrainedConfig):
             Whether to add a bias to the queries, keys and values.
         encoder_stride (`int`, *optional*, defaults to 16):
            Factor to increase the spatial resolution by in the decoder head for masked image modeling.
+        pooler_output_size (`int`, *optional*):
+           Dimensionality of the pooler layer. If None, defaults to `hidden_size`.
+        pooler_act (`str`, *optional*, defaults to `"tanh"`):
+           The activation function to be used by the pooler.
 
     Example:
 
@@ -107,10 +99,10 @@ class ViTConfig(PretrainedConfig):
         num_channels=3,
         qkv_bias=True,
         encoder_stride=16,
+        pooler_output_size=None,
+        pooler_act="tanh",
         **kwargs,
     ):
-        super().__init__(**kwargs)
-
         self.hidden_size = hidden_size
         self.num_hidden_layers = num_hidden_layers
         self.num_attention_heads = num_attention_heads
@@ -125,19 +117,10 @@ class ViTConfig(PretrainedConfig):
         self.num_channels = num_channels
         self.qkv_bias = qkv_bias
         self.encoder_stride = encoder_stride
+        self.pooler_output_size = pooler_output_size if pooler_output_size else hidden_size
+        self.pooler_act = pooler_act
+
+        super().__init__(**kwargs)
 
 
-class ViTOnnxConfig(OnnxConfig):
-    torch_onnx_minimum_version = version.parse("1.11")
-
-    @property
-    def inputs(self) -> Mapping[str, Mapping[int, str]]:
-        return OrderedDict(
-            [
-                ("pixel_values", {0: "batch", 1: "num_channels", 2: "height", 3: "width"}),
-            ]
-        )
-
-    @property
-    def atol_for_validation(self) -> float:
-        return 1e-4
+__all__ = ["ViTConfig"]

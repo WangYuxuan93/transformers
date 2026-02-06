@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023 IBM and HuggingFace Inc. team. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,35 +11,29 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PatchTSMixer model configuration"""
+"""PatchTSMixer model configuration"""
 
-from typing import List, Optional, Union
-
-from ...configuration_utils import PretrainedConfig
+from ...configuration_utils import PreTrainedConfig
 from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
 
-PATCHTSMIXER_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "ibm/patchtsmixer-etth1-pretrain": "https://huggingface.co/ibm/patchtsmixer-etth1-pretrain/resolve/main/config.json",
-}
 
-
-class PatchTSMixerConfig(PretrainedConfig):
+class PatchTSMixerConfig(PreTrainedConfig):
     r"""
     This is the configuration class to store the configuration of a [`PatchTSMixerModel`]. It is used to instantiate a
     PatchTSMixer model according to the specified arguments, defining the model architecture. Instantiating a
     configuration with the defaults will yield a similar configuration to that of the PatchTSMixer
     [ibm/patchtsmixer-etth1-pretrain](https://huggingface.co/ibm/patchtsmixer-etth1-pretrain) architecture.
 
-    Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
-    documentation from [`PretrainedConfig`] for more information.
+    Configuration objects inherit from [`PreTrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PreTrainedConfig`] for more information.
 
     Args:
         context_length (`int`, *optional*, defaults to 32):
             The context/history length for the input sequence.
-        patch_len (`int`, *optional*, defaults to 8):
+        patch_length (`int`, *optional*, defaults to 8):
             The patch length for the input sequence.
         num_input_channels (`int`, *optional*, defaults to 1):
             Number of input variates. For Univariate, set it to 1.
@@ -51,7 +44,7 @@ class PatchTSMixerConfig(PretrainedConfig):
             The number of samples to generate in parallel for probabilistic forecast.
         d_model (`int`, *optional*, defaults to 8):
             Hidden dimension of the model. Recommended to set it as a multiple of patch_length (i.e. 2-5X of
-            patch_len). Larger value indicates more complex model.
+            patch_length). Larger value indicates more complex model.
         expansion_factor (`int`, *optional*, defaults to 2):
             Expansion factor to use inside MLP. Recommended range is 2-5. Larger value indicates more complex model.
         num_layers (`int`, *optional*, defaults to 3):
@@ -155,7 +148,7 @@ class PatchTSMixerConfig(PretrainedConfig):
         self,
         # Time series specific configuration
         context_length: int = 32,
-        patch_len: int = 8,
+        patch_length: int = 8,
         num_input_channels: int = 1,
         patch_stride: int = 8,
         num_parallel_samples: int = 100,
@@ -171,7 +164,7 @@ class PatchTSMixerConfig(PretrainedConfig):
         self_attn_heads: int = 1,
         use_positional_encoding: bool = False,
         positional_encoding_type: str = "sincos",
-        scaling: Optional[Union[str, bool]] = "std",
+        scaling: str | bool | None = "std",
         loss: str = "mse",
         init_std: float = 0.02,
         post_init: bool = False,
@@ -179,26 +172,26 @@ class PatchTSMixerConfig(PretrainedConfig):
         # Pretrain model configuration
         mask_type: str = "random",
         random_mask_ratio: float = 0.5,
-        num_forecast_mask_patches: Optional[Union[List[int], int]] = [2],
+        num_forecast_mask_patches: list[int] | int | None = [2],
         mask_value: int = 0,
         masked_loss: bool = True,
         channel_consistent_masking: bool = True,
-        unmasked_channel_indices: Optional[List[int]] = None,
+        unmasked_channel_indices: list[int] | None = None,
         # General head configuration
         head_dropout: float = 0.2,
         distribution_output: str = "student_t",
         # Prediction head configuration
         prediction_length: int = 16,
-        prediction_channel_indices: list = None,
+        prediction_channel_indices: list | None = None,
         # Classification/Regression configuration
         num_targets: int = 3,
-        output_range: list = None,
+        output_range: list | None = None,
         head_aggregation: str = "max_pool",
         **kwargs,
     ):
         self.num_input_channels = num_input_channels
         self.context_length = context_length
-        self.patch_length = patch_len
+        self.patch_length = patch_length
         self.patch_stride = patch_stride
         self.d_model = d_model
         self.expansion_factor = expansion_factor
@@ -209,7 +202,7 @@ class PatchTSMixerConfig(PretrainedConfig):
         self.norm_mlp = norm_mlp
         self.scaling = scaling
         self.head_dropout = head_dropout
-        self.num_patches = (max(context_length, patch_len) - patch_len) // patch_stride + 1
+        self.num_patches = (max(context_length, patch_length) - patch_length) // patch_stride + 1
         self.mask_type = mask_type
         self.random_mask_ratio = random_mask_ratio
         self.num_forecast_mask_patches = num_forecast_mask_patches
@@ -234,3 +227,6 @@ class PatchTSMixerConfig(PretrainedConfig):
         self.unmasked_channel_indices = unmasked_channel_indices
         self.norm_eps = norm_eps
         super().__init__(**kwargs)
+
+
+__all__ = ["PatchTSMixerConfig"]

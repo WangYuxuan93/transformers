@@ -16,7 +16,7 @@ rendered properly in your Markdown viewer.
 
 # अनुमान के लिए पाइपलाइन
 
-[`pipeline`] किसी भी भाषा, कंप्यूटर दृष्टि, भाषण और मल्टीमॉडल कार्यों पर अनुमान लगाने के लिए [Hub] (https://huggingface.co/models) से किसी भी मॉडल का उपयोग करना आसान बनाता है। भले ही आपके पास किसी विशिष्ट तौर-तरीके का अनुभव न हो या आप मॉडलों के पीछे अंतर्निहित कोड से परिचित न हों, फिर भी आप [`pipeline`] के अनुमान के लिए उनका उपयोग कर सकते हैं! यह ट्यूटोरियल आपको ये सिखाएगा:
+[`pipeline`] किसी भी भाषा, कंप्यूटर दृष्टि, भाषण और मल्टीमॉडल कार्यों पर अनुमान लगाने के लिए [Hub](https://huggingface.co/models) से किसी भी मॉडल का उपयोग करना आसान बनाता है। भले ही आपके पास किसी विशिष्ट तौर-तरीके का अनुभव न हो या आप मॉडलों के पीछे अंतर्निहित कोड से परिचित न हों, फिर भी आप [`pipeline`] के अनुमान के लिए उनका उपयोग कर सकते हैं! यह ट्यूटोरियल आपको ये सिखाएगा:
 
 * अनुमान के लिए [`pipeline`] का उपयोग करें।
 * एक विशिष्ट टोकननाइज़र या मॉडल का उपयोग करें।
@@ -67,7 +67,7 @@ Wav2Vec2.
 {'text': ' I have a dream that one day this nation will rise up and live out the true meaning of its creed.'}
 ```
 
-अब यह परिणाम अधिक सटीक दिखता है! Wav2Vec2 बनाम व्हिस्पर पर गहन तुलना के लिए, [ऑडियो ट्रांसफॉर्मर्स कोर्स] (https://huggingface.co/learn/audio-course/chapter5/asr_models) देखें।
+अब यह परिणाम अधिक सटीक दिखता है! Wav2Vec2 बनाम व्हिस्पर पर गहन तुलना के लिए, [ऑडियो ट्रांसफॉर्मर्स कोर्स](https://huggingface.co/learn/audio-course/chapter5/asr_models) देखें।
 हम वास्तव में आपको विभिन्न भाषाओं में मॉडल, आपके क्षेत्र में विशेषीकृत मॉडल और बहुत कुछ के लिए हब की जांच करने के लिए प्रोत्साहित करते हैं।
 आप हब पर सीधे अपने ब्राउज़र से मॉडल परिणामों की जांच और तुलना कर सकते हैं कि यह फिट बैठता है या नहीं
 अन्य मामलों की तुलना में कोने के मामलों को बेहतर ढंग से संभालता है।
@@ -114,7 +114,7 @@ transcriber = pipeline(model="openai/whisper-large-v2", device=0)
 ```
 
 यदि मॉडल एकल GPU के लिए बहुत बड़ा है और आप PyTorch का उपयोग कर रहे हैं, तो आप `device_map="auto"` को स्वचालित रूप से सेट कर सकते हैं
-निर्धारित करें कि मॉडल वज़न को कैसे लोड और संग्रहीत किया जाए। `device_map` तर्क का उपयोग करने के लिए 🤗 [Accelerate] (https://huggingface.co/docs/accelerate) की आवश्यकता होती है
+निर्धारित करें कि मॉडल वज़न को कैसे लोड और संग्रहीत किया जाए। `device_map` तर्क का उपयोग करने के लिए 🤗 [Accelerate](https://huggingface.co/docs/accelerate) की आवश्यकता होती है
 पैकेट:
 
 ```bash
@@ -131,7 +131,7 @@ transcriber = pipeline(model="openai/whisper-large-v2", device_map="auto")
 
 ### बैच का आकार
 
-डिफ़ॉल्ट रूप से, पाइपलाइनें [यहां] (https://huggingface.co/docs/transformers/main_classes/pipelines#pipeline-batching) विस्तार से बताए गए कारणों के लिए बैच अनुमान नहीं लगाएंगी। इसका कारण यह है कि बैचिंग आवश्यक रूप से तेज़ नहीं है, और वास्तव में कुछ मामलों में काफी धीमी हो सकती है।
+डिफ़ॉल्ट रूप से, पाइपलाइनें [यहां](https://huggingface.co/docs/transformers/main_classes/pipelines#pipeline-batching) विस्तार से बताए गए कारणों के लिए बैच अनुमान नहीं लगाएंगी। इसका कारण यह है कि बैचिंग आवश्यक रूप से तेज़ नहीं है, और वास्तव में कुछ मामलों में काफी धीमी हो सकती है।
 
 लेकिन अगर यह आपके उपयोग के मामले में काम करता है, तो आप इसका उपयोग कर सकते हैं:
 
@@ -185,7 +185,7 @@ def data():
         yield f"My example {i}"
 
 
-pipe = pipeline(model="gpt2", device=0)
+pipe = pipeline(model="openai-community/gpt2", device=0)
 generated_characters = 0
 for out in pipe(data()):
     generated_characters += len(out[0]["generated_text"])
@@ -270,11 +270,13 @@ NLP कार्यों के लिए [`pipeline`] का उपयोग �
 >>> from transformers import pipeline
 
 >>> vqa = pipeline(model="impira/layoutlm-document-qa")
->>> vqa(
+>>> output = vqa(
 ...     image="https://huggingface.co/spaces/impira/docquery/resolve/2359223c1837a7587402bda0f2643382a6eefeab/invoice.png",
 ...     question="What is the invoice number?",
 ... )
-[{'score': 0.42515, 'answer': 'us-001', 'start': 16, 'end': 16}]
+>>> output[0]["score"] = round(output[0]["score"], 3)
+>>> output
+[{'score': 0.425, 'answer': 'us-001', 'start': 16, 'end': 16}]
 ```
 
 <Tip>
@@ -299,7 +301,7 @@ pip install pytesseract
 import torch
 from transformers import pipeline
 
-pipe = pipeline(model="facebook/opt-1.3b", torch_dtype=torch.bfloat16, device_map="auto")
+pipe = pipeline(model="facebook/opt-1.3b", dtype=torch.bfloat16, device_map="auto")
 output = pipe("This is a cool example!", do_sample=True, top_p=0.95)
 ```
 
@@ -308,9 +310,9 @@ output = pipe("This is a cool example!", do_sample=True, top_p=0.95)
 ```py
 # pip install accelerate bitsandbytes
 import torch
-from transformers import pipeline
+from transformers import pipeline, BitsAndBytesConfig
 
-pipe = pipeline(model="facebook/opt-1.3b", device_map="auto", model_kwargs={"load_in_8bit": True})
+pipe = pipeline(model="facebook/opt-1.3b", device_map="auto", model_kwargs={"quantization_config": BitsAndBytesConfig(load_in_8bit=True)})
 output = pipe("This is a cool example!", do_sample=True, top_p=0.95)
 ```
 

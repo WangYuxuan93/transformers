@@ -32,7 +32,7 @@ El uso de un modelo pre-entrenado tiene importantes ventajas. Reduce los costos 
 
 Antes de aplicar fine-tuning a un modelo pre-entrenado, descarga un dataset y prepáralo para el entrenamiento. El tutorial anterior nos enseñó cómo procesar los datos para el entrenamiento, y ahora es la oportunidad de poner a prueba estas habilidades.
 
-Comienza cargando el dataset de [Yelp Reviews](https://huggingface.co/datasets/yelp_review_full):
+Comienza cargando el dataset de [Yelp Reviews](https://huggingface.co/datasets/Yelp/yelp_review_full):
 
 ```py
 >>> from datasets import load_dataset
@@ -48,7 +48,7 @@ Como ya sabes, necesitas un tokenizador para procesar el texto e incluir una est
 ```py
 >>> from transformers import AutoTokenizer
 
->>> tokenizer = AutoTokenizer.from_pretrained("bert-base-cased")
+>>> tokenizer = AutoTokenizer.from_pretrained("google-bert/bert-base-cased")
 
 
 >>> def tokenize_function(examples):
@@ -73,12 +73,12 @@ Si lo deseas, puedes crear un subconjunto más pequeño del dataset completo par
 
 🤗 Transformers proporciona una clase [`Trainer`] optimizada para el entrenamiento de modelos de 🤗 Transformers, haciendo más fácil el inicio del entrenamiento sin necesidad de escribir manualmente tu propio ciclo. La API del [`Trainer`] soporta una amplia gama de opciones de entrenamiento y características como el logging, el gradient accumulation y el mixed precision.
 
-Comienza cargando tu modelo y especifica el número de labels previstas. A partir del [Card Dataset](https://huggingface.co/datasets/yelp_review_full#data-fields) de Yelp Review, que como ya sabemos tiene 5 labels:
+Comienza cargando tu modelo y especifica el número de labels previstas. A partir del [Card Dataset](https://huggingface.co/datasets/Yelp/yelp_review_full#data-fields) de Yelp Review, que como ya sabemos tiene 5 labels:
 
 ```py
 >>> from transformers import AutoModelForSequenceClassification
 
->>> model = AutoModelForSequenceClassification.from_pretrained("bert-base-cased", num_labels=5)
+>>> model = AutoModelForSequenceClassification.from_pretrained("google-bert/bert-base-cased", num_labels=5)
 ```
 
 <Tip>
@@ -120,12 +120,12 @@ Define la función `compute` en `metric` para calcular el accuracy de tus predic
 ...     return metric.compute(predictions=predictions, references=labels)
 ```
 
-Si quieres controlar tus métricas de evaluación durante el fine-tuning, especifica el parámetro `evaluation_strategy` en tus argumentos de entrenamiento para que el modelo tenga en cuenta la métrica de evaluación al final de cada época:
+Si quieres controlar tus métricas de evaluación durante el fine-tuning, especifica el parámetro `eval_strategy` en tus argumentos de entrenamiento para que el modelo tenga en cuenta la métrica de evaluación al final de cada época:
 
 ```py
 >>> from transformers import TrainingArguments
 
->>> training_args = TrainingArguments(output_dir="test_trainer", evaluation_strategy="epoch")
+>>> training_args = TrainingArguments(output_dir="test_trainer", eval_strategy="epoch")
 ```
 
 ### Trainer
@@ -200,7 +200,7 @@ Carguemos un modelo TensorFlow con el número esperado de labels:
 >>> import tensorflow as tf
 >>> from transformers import TFAutoModelForSequenceClassification
 
->>> model = TFAutoModelForSequenceClassification.from_pretrained("bert-base-cased", num_labels=5)
+>>> model = TFAutoModelForSequenceClassification.from_pretrained("google-bert/bert-base-cased", num_labels=5)
 ```
 
 A continuación, compila y aplica fine-tuning a tu modelo con [`fit`](https://keras.io/api/models/model_training_apis/) como lo harías con cualquier otro modelo de Keras:
@@ -275,7 +275,7 @@ Carga tu modelo con el número de labels previstas:
 ```py
 >>> from transformers import AutoModelForSequenceClassification
 
->>> model = AutoModelForSequenceClassification.from_pretrained("bert-base-cased", num_labels=5)
+>>> model = AutoModelForSequenceClassification.from_pretrained("google-bert/bert-base-cased", num_labels=5)
 ```
 
 ### Optimiza y programa el learning rate

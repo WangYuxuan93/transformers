@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2024 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,31 +11,24 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Siglip model configuration"""
+"""Siglip model configuration"""
 
-import os
-from typing import Union
-
-from ...configuration_utils import PretrainedConfig
+from ...configuration_utils import PreTrainedConfig
 from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
 
-SIGLIP_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "google/siglip-base-patch16-224": "https://huggingface.co/google/siglip-base-patch16-224/resolve/main/config.json",
-}
 
-
-class SiglipTextConfig(PretrainedConfig):
+class SiglipTextConfig(PreTrainedConfig):
     r"""
     This is the configuration class to store the configuration of a [`SiglipTextModel`]. It is used to instantiate a
     Siglip text encoder according to the specified arguments, defining the model architecture. Instantiating a
     configuration with the defaults will yield a similar configuration to that of the text encoder of the Siglip
     [google/siglip-base-patch16-224](https://huggingface.co/google/siglip-base-patch16-224) architecture.
 
-    Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
-    documentation from [`PretrainedConfig`] for more information.
+    Configuration objects inherit from [`PreTrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PreTrainedConfig`] for more information.
 
     Args:
         vocab_size (`int`, *optional*, defaults to 32000):
@@ -66,6 +58,8 @@ class SiglipTextConfig(PretrainedConfig):
             The id of the beginning-of-sequence token in the vocabulary.
         eos_token_id (`int`, *optional*, defaults to 49407):
             The id of the end-of-sequence token in the vocabulary.
+        projection_size (`int`, *optional*, defaults to `hidden_size`):
+            The size of the projection head.
 
     Example:
 
@@ -83,6 +77,7 @@ class SiglipTextConfig(PretrainedConfig):
     ```"""
 
     model_type = "siglip_text_model"
+    base_config_key = "text_config"
 
     def __init__(
         self,
@@ -100,9 +95,13 @@ class SiglipTextConfig(PretrainedConfig):
         pad_token_id=1,
         bos_token_id=49406,
         eos_token_id=49407,
+        projection_size=None,
         **kwargs,
     ):
-        super().__init__(pad_token_id=pad_token_id, bos_token_id=bos_token_id, eos_token_id=eos_token_id, **kwargs)
+        super().__init__(**kwargs)
+        self.pad_token_id = pad_token_id
+        self.bos_token_id = bos_token_id
+        self.eos_token_id = eos_token_id
 
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
@@ -113,35 +112,18 @@ class SiglipTextConfig(PretrainedConfig):
         self.layer_norm_eps = layer_norm_eps
         self.hidden_act = hidden_act
         self.attention_dropout = attention_dropout
-
-    @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path: Union[str, os.PathLike], **kwargs) -> "PretrainedConfig":
-        cls._set_token_in_kwargs(kwargs)
-
-        config_dict, kwargs = cls.get_config_dict(pretrained_model_name_or_path, **kwargs)
-
-        # get the text config dict if we are loading from SiglipConfig
-        if config_dict.get("model_type") == "siglip":
-            config_dict = config_dict["text_config"]
-
-        if "model_type" in config_dict and hasattr(cls, "model_type") and config_dict["model_type"] != cls.model_type:
-            logger.warning(
-                f"You are using a model of type {config_dict['model_type']} to instantiate a model of type "
-                f"{cls.model_type}. This is not supported for all configurations of models and can yield errors."
-            )
-
-        return cls.from_dict(config_dict, **kwargs)
+        self.projection_size = projection_size if projection_size is not None else hidden_size
 
 
-class SiglipVisionConfig(PretrainedConfig):
+class SiglipVisionConfig(PreTrainedConfig):
     r"""
     This is the configuration class to store the configuration of a [`SiglipVisionModel`]. It is used to instantiate a
     Siglip vision encoder according to the specified arguments, defining the model architecture. Instantiating a
     configuration with the defaults will yield a similar configuration to that of the vision encoder of the Siglip
     [google/siglip-base-patch16-224](https://huggingface.co/google/siglip-base-patch16-224) architecture.
 
-    Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
-    documentation from [`PretrainedConfig`] for more information.
+    Configuration objects inherit from [`PreTrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PreTrainedConfig`] for more information.
 
     Args:
         hidden_size (`int`, *optional*, defaults to 768):
@@ -160,7 +142,7 @@ class SiglipVisionConfig(PretrainedConfig):
             The size (resolution) of each patch.
         hidden_act (`str` or `function`, *optional*, defaults to `"gelu_pytorch_tanh"`):
             The non-linear activation function (function or string) in the encoder and pooler. If string, `"gelu"`,
-            `"relu"`, `"selu"` and `"gelu_new"` ``"quick_gelu"` are supported.
+            `"relu"`, `"selu"` and `"gelu_new"` `"quick_gelu"` are supported.
         layer_norm_eps (`float`, *optional*, defaults to 1e-06):
             The epsilon used by the layer normalization layers.
         attention_dropout (`float`, *optional*, defaults to 0.0):
@@ -182,6 +164,7 @@ class SiglipVisionConfig(PretrainedConfig):
     ```"""
 
     model_type = "siglip_vision_model"
+    base_config_key = "vision_config"
 
     def __init__(
         self,
@@ -210,34 +193,16 @@ class SiglipVisionConfig(PretrainedConfig):
         self.layer_norm_eps = layer_norm_eps
         self.hidden_act = hidden_act
 
-    @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path: Union[str, os.PathLike], **kwargs) -> "PretrainedConfig":
-        cls._set_token_in_kwargs(kwargs)
 
-        config_dict, kwargs = cls.get_config_dict(pretrained_model_name_or_path, **kwargs)
-
-        # get the vision config dict if we are loading from SiglipConfig
-        if config_dict.get("model_type") == "siglip":
-            config_dict = config_dict["vision_config"]
-
-        if "model_type" in config_dict and hasattr(cls, "model_type") and config_dict["model_type"] != cls.model_type:
-            logger.warning(
-                f"You are using a model of type {config_dict['model_type']} to instantiate a model of type "
-                f"{cls.model_type}. This is not supported for all configurations of models and can yield errors."
-            )
-
-        return cls.from_dict(config_dict, **kwargs)
-
-
-class SiglipConfig(PretrainedConfig):
+class SiglipConfig(PreTrainedConfig):
     r"""
     [`SiglipConfig`] is the configuration class to store the configuration of a [`SiglipModel`]. It is used to
     instantiate a Siglip model according to the specified arguments, defining the text model and vision model configs.
     Instantiating a configuration with the defaults will yield a similar configuration to that of the Siglip
     [google/siglip-base-patch16-224](https://huggingface.co/google/siglip-base-patch16-224) architecture.
 
-    Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
-    documentation from [`PretrainedConfig`] for more information.
+    Configuration objects inherit from [`PreTrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PreTrainedConfig`] for more information.
 
     Args:
         text_config (`dict`, *optional*):
@@ -268,35 +233,30 @@ class SiglipConfig(PretrainedConfig):
     >>> config_text = SiglipTextConfig()
     >>> config_vision = SiglipVisionConfig()
 
-    >>> config = SiglipConfig.from_text_vision_configs(config_text, config_vision)
+    >>> config = SiglipConfig(text_config=config_text, vision_config=config_vision)
     ```"""
 
     model_type = "siglip"
+    sub_configs = {"text_config": SiglipTextConfig, "vision_config": SiglipVisionConfig}
 
     def __init__(self, text_config=None, vision_config=None, **kwargs):
-        super().__init__(**kwargs)
-
         if text_config is None:
-            text_config = {}
+            text_config = SiglipTextConfig()
             logger.info("`text_config` is `None`. Initializing the `SiglipTextConfig` with default values.")
+        elif isinstance(text_config, dict):
+            text_config = SiglipTextConfig(**text_config)
 
         if vision_config is None:
-            vision_config = {}
+            vision_config = SiglipVisionConfig()
             logger.info("`vision_config` is `None`. initializing the `SiglipVisionConfig` with default values.")
+        elif isinstance(vision_config, dict):
+            vision_config = SiglipVisionConfig(**vision_config)
 
-        self.text_config = SiglipTextConfig(**text_config)
-        self.vision_config = SiglipVisionConfig(**vision_config)
-
+        self.text_config = text_config
+        self.vision_config = vision_config
         self.initializer_factor = 1.0
 
-    @classmethod
-    def from_text_vision_configs(cls, text_config: SiglipTextConfig, vision_config: SiglipVisionConfig, **kwargs):
-        r"""
-        Instantiate a [`SiglipConfig`] (or a derived class) from siglip text model configuration and siglip vision
-        model configuration.
+        super().__init__(**kwargs)
 
-        Returns:
-            [`SiglipConfig`]: An instance of a configuration object
-        """
 
-        return cls(text_config=text_config.to_dict(), vision_config=vision_config.to_dict(), **kwargs)
+__all__ = ["SiglipConfig", "SiglipTextConfig", "SiglipVisionConfig"]

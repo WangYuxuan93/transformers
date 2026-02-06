@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023 The HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,158 +15,109 @@
 Processor class for InstructBLIP. Largely copy of Blip2Processor with addition of a tokenizer for the Q-Former.
 """
 
-import os
-from typing import List, Optional, Union
-
 from ...image_processing_utils import BatchFeature
 from ...image_utils import ImageInput
-from ...processing_utils import ProcessorMixin
-from ...tokenization_utils_base import PaddingStrategy, PreTokenizedInput, TextInput, TruncationStrategy
-from ...utils import TensorType
-from ..auto import AutoTokenizer
+from ...processing_utils import ProcessingKwargs, ProcessorMixin, Unpack
+from ...tokenization_utils_base import AddedToken, PreTokenizedInput, TextInput
+from ...utils import auto_docstring, logging
 
 
+logger = logging.get_logger(__name__)
+
+
+class InstructBlipProcessorKwargs(ProcessingKwargs, total=False):
+    _defaults = {
+        "text_kwargs": {
+            "add_special_tokens": True,
+            "padding": False,
+            "stride": 0,
+            "return_overflowing_tokens": False,
+            "return_special_tokens_mask": False,
+            "return_offsets_mapping": False,
+            "return_token_type_ids": False,
+            "return_length": False,
+            "verbose": True,
+        },
+    }
+
+
+@auto_docstring
 class InstructBlipProcessor(ProcessorMixin):
-    r"""
-    Constructs an InstructBLIP processor which wraps a BLIP image processor and a LLaMa/T5 tokenizer into a single
-    processor.
-
-    [`InstructBlipProcessor`] offers all the functionalities of [`BlipImageProcessor`] and [`AutoTokenizer`]. See the
-    docstring of [`~BlipProcessor.__call__`] and [`~BlipProcessor.decode`] for more information.
-
-    Args:
-        image_processor (`BlipImageProcessor`):
-            An instance of [`BlipImageProcessor`]. The image processor is a required input.
-        tokenizer (`AutoTokenizer`):
-            An instance of ['PreTrainedTokenizer`]. The tokenizer is a required input.
+    def __init__(self, image_processor, tokenizer, qformer_tokenizer, num_query_tokens=None, **kwargs):
+        r"""
         qformer_tokenizer (`AutoTokenizer`):
             An instance of ['PreTrainedTokenizer`]. The Q-Former tokenizer is a required input.
-    """
+        num_query_tokens (`int`, *optional*):
+            "
+            Number of tokens used by the Qformer as queries, should be same as in model's config.
+        """
+        if not hasattr(tokenizer, "image_token"):
+            self.image_token = AddedToken("<image>", normalized=False, special=True)
+            tokenizer.add_tokens([self.image_token], special_tokens=True)
+        else:
+            self.image_token = tokenizer.image_token
+        self.num_query_tokens = num_query_tokens
 
-    attributes = ["image_processor", "tokenizer"]
-    image_processor_class = "BlipImageProcessor"
-    tokenizer_class = "AutoTokenizer"
+        super().__init__(image_processor, tokenizer, qformer_tokenizer)
 
-    def __init__(self, image_processor, tokenizer, qformer_tokenizer):
-        super().__init__(image_processor, tokenizer)
-
-        # add QFormer tokenizer
-        self.qformer_tokenizer = qformer_tokenizer
-
+    @auto_docstring
     def __call__(
         self,
-        images: ImageInput = None,
-        text: Union[TextInput, PreTokenizedInput, List[TextInput], List[PreTokenizedInput]] = None,
-        add_special_tokens: bool = True,
-        padding: Union[bool, str, PaddingStrategy] = False,
-        truncation: Union[bool, str, TruncationStrategy] = None,
-        max_length: Optional[int] = None,
-        stride: int = 0,
-        pad_to_multiple_of: Optional[int] = None,
-        return_attention_mask: Optional[bool] = None,
-        return_overflowing_tokens: bool = False,
-        return_special_tokens_mask: bool = False,
-        return_offsets_mapping: bool = False,
-        return_token_type_ids: bool = False,
-        return_length: bool = False,
-        verbose: bool = True,
-        return_tensors: Optional[Union[str, TensorType]] = None,
-        **kwargs,
+        images: ImageInput | None = None,
+        text: TextInput | PreTokenizedInput | list[TextInput] | list[PreTokenizedInput] = None,
+        **kwargs: Unpack[InstructBlipProcessorKwargs],
     ) -> BatchFeature:
-        """
-        This method uses [`BlipImageProcessor.__call__`] method to prepare image(s) for the model, and
-        [`BertTokenizerFast.__call__`] to prepare text for the model.
-
-        Please refer to the docstring of the above two methods for more information.
-        """
         if images is None and text is None:
             raise ValueError("You have to specify at least images or text.")
 
-        encoding = BatchFeature()
+        output_kwargs = self._merge_kwargs(
+            InstructBlipProcessorKwargs,
+            tokenizer_init_kwargs=self.tokenizer.init_kwargs,
+            **kwargs,
+        )
 
+        return_tensors = output_kwargs["text_kwargs"].pop("return_tensors", None)
+        encoding = {}
         if text is not None:
-            text_encoding = self.tokenizer(
-                text=text,
-                add_special_tokens=add_special_tokens,
-                padding=padding,
-                truncation=truncation,
-                max_length=max_length,
-                stride=stride,
-                pad_to_multiple_of=pad_to_multiple_of,
-                return_attention_mask=return_attention_mask,
-                return_overflowing_tokens=return_overflowing_tokens,
-                return_special_tokens_mask=return_special_tokens_mask,
-                return_offsets_mapping=return_offsets_mapping,
-                return_token_type_ids=return_token_type_ids,
-                return_length=return_length,
-                verbose=verbose,
-                return_tensors=return_tensors,
-                **kwargs,
-            )
-            encoding.update(text_encoding)
-            qformer_text_encoding = self.qformer_tokenizer(
-                text=text,
-                add_special_tokens=add_special_tokens,
-                padding=padding,
-                truncation=truncation,
-                max_length=max_length,
-                stride=stride,
-                pad_to_multiple_of=pad_to_multiple_of,
-                return_attention_mask=return_attention_mask,
-                return_overflowing_tokens=return_overflowing_tokens,
-                return_special_tokens_mask=return_special_tokens_mask,
-                return_offsets_mapping=return_offsets_mapping,
-                return_token_type_ids=return_token_type_ids,
-                return_length=return_length,
-                verbose=verbose,
-                return_tensors=return_tensors,
-                **kwargs,
-            )
+            if isinstance(text, str):
+                text = [text]
+            elif not isinstance(text, list) and not isinstance(text[0], str):
+                raise ValueError("Invalid input text. Please provide a string, or a list of strings")
+
+            qformer_text_encoding = self.qformer_tokenizer(text, **output_kwargs["text_kwargs"])
             encoding["qformer_input_ids"] = qformer_text_encoding.pop("input_ids")
             encoding["qformer_attention_mask"] = qformer_text_encoding.pop("attention_mask")
 
+            # We need this hacky manipulation because BLIP expects image tokens to be at the beginning even before BOS token
+            if output_kwargs["text_kwargs"].get("max_length") is not None:
+                output_kwargs["text_kwargs"]["max_length"] -= self.num_query_tokens
+            text_encoding = self.tokenizer(text, **output_kwargs["text_kwargs"])
+
+            if images is not None:
+                # Image tokens should not be padded/truncated or prepended with special BOS token
+                image_tokens = self.image_token.content * self.num_query_tokens
+                output_kwargs["text_kwargs"]["add_special_tokens"] = False
+                output_kwargs["text_kwargs"]["padding"] = False
+                output_kwargs["text_kwargs"]["truncation"] = False
+                image_text_encoding = self.tokenizer(image_tokens, **output_kwargs["text_kwargs"])
+                for k in text_encoding:
+                    text_encoding[k] = [image_text_encoding[k] + sample for sample in text_encoding[k]]
+            encoding.update(text_encoding)
+
         if images is not None:
-            image_encoding = self.image_processor(images, return_tensors=return_tensors)
+            image_encoding = self.image_processor(images, **output_kwargs["images_kwargs"])
             encoding.update(image_encoding)
 
+        # Cast to desired return tensors type
+        encoding = BatchFeature(encoding, tensor_type=return_tensors)
         return encoding
 
-    # Copied from transformers.models.blip.processing_blip.BlipProcessor.batch_decode with BertTokenizerFast->PreTrainedTokenizer
-    def batch_decode(self, *args, **kwargs):
-        """
-        This method forwards all its arguments to PreTrainedTokenizer's [`~PreTrainedTokenizer.batch_decode`]. Please
-        refer to the docstring of this method for more information.
-        """
-        return self.tokenizer.batch_decode(*args, **kwargs)
-
-    # Copied from transformers.models.blip.processing_blip.BlipProcessor.decode with BertTokenizerFast->PreTrainedTokenizer
-    def decode(self, *args, **kwargs):
-        """
-        This method forwards all its arguments to PreTrainedTokenizer's [`~PreTrainedTokenizer.decode`]. Please refer to
-        the docstring of this method for more information.
-        """
-        return self.tokenizer.decode(*args, **kwargs)
-
     @property
-    # Copied from transformers.models.blip.processing_blip.BlipProcessor.model_input_names
     def model_input_names(self):
         tokenizer_input_names = self.tokenizer.model_input_names
         image_processor_input_names = self.image_processor.model_input_names
-        return list(dict.fromkeys(tokenizer_input_names + image_processor_input_names))
+        qformer_input_names = ["qformer_input_ids", "qformer_attention_mask"]
+        return tokenizer_input_names + image_processor_input_names + qformer_input_names
 
-    # overwrite to save the Q-Former tokenizer in a separate folder
-    def save_pretrained(self, save_directory, **kwargs):
-        if os.path.isfile(save_directory):
-            raise ValueError(f"Provided path ({save_directory}) should be a directory, not a file")
-        os.makedirs(save_directory, exist_ok=True)
-        qformer_tokenizer_path = os.path.join(save_directory, "qformer_tokenizer")
-        self.qformer_tokenizer.save_pretrained(qformer_tokenizer_path)
-        return super().save_pretrained(save_directory, **kwargs)
 
-    # overwrite to load the Q-Former tokenizer from a separate folder
-    @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path, **kwargs):
-        qformer_tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name_or_path, subfolder="qformer_tokenizer")
-        args = cls._get_arguments_from_pretrained(pretrained_model_name_or_path, **kwargs)
-        args.append(qformer_tokenizer)
-        return cls(*args)
+__all__ = ["InstructBlipProcessor"]

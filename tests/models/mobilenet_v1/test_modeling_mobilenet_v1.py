@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2022 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,14 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch MobileNetV1 model. """
-
+"""Testing suite for the PyTorch MobileNetV1 model."""
 
 import unittest
+from functools import cached_property
 
 from transformers import MobileNetV1Config
-from transformers.testing_utils import require_torch, require_vision, slow, torch_device
-from transformers.utils import cached_property, is_torch_available, is_vision_available
+from transformers.testing_utils import Expectations, require_torch, require_vision, slow, torch_device
+from transformers.utils import is_torch_available, is_vision_available
 
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ModelTesterMixin, floats_tensor, ids_tensor
@@ -30,7 +29,6 @@ if is_torch_available():
     import torch
 
     from transformers import MobileNetV1ForImageClassification, MobileNetV1Model
-    from transformers.models.mobilenet_v1.modeling_mobilenet_v1 import MOBILENET_V1_PRETRAINED_MODEL_ARCHIVE_LIST
 
 
 if is_vision_available():
@@ -147,14 +145,12 @@ class MobileNetV1ModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestC
 
     all_model_classes = (MobileNetV1Model, MobileNetV1ForImageClassification) if is_torch_available() else ()
     pipeline_model_mapping = (
-        {"feature-extraction": MobileNetV1Model, "image-classification": MobileNetV1ForImageClassification}
+        {"image-feature-extraction": MobileNetV1Model, "image-classification": MobileNetV1ForImageClassification}
         if is_torch_available()
         else {}
     )
 
-    test_pruning = False
     test_resize_embeddings = False
-    test_head_masking = False
     has_attentions = False
 
     def setUp(self):
@@ -169,7 +165,7 @@ class MobileNetV1ModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestC
         pass
 
     @unittest.skip(reason="MobileNetV1 does not support input and output embeddings")
-    def test_model_common_attributes(self):
+    def test_model_get_set_embeddings(self):
         pass
 
     @unittest.skip(reason="MobileNetV1 does not output attentions")
@@ -212,9 +208,9 @@ class MobileNetV1ModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestC
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in MOBILENET_V1_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = MobileNetV1Model.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "google/mobilenet_v1_1.0_224"
+        model = MobileNetV1Model.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
 
 # We will verify our results on an image of cute cats
@@ -248,6 +244,12 @@ class MobileNetV1ModelIntegrationTest(unittest.TestCase):
         expected_shape = torch.Size((1, 1001))
         self.assertEqual(outputs.logits.shape, expected_shape)
 
-        expected_slice = torch.tensor([-4.1739, -1.1233, 3.1205]).to(torch_device)
+        expectations = Expectations(
+            {
+                (None, None): [-4.1739, -1.1233, 3.1205],
+                ("cuda", 8): [-4.1739, -1.1233, 3.1205],
+            }
+        )
+        expected_slice = torch.tensor(expectations.get_expectation()).to(torch_device)
 
-        self.assertTrue(torch.allclose(outputs.logits[0, :3], expected_slice, atol=1e-4))
+        torch.testing.assert_close(outputs.logits[0, :3], expected_slice, rtol=2e-4, atol=2e-4)

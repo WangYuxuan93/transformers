@@ -19,7 +19,7 @@ rendered properly in your Markdown viewer.
 ## Overview
 
 BertGeneration モデルは、次を使用してシーケンス間のタスクに利用できる BERT モデルです。
-[Leveraging Pre-trained Checkpoints for Sequence Generation Tasks](https://arxiv.org/abs/1907.12461) で提案されている [`EncoderDecoderModel`]
+[Leveraging Pre-trained Checkpoints for Sequence Generation Tasks](https://huggingface.co/papers/1907.12461) で提案されている [`EncoderDecoderModel`]
 タスク、Sascha Rothe、Sishi Nagayan、Aliaksei Severyn 著。
 
 論文の要約は次のとおりです。
@@ -41,15 +41,15 @@ GPT-2 および RoBERTa チェックポイントを使用し、モデルの初�
 ```python
 >>> # leverage checkpoints for Bert2Bert model...
 >>> # use BERT's cls token as BOS token and sep token as EOS token
->>> encoder = BertGenerationEncoder.from_pretrained("bert-large-uncased", bos_token_id=101, eos_token_id=102)
+>>> encoder = BertGenerationEncoder.from_pretrained("google-bert/bert-large-uncased", bos_token_id=101, eos_token_id=102)
 >>> # add cross attention layers and use BERT's cls token as BOS token and sep token as EOS token
 >>> decoder = BertGenerationDecoder.from_pretrained(
-...     "bert-large-uncased", add_cross_attention=True, is_decoder=True, bos_token_id=101, eos_token_id=102
+...     "google-bert/bert-large-uncased", add_cross_attention=True, is_decoder=True, bos_token_id=101, eos_token_id=102
 ... )
 >>> bert2bert = EncoderDecoderModel(encoder=encoder, decoder=decoder)
 
 >>> # create tokenizer...
->>> tokenizer = BertTokenizer.from_pretrained("bert-large-uncased")
+>>> tokenizer = BertTokenizer.from_pretrained("google-bert/bert-large-uncased")
 
 >>> input_ids = tokenizer(
 ...     "This is a long article to summarize", add_special_tokens=False, return_tensors="pt"

@@ -16,13 +16,13 @@ rendered properly in your Markdown viewer.
 
 # Trainieren mit einem Skript
 
-Neben den 🤗 Transformers [notebooks](./noteboks/README) gibt es auch Beispielskripte, die zeigen, wie man ein Modell für eine Aufgabe mit [PyTorch](https://github.com/huggingface/transformers/tree/main/examples/pytorch), [TensorFlow](https://github.com/huggingface/transformers/tree/main/examples/tensorflow) oder [JAX/Flax](https://github.com/huggingface/transformers/tree/main/examples/flax) trainiert.
+Neben den 🤗 Transformers [notebooks](./notebooks) gibt es auch Beispielskripte, die zeigen, wie man ein Modell für eine Aufgabe mit [PyTorch](https://github.com/huggingface/transformers/tree/main/examples/pytorch), [TensorFlow](https://github.com/huggingface/transformers/tree/main/examples/tensorflow) oder [JAX/Flax](https://github.com/huggingface/transformers/tree/main/examples/flax) trainiert.
 
-Sie werden auch Skripte finden, die wir in unseren [Forschungsprojekten](https://github.com/huggingface/transformers/tree/main/examples/research_projects) und [Legacy-Beispielen](https://github.com/huggingface/transformers/tree/main/examples/legacy) verwendet haben und die größtenteils von der Community stammen. Diese Skripte werden nicht aktiv gepflegt und erfordern eine bestimmte Version von 🤗 Transformers, die höchstwahrscheinlich nicht mit der neuesten Version der Bibliothek kompatibel ist.
+Sie werden auch Skripte finden, die wir in unseren [Forschungsprojekten](https://github.com/huggingface/transformers-research-projects/) und [Legacy-Beispielen](https://github.com/huggingface/transformers/tree/main/examples/legacy) verwendet haben und die größtenteils von der Community stammen. Diese Skripte werden nicht aktiv gepflegt und erfordern eine bestimmte Version von 🤗 Transformers, die höchstwahrscheinlich nicht mit der neuesten Version der Bibliothek kompatibel ist.
 
 Es wird nicht erwartet, dass die Beispielskripte bei jedem Problem sofort funktionieren. Möglicherweise müssen Sie das Skript an das Problem anpassen, das Sie zu lösen versuchen. Um Ihnen dabei zu helfen, legen die meisten Skripte vollständig offen, wie die Daten vorverarbeitet werden, so dass Sie sie nach Bedarf für Ihren Anwendungsfall bearbeiten können.
 
-Für jede Funktion, die Sie in einem Beispielskript implementieren möchten, diskutieren Sie bitte im [Forum] (https://discuss.huggingface.co/) oder in einem [issue] (https://github.com/huggingface/transformers/issues), bevor Sie einen Pull Request einreichen. Wir freuen uns zwar über Fehlerkorrekturen, aber es ist unwahrscheinlich, dass wir einen Pull Request zusammenführen, der mehr Funktionalität auf Kosten der Lesbarkeit hinzufügt.
+Für jede Funktion, die Sie in einem Beispielskript implementieren möchten, diskutieren Sie bitte im [Forum](https://discuss.huggingface.co/) oder in einem [issue](https://github.com/huggingface/transformers/issues), bevor Sie einen Pull Request einreichen. Wir freuen uns zwar über Fehlerkorrekturen, aber es ist unwahrscheinlich, dass wir einen Pull Request zusammenführen, der mehr Funktionalität auf Kosten der Lesbarkeit hinzufügt.
 
 Diese Anleitung zeigt Ihnen, wie Sie ein Beispiel für ein Trainingsskript zur Zusammenfassung in [PyTorch](https://github.com/huggingface/transformers/tree/main/examples/pytorch/summarization) und [TensorFlow](https://github.com/huggingface/transformers/tree/main/examples/tensorflow/summarization) ausführen können. Sofern nicht anders angegeben, sollten alle Beispiele mit beiden Frameworks funktionieren.
 
@@ -85,13 +85,11 @@ pip install -r requirements.txt
 
 ## Ein Skript ausführen
 
-<frameworkcontent>
-<pt>
-Das Beispielskript lädt einen Datensatz aus der 🤗 [Datasets](https://huggingface.co/docs/datasets/) Bibliothek herunter und verarbeitet ihn vor. Dann nimmt das Skript eine Feinabstimmung eines Datensatzes mit dem [Trainer](https://huggingface.co/docs/transformers/main_classes/trainer) auf einer Architektur vor, die eine Zusammenfassung unterstützt. Das folgende Beispiel zeigt, wie die Feinabstimmung von [T5-small](https://huggingface.co/t5-small) auf dem Datensatz [CNN/DailyMail](https://huggingface.co/datasets/cnn_dailymail) durchgeführt wird. Das T5-Modell benötigt aufgrund der Art und Weise, wie es trainiert wurde, ein zusätzliches Argument `source_prefix`. Mit dieser Eingabeaufforderung weiß T5, dass es sich um eine Zusammenfassungsaufgabe handelt.
+Das Beispielskript lädt einen Datensatz aus der 🤗 [Datasets](https://huggingface.co/docs/datasets/) Bibliothek herunter und verarbeitet ihn vor. Dann nimmt das Skript eine Feinabstimmung eines Datensatzes mit dem [Trainer](https://huggingface.co/docs/transformers/main_classes/trainer) auf einer Architektur vor, die eine Zusammenfassung unterstützt. Das folgende Beispiel zeigt, wie die Feinabstimmung von [T5-small](https://huggingface.co/google-t5/t5-small) auf dem Datensatz [CNN/DailyMail](https://huggingface.co/datasets/cnn_dailymail) durchgeführt wird. Das T5-Modell benötigt aufgrund der Art und Weise, wie es trainiert wurde, ein zusätzliches Argument `source_prefix`. Mit dieser Eingabeaufforderung weiß T5, dass es sich um eine Zusammenfassungsaufgabe handelt.
 
 ```bash
 python examples/pytorch/summarization/run_summarization.py \
-    --model_name_or_path t5-small \
+    --model_name_or_path google-t5/t5-small \
     --do_train \
     --do_eval \
     --dataset_name cnn_dailymail \
@@ -100,27 +98,8 @@ python examples/pytorch/summarization/run_summarization.py \
     --output_dir /tmp/tst-summarization \
     --per_device_train_batch_size=4 \
     --per_device_eval_batch_size=4 \
-    --overwrite_output_dir \
     --predict_with_generate
 ```
-</pt>
-<tf>
-Das Beispielskript lädt einen Datensatz aus der 🤗 [Datasets](https://huggingface.co/docs/datasets/) Bibliothek herunter und verarbeitet ihn vor. Anschließend nimmt das Skript die Feinabstimmung eines Datensatzes mit Keras auf einer Architektur vor, die die Zusammenfassung unterstützt. Das folgende Beispiel zeigt, wie die Feinabstimmung von [T5-small](https://huggingface.co/t5-small) auf dem [CNN/DailyMail](https://huggingface.co/datasets/cnn_dailymail) Datensatz durchgeführt wird. Das T5-Modell benötigt aufgrund der Art und Weise, wie es trainiert wurde, ein zusätzliches Argument `source_prefix`. Mit dieser Eingabeaufforderung weiß T5, dass es sich um eine Zusammenfassungsaufgabe handelt.
-
-```bash
-python examples/tensorflow/summarization/run_summarization.py  \
-    --model_name_or_path t5-small \
-    --dataset_name cnn_dailymail \
-    --dataset_config "3.0.0" \
-    --output_dir /tmp/tst-summarization  \
-    --per_device_train_batch_size 8 \
-    --per_device_eval_batch_size 16 \
-    --num_train_epochs 3 \
-    --do_train \
-    --do_eval
-```
-</tf>
-</frameworkcontent>
 
 ## Verteiltes Training und gemischte Präzision
 
@@ -133,7 +112,7 @@ Der [Trainer](https://huggingface.co/docs/transformers/main_classes/trainer) unt
 torchrun \
     --nproc_per_node 8 pytorch/summarization/run_summarization.py \
     --fp16 \
-    --model_name_or_path t5-small \
+    --model_name_or_path google-t5/t5-small \
     --do_train \
     --do_eval \
     --dataset_name cnn_dailymail \
@@ -142,7 +121,6 @@ torchrun \
     --output_dir /tmp/tst-summarization \
     --per_device_train_batch_size=4 \
     --per_device_eval_batch_size=4 \
-    --overwrite_output_dir \
     --predict_with_generate
 ```
 
@@ -150,14 +128,12 @@ TensorFlow-Skripte verwenden eine [`MirroredStrategy`](https://www.tensorflow.or
 
 ## Ein Skript auf einer TPU ausführen
 
-<frameworkcontent>
-<pt>
 Tensor Processing Units (TPUs) sind speziell für die Beschleunigung der Leistung konzipiert. PyTorch unterstützt TPUs mit dem [XLA](https://www.tensorflow.org/xla) Deep Learning Compiler (siehe [hier](https://github.com/pytorch/xla/blob/master/README.md) für weitere Details). Um eine TPU zu verwenden, starten Sie das Skript `xla_spawn.py` und verwenden das Argument `num_cores`, um die Anzahl der TPU-Kerne festzulegen, die Sie verwenden möchten.
 
 ```bash
 python xla_spawn.py --num_cores 8 \
     summarization/run_summarization.py \
-    --model_name_or_path t5-small \
+    --model_name_or_path google-t5/t5-small \
     --do_train \
     --do_eval \
     --dataset_name cnn_dailymail \
@@ -166,28 +142,8 @@ python xla_spawn.py --num_cores 8 \
     --output_dir /tmp/tst-summarization \
     --per_device_train_batch_size=4 \
     --per_device_eval_batch_size=4 \
-    --overwrite_output_dir \
     --predict_with_generate
 ```
-</pt>
-<tf>
-Tensor Processing Units (TPUs) sind speziell für die Beschleunigung der Leistung konzipiert. TensorFlow Skripte verwenden eine [`TPUStrategy`](https://www.tensorflow.org/guide/distributed_training#tpustrategy) für das Training auf TPUs. Um eine TPU zu verwenden, übergeben Sie den Namen der TPU-Ressource an das Argument `tpu`.
-
-```bash
-python run_summarization.py  \
-    --tpu name_of_tpu_resource \
-    --model_name_or_path t5-small \
-    --dataset_name cnn_dailymail \
-    --dataset_config "3.0.0" \
-    --output_dir /tmp/tst-summarization  \
-    --per_device_train_batch_size 8 \
-    --per_device_eval_batch_size 16 \
-    --num_train_epochs 3 \
-    --do_train \
-    --do_eval
-```
-</tf>
-</frameworkcontent>
 
 ## Führen Sie ein Skript mit 🤗 Accelerate aus.
 
@@ -214,7 +170,7 @@ Jetzt sind Sie bereit, das Training zu starten:
 
 ```bash
 accelerate launch run_summarization_no_trainer.py \
-    --model_name_or_path t5-small \
+    --model_name_or_path google-t5/t5-small \
     --dataset_name cnn_dailymail \
     --dataset_config "3.0.0" \
     --source_prefix "summarize: " \
@@ -226,14 +182,14 @@ accelerate launch run_summarization_no_trainer.py \
 Das Verdichtungsskript unterstützt benutzerdefinierte Datensätze, solange es sich um eine CSV- oder JSON-Line-Datei handelt. Wenn Sie Ihren eigenen Datensatz verwenden, müssen Sie mehrere zusätzliche Argumente angeben:
 
 - `train_file` und `validation_file` geben den Pfad zu Ihren Trainings- und Validierungsdateien an.
-- text_column` ist der Eingabetext, der zusammengefasst werden soll.
+- `text_column` ist der Eingabetext, der zusammengefasst werden soll.
 - Summary_column" ist der auszugebende Zieltext.
 
 Ein Zusammenfassungsskript, das einen benutzerdefinierten Datensatz verwendet, würde wie folgt aussehen:
 
 ```bash
 python examples/pytorch/summarization/run_summarization.py \
-    --model_name_or_path t5-small \
+    --model_name_or_path google-t5/t5-small \
     --do_train \
     --do_eval \
     --train_file path_to_csv_or_jsonlines_file \
@@ -242,7 +198,6 @@ python examples/pytorch/summarization/run_summarization.py \
     --summary_column summary_column_name \
     --source_prefix "summarize: " \
     --output_dir /tmp/tst-summarization \
-    --overwrite_output_dir \
     --per_device_train_batch_size=4 \
     --per_device_eval_batch_size=4 \
     --predict_with_generate
@@ -258,7 +213,7 @@ Es ist oft eine gute Idee, Ihr Skript an einer kleineren Anzahl von Beispielen f
 
 ```bash
 python examples/pytorch/summarization/run_summarization.py \
-    --model_name_or_path t5-small \
+    --model_name_or_path google-t5/t5-small \
     --max_train_samples 50 \
     --max_eval_samples 50 \
     --max_predict_samples 50 \
@@ -270,7 +225,6 @@ python examples/pytorch/summarization/run_summarization.py \
     --output_dir /tmp/tst-summarization \
     --per_device_train_batch_size=4 \
     --per_device_eval_batch_size=4 \
-    --overwrite_output_dir \
     --predict_with_generate
 ```
 
@@ -284,11 +238,9 @@ examples/pytorch/summarization/run_summarization.py -h
 
 Eine weitere hilfreiche Option, die Sie aktivieren können, ist die Wiederaufnahme des Trainings von einem früheren Kontrollpunkt aus. Auf diese Weise können Sie im Falle einer Unterbrechung Ihres Trainings dort weitermachen, wo Sie aufgehört haben, ohne von vorne beginnen zu müssen. Es gibt zwei Methoden, um das Training von einem Kontrollpunkt aus wieder aufzunehmen.
 
-Die erste Methode verwendet das Argument `output_dir previous_output_dir`, um das Training ab dem letzten in `output_dir` gespeicherten Kontrollpunkt wieder aufzunehmen. In diesem Fall sollten Sie `overwrite_output_dir` entfernen:
-
 ```bash
 python examples/pytorch/summarization/run_summarization.py
-    --model_name_or_path t5-small \
+    --model_name_or_path google-t5/t5-small \
     --do_train \
     --do_eval \
     --dataset_name cnn_dailymail \
@@ -297,24 +249,6 @@ python examples/pytorch/summarization/run_summarization.py
     --output_dir /tmp/tst-summarization \
     --per_device_train_batch_size=4 \
     --per_device_eval_batch_size=4 \
-    --output_dir previous_output_dir \
-    --predict_with_generate
-```
-
-Die zweite Methode verwendet das Argument `Resume_from_checkpoint path_to_specific_checkpoint`, um das Training ab einem bestimmten Checkpoint-Ordner wieder aufzunehmen.
-
-```bash
-python examples/pytorch/summarization/run_summarization.py
-    --model_name_or_path t5-small \
-    --do_train \
-    --do_eval \
-    --dataset_name cnn_dailymail \
-    --dataset_config "3.0.0" \
-    --source_prefix "summarize: " \
-    --output_dir /tmp/tst-summarization \
-    --per_device_train_batch_size=4 \
-    --per_device_eval_batch_size=4 \
-    --overwrite_output_dir \
     --resume_from_checkpoint path_to_specific_checkpoint \
     --predict_with_generate
 ```
@@ -324,7 +258,7 @@ python examples/pytorch/summarization/run_summarization.py
 Alle Skripte können Ihr endgültiges Modell in den [Model Hub](https://huggingface.co/models) hochladen. Stellen Sie sicher, dass Sie bei Hugging Face angemeldet sind, bevor Sie beginnen:
 
 ```bash
-huggingface-cli login
+hf auth login
 ```
 
 Dann fügen Sie dem Skript das Argument `push_to_hub` hinzu. Mit diesem Argument wird ein Repository mit Ihrem Hugging Face-Benutzernamen und dem in `output_dir` angegebenen Ordnernamen erstellt.
@@ -335,7 +269,7 @@ Das folgende Beispiel zeigt, wie Sie ein Modell mit einem bestimmten Repository-
 
 ```bash
 python examples/pytorch/summarization/run_summarization.py
-    --model_name_or_path t5-small \
+    --model_name_or_path google-t5/t5-small \
     --do_train \
     --do_eval \
     --dataset_name cnn_dailymail \
@@ -346,6 +280,5 @@ python examples/pytorch/summarization/run_summarization.py
     --output_dir /tmp/tst-summarization \
     --per_device_train_batch_size=4 \
     --per_device_eval_batch_size=4 \
-    --overwrite_output_dir \
     --predict_with_generate
 ```

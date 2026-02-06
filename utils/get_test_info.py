@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023 The HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -53,7 +52,15 @@ def get_module_path(test_file):
 def get_test_module(test_file):
     """Get the module of a model test file."""
     test_module_path = get_module_path(test_file)
-    test_module = importlib.import_module(test_module_path)
+    try:
+        test_module = importlib.import_module(test_module_path)
+    except AttributeError as exc:
+        # e.g. if you have a `tests` folder in `site-packages`, created by another package, when trying to import
+        # `tests.models...`
+        raise ValueError(
+            f"Could not import module {test_module_path}. Confirm that you don't have a package with the same root "
+            "name installed or in your environment's `site-packages`."
+        ) from exc
 
     return test_module
 
@@ -73,15 +80,14 @@ def get_tester_classes(test_file):
 def get_test_classes(test_file):
     """Get all [test] classes in a model test file with attribute `all_model_classes` that are non-empty.
 
-    These are usually the (model) test classes containing the (non-slow) tests to run and are subclasses of one of the
-    classes `ModelTesterMixin`, `TFModelTesterMixin` or `FlaxModelTesterMixin`, as well as a subclass of
-    `unittest.TestCase`. Exceptions include `RagTestMixin` (and its subclasses).
+    These are usually the (model) test classes containing the (non-slow) tests to run and are subclasses of
+    `ModelTesterMixin`, as well as a subclass of `unittest.TestCase`. Exceptions include `RagTestMixin` (and its subclasses).
     """
     test_classes = []
     test_module = get_test_module(test_file)
     for attr in dir(test_module):
         attr_value = getattr(test_module, attr)
-        # (TF/Flax)ModelTesterMixin is also an attribute in specific model test module. Let's exclude them by checking
+        # ModelTesterMixin is also an attribute in specific model test module. Let's exclude them by checking
         # `all_model_classes` is not empty (which also excludes other special classes).
         model_classes = getattr(attr_value, "all_model_classes", [])
         if len(model_classes) > 0:
@@ -110,7 +116,7 @@ def get_model_tester_from_test_class(test_class):
 
     model_tester = None
     if hasattr(test, "model_tester"):
-        # `(TF/Flax)ModelTesterMixin` has this attribute default to `None`. Let's skip this case.
+        # `ModelTesterMixin` has this attribute default to `None`. Let's skip this case.
         if test.model_tester is not None:
             model_tester = test.model_tester.__class__
 

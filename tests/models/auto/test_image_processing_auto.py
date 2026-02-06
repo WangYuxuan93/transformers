@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2021 the HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,6 +13,7 @@
 # limitations under the License.
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -27,8 +27,11 @@ from transformers import (
     AutoImageProcessor,
     CLIPConfig,
     CLIPImageProcessor,
+    CLIPImageProcessorFast,
+    ViTImageProcessor,
+    ViTImageProcessorFast,
 )
-from transformers.testing_utils import DUMMY_UNKNOWN_IDENTIFIER
+from transformers.testing_utils import DUMMY_UNKNOWN_IDENTIFIER, require_torchvision, require_vision
 
 
 sys.path.append(str(Path(__file__).parent.parent.parent.parent / "utils"))
@@ -41,10 +44,12 @@ class AutoImageProcessorTest(unittest.TestCase):
     def setUp(self):
         transformers.dynamic_module_utils.TIME_OUT_REMOTE_CODE = 0
 
+    @require_torchvision
     def test_image_processor_from_model_shortcut(self):
         config = AutoImageProcessor.from_pretrained("openai/clip-vit-base-patch32")
-        self.assertIsInstance(config, CLIPImageProcessor)
+        self.assertIsInstance(config, CLIPImageProcessorFast)
 
+    @require_torchvision
     def test_image_processor_from_local_directory_from_key(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
             processor_tmpfile = Path(tmpdirname) / "preprocessor_config.json"
@@ -56,10 +61,13 @@ class AutoImageProcessorTest(unittest.TestCase):
             json.dump({"model_type": "clip"}, open(config_tmpfile, "w"))
 
             config = AutoImageProcessor.from_pretrained(tmpdirname)
-            self.assertIsInstance(config, CLIPImageProcessor)
+            self.assertIsInstance(config, CLIPImageProcessorFast)
 
+    @require_torchvision
     def test_image_processor_from_local_directory_from_feature_extractor_key(self):
         # Ensure we can load the image processor from the feature extractor config
+        # Though we don't have any `CLIPFeatureExtractor` class, we can't be sure that
+        # there are no models in the hub serialized with `processor_type=CLIPFeatureExtractor`
         with tempfile.TemporaryDirectory() as tmpdirname:
             processor_tmpfile = Path(tmpdirname) / "preprocessor_config.json"
             config_tmpfile = Path(tmpdirname) / "config.json"
@@ -70,13 +78,29 @@ class AutoImageProcessorTest(unittest.TestCase):
             json.dump({"model_type": "clip"}, open(config_tmpfile, "w"))
 
             config = AutoImageProcessor.from_pretrained(tmpdirname)
-            self.assertIsInstance(config, CLIPImageProcessor)
+            self.assertIsInstance(config, CLIPImageProcessorFast)
 
+    @require_torchvision
+    def test_image_processor_from_new_filename(self):
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            processor_tmpfile = Path(tmpdirname) / "preprocessor_config.json"
+            config_tmpfile = Path(tmpdirname) / "config.json"
+            json.dump(
+                {"image_processor_type": "CLIPImageProcessor", "processor_class": "CLIPProcessor"},
+                open(processor_tmpfile, "w"),
+            )
+            json.dump({"model_type": "clip"}, open(config_tmpfile, "w"))
+
+            config = AutoImageProcessor.from_pretrained(tmpdirname)
+            # Now loading fast image processor by default
+            self.assertIsInstance(config, CLIPImageProcessorFast)
+
+    @require_torchvision
     def test_image_processor_from_local_directory_from_config(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
             model_config = CLIPConfig()
 
-            # Create a dummy config file with image_proceesor_type
+            # Create a dummy config file with image_processor_type
             processor_tmpfile = Path(tmpdirname) / "preprocessor_config.json"
             config_tmpfile = Path(tmpdirname) / "config.json"
             json.dump(
@@ -101,8 +125,9 @@ class AutoImageProcessorTest(unittest.TestCase):
             dict_as_saved = json.loads(config.to_json_string())
             self.assertTrue("_processor_class" not in dict_as_saved)
 
-        self.assertIsInstance(config, CLIPImageProcessor)
+        self.assertIsInstance(config, CLIPImageProcessorFast)
 
+    @require_torchvision
     def test_image_processor_from_local_file(self):
         with tempfile.TemporaryDirectory() as tmpdirname:
             processor_tmpfile = Path(tmpdirname) / "preprocessor_config.json"
@@ -112,7 +137,7 @@ class AutoImageProcessorTest(unittest.TestCase):
             )
 
             config = AutoImageProcessor.from_pretrained(processor_tmpfile)
-            self.assertIsInstance(config, CLIPImageProcessor)
+            self.assertIsInstance(config, CLIPImageProcessorFast)
 
     def test_repo_not_found(self):
         with self.assertRaisesRegex(
@@ -129,9 +154,26 @@ class AutoImageProcessorTest(unittest.TestCase):
     def test_image_processor_not_found(self):
         with self.assertRaisesRegex(
             EnvironmentError,
-            "hf-internal-testing/config-no-model does not appear to have a file named preprocessor_config.json.",
+            "Can't load image processor for 'hf-internal-testing/config-no-model'.",
         ):
             _ = AutoImageProcessor.from_pretrained("hf-internal-testing/config-no-model")
+
+    @require_vision
+    @require_torchvision
+    def test_use_fast_selection(self):
+        checkpoint = "hf-internal-testing/tiny-random-vit"
+
+        # Fast image processor is selected by default
+        image_processor = AutoImageProcessor.from_pretrained(checkpoint)
+        self.assertIsInstance(image_processor, ViTImageProcessorFast)
+
+        # Fast image processor is selected when use_fast=True
+        image_processor = AutoImageProcessor.from_pretrained(checkpoint, use_fast=True)
+        self.assertIsInstance(image_processor, ViTImageProcessorFast)
+
+        # Slow image processor is selected when use_fast=False
+        image_processor = AutoImageProcessor.from_pretrained(checkpoint, use_fast=False)
+        self.assertIsInstance(image_processor, ViTImageProcessor)
 
     def test_from_pretrained_dynamic_image_processor(self):
         # If remote code is not set, we will time out when asking whether to load the model.
@@ -148,11 +190,27 @@ class AutoImageProcessorTest(unittest.TestCase):
         )
         self.assertEqual(image_processor.__class__.__name__, "NewImageProcessor")
 
+        # Test the dynamic module is loaded only once.
+        reloaded_image_processor = AutoImageProcessor.from_pretrained(
+            "hf-internal-testing/test_dynamic_image_processor", trust_remote_code=True
+        )
+        self.assertIs(image_processor.__class__, reloaded_image_processor.__class__)
+
         # Test image processor can be reloaded.
         with tempfile.TemporaryDirectory() as tmp_dir:
             image_processor.save_pretrained(tmp_dir)
             reloaded_image_processor = AutoImageProcessor.from_pretrained(tmp_dir, trust_remote_code=True)
+            self.assertTrue(os.path.exists(os.path.join(tmp_dir, "image_processor.py")))  # Assert we saved custom code
+            self.assertEqual(
+                reloaded_image_processor.auto_map["AutoImageProcessor"], "image_processor.NewImageProcessor"
+            )
         self.assertEqual(reloaded_image_processor.__class__.__name__, "NewImageProcessor")
+
+        # Test the dynamic module is reloaded if we force it.
+        reloaded_image_processor = AutoImageProcessor.from_pretrained(
+            "hf-internal-testing/test_dynamic_image_processor", trust_remote_code=True, force_download=True
+        )
+        self.assertIsNot(image_processor.__class__, reloaded_image_processor.__class__)
 
     def test_new_image_processor_registration(self):
         try:

@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2022 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,8 +14,9 @@
 
 import argparse
 import re
+from io import BytesIO
 
-import requests
+import httpx
 import torch
 
 # git clone https://github.com/salesforce/BLIP.git
@@ -37,8 +37,9 @@ from transformers import (
 
 
 def load_demo_image(image_size, device):
-    img_url = "https://storage.googleapis.com/sfr-vision-language-research/BLIP/demo.jpg"
-    raw_image = Image.open(requests.get(img_url, stream=True).raw).convert("RGB")
+    url = "https://storage.googleapis.com/sfr-vision-language-research/BLIP/demo.jpg"
+    with httpx.stream("GET", url) as response:
+        raw_image = Image.open(BytesIO(response.read())).convert("RGB")
 
     transform = transforms.Compose(
         [
@@ -105,7 +106,7 @@ def convert_blip_checkpoint(pytorch_dump_folder_path, config_path=None):
 
     image_size = 384
     image = load_demo_image(image_size=image_size, device="cpu")
-    tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+    tokenizer = BertTokenizer.from_pretrained("google-bert/bert-base-uncased")
     input_ids = tokenizer(["a picture of"]).input_ids
 
     out = hf_model.generate(image, input_ids)
@@ -188,4 +189,4 @@ if __name__ == "__main__":
     parser.add_argument("--config_path", default=None, type=str, help="Path to hf config.json of model to convert")
     args = parser.parse_args()
 
-    convert_blip_checkpoint(args.checkpoint_path, args.pytorch_dump_folder_path, args.config_path)
+    convert_blip_checkpoint(args.pytorch_dump_folder_path, args.config_path)

@@ -52,12 +52,11 @@ rendered properly in your Markdown viewer.
 
 </Tip>
 
-これらのテクニックは、[`Trainer`]でモデルをトレーニングしている場合や、純粋なPyTorchループを記述している場合の両方で利用できます。詳細な最適化の設定については、🤗 Accelerateを使用して[これらの最適化を設定できます](#using-accelerate)。
+これらのテクニックは、[`Trainer`]でモデルをトレーニングしている場合や、純粋なPyTorchループを記述している場合の両方で利用できます。詳細な最適化の設定については、🤗 Accelerateを使用して[これらの最適化を設定できます](#using--accelerate)。
 
 これらの方法が十分な利益をもたらさない場合、以下のオプションを検討できます：
 * [効率的なソフトウェアプリビルドを備えたカスタムDockerコンテナの作成](#efficient-software-prebuilds)
 * [Mixture of Experts（MoE）を使用するモデルを検討](#mixture-of-experts)
-* [モデルをBetterTransformerに変換して、PyTorchネイティブのアテンションを活用](#using-pytorch-native-attention)
 
 最後に、これらの方法がまだ十分でない場合、A100などのサーバーグレードGPUに切り替えても、さらなる改善が必要かもしれません。これらのアプローチは、マルチGPUセットアップでも有効であり、[マルチGPUセクション](perf_train_gpu_many)で説明されている追加の並列化技術を活用できます。
 
@@ -83,7 +82,7 @@ training_args = TrainingArguments(per_device_train_batch_size=1, gradient_accumu
 
 上記の例では、効果的なバッチサイズは4になります。
 
-また、トレーニングループを完全に制御するために🤗 Accelerateを使用することもできます。🤗 Accelerateの例は、[このガイドの後半にある](#using-accelerate)で見つけることができます。
+また、トレーニングループを完全に制御するために🤗 Accelerateを使用することもできます。🤗 Accelerateの例は、[このガイドの後半にある](#using--accelerate)で見つけることができます。
 
 できるだけGPUの使用率を最大限にすることが推奨されていますが、高い勾配蓄積ステップ数はトレーニングの遅延をより顕著にすることがあります。以下の例を考えてみましょう。`per_device_train_batch_size=4`の場合、勾配蓄積を使用しないとGPUの制限に達します。バッチサイズ64でトレーニングしたい場合、`per_device_train_batch_size`を1に設定し、`gradient_accumulation_steps`を64に設定しないでください。代わりに、`per_device_train_batch_size=4`を保持し、`gradient_accumulation_steps=16`を設定します。これにより、同じ効果的なバッチサイズが得られ、利用可能なGPUリソースが効果的に活用されます。
 
@@ -106,7 +105,7 @@ training_args = TrainingArguments(
 )
 ```
 
-代替手段として、🤗 Accelerateを使用することもできます - 🤗 Accelerateの例は[このガイドのさらに後ろにあります](#using-accelerate)。
+代替手段として、🤗 Accelerateを使用することもできます - 🤗 Accelerateの例は[このガイドのさらに後ろにあります](#using--accelerate)。
 
 <Tip>
 
@@ -133,7 +132,7 @@ training_args = TrainingArguments(
 training_args = TrainingArguments(per_device_train_batch_size=4, fp16=True, **default_args)
 ```
 
-🤗 Accelerateを使用する場合、🤗 Accelerateの例は[このガイドのさらに後ろにあります](#using-accelerate)。
+🤗 Accelerateを使用する場合、🤗 Accelerateの例は[このガイドのさらに後ろにあります](#using--accelerate)。
 
 ### BF16
 
@@ -151,7 +150,7 @@ training_args = TrainingArguments(bf16=True, **default_args)
 
 アンペアハードウェアは、tf32という特別なデータ型を使用します。これは、fp32と同じ数値範囲（8ビット）を持っていますが、23ビットの精度ではなく、10ビットの精度（fp16と同じ）を持ち、合計で19ビットしか使用しません。これは通常のfp32トレーニングおよび推論コードを使用し、tf32サポートを有効にすることで、最大3倍のスループットの向上が得られる点で「魔法のよう」です。行う必要があるのは、次のコードを追加するだけです：
 
-```
+```python
 import torch
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -193,7 +192,7 @@ AdamWオプティマイザの代替手段について詳しく見てみましょ
 1. [`Trainer`]で使用可能な`adafactor`
 2. Trainerで使用可能な`adamw_bnb_8bit`は、デモンストレーション用に以下でサードパーティの統合が提供されています。
 
-比較のため、3Bパラメータモデル（例：「t5-3b」）の場合：
+比較のため、3Bパラメータモデル（例：「google-t5/t5-3b」）の場合：
 * 標準のAdamWオプティマイザは、各パラメータに8バイトを使用するため、24GBのGPUメモリが必要です（8 * 3 => 24GB）。
 * Adafactorオプティマイザは12GB以上必要です。各パラメータにわずか4バイト以上を使用するため、4 * 3と少し余分になります。
 * 8ビットのBNB量子化オプティマイザは、すべてのオプティマイザの状態が量子化されている場合、わずか6GBしか使用しません。
@@ -237,8 +236,7 @@ from transformers.trainer_pt_utils import get_parameter_names
 
 training_args = TrainingArguments(per_device_train_batch_size=4, **default_args)
 
-decay_parameters = get_parameter_names(model, [nn.LayerNorm])
-decay_parameters = [name for name in decay_parameters if "bias" not in name]
+decay_parameters = get_parameter_names(model, [nn.LayerNorm], ["bias", "layernorm", "rmsnorm"])
 optimizer_grouped_parameters = [
     {
         "params": [p for n, p in model.named_parameters() if n in decay_parameters],
@@ -407,32 +405,9 @@ PyTorchの[pipとcondaビルド](https://pytorch.org/get-started/locally/#start-
 
 関連するほとんどの論文および実装はTensorflow/TPUを中心に構築されています。
 
-- [GShard: Conditional Computation and Automatic Shardingを活用した巨大モデルのスケーリング](https://arxiv.org/abs/2006.16668)
-- [Switch Transformers: シンプルで効率的なスパース性を備えたトリリオンパラメータモデルへのスケーリング](https://arxiv.org/abs/2101.03961)
+- [GShard: Conditional Computation and Automatic Shardingを活用した巨大モデルのスケーリング](https://huggingface.co/papers/2006.16668)
+- [Switch Transformers: シンプルで効率的なスパース性を備えたトリリオンパラメータモデルへのスケーリング](https://huggingface.co/papers/2101.03961)
 - [GLaM: Generalist Language Model (GLaM)](https://ai.googleblog.com/2021/12/more-efficient-in-context-learning-with.html)
 
-PytorchにはDeepSpeedが構築したものもあります: [DeepSpeed-MoE: Advancing Mixture-of-Experts Inference and Training to Power Next-Generation AI Scale](https://arxiv.org/abs/2201.05596)、[Mixture of Experts](https://www.deepspeed.ai/tutorials/mixture-of-experts/) - ブログ記事: [1](https://www.microsoft.com/en-us/research/blog/deepspeed-powers-8x-larger-moe-model-training-with-high-performance/)、[2](https://www.microsoft.com/en-us/research/publication/scalable-and-efficient-moe-training-for-multitask-multilingual-models/)、大規模なTransformerベースの自然言語生成モデルの具体的な展開については、[ブログ記事](https://www.deepspeed.ai/2021/12/09/deepspeed-moe-nlg.html)、[Megatron-Deepspeedブランチ](https://github.com/microsoft/Megatron-DeepSpeed/tree/moe-training)を参照してください。
+PytorchにはDeepSpeedが構築したものもあります: [DeepSpeed-MoE: Advancing Mixture-of-Experts Inference and Training to Power Next-Generation AI Scale](https://huggingface.co/papers/2201.05596)、[Mixture of Experts](https://www.deepspeed.ai/tutorials/mixture-of-experts/) - ブログ記事: [1](https://www.microsoft.com/en-us/research/blog/deepspeed-powers-8x-larger-moe-model-training-with-high-performance/)、[2](https://www.microsoft.com/en-us/research/publication/scalable-and-efficient-moe-training-for-multitask-multilingual-models/)、大規模なTransformerベースの自然言語生成モデルの具体的な展開については、[ブログ記事](https://www.deepspeed.ai/2021/12/09/deepspeed-moe-nlg.html)、[Megatron-Deepspeedブランチ](https://github.com/microsoft/Megatron-DeepSpeed/tree/moe-training)を参照してください。
 
-
-## PyTorchネイティブアテンションとFlash Attentionの使用
-
-PyTorch 2.0では、ネイティブの[`torch.nn.functional.scaled_dot_product_attention`](https://pytorch.org/docs/master/generated/torch.nn.functional.scaled_dot_product_attention.html)（SDPA）がリリースされ、[メモリ効率の高いアテンション](https://arxiv.org/abs/2112.05682)や[フラッシュアテンション](https://arxiv.org/abs/2205.14135)などの融合されたGPUカーネルの使用を可能にします。
-
-[`optimum`](https://github.com/huggingface/optimum)パッケージをインストールした後、関連する内部モジュールを置き換えて、PyTorchのネイティブアテンションを使用できます。以下のように設定します：
-
-
-```python
-model = model.to_bettertransformer()
-```
-
-変換後、通常通りモデルをトレーニングしてください。
-
-<Tip warning={true}>
-
-PyTorchネイティブの`scaled_dot_product_attention`演算子は、`attention_mask`が提供されていない場合にのみFlash Attentionにディスパッチできます。
-
-デフォルトでは、トレーニングモードでBetterTransformer統合はマスクサポートを削除し、バッチトレーニングにパディングマスクが必要ないトレーニングにしか使用できません。これは、例えばマスク言語モデリングや因果言語モデリングのような、バッチトレーニングにパディングマスクが不要なトレーニングの場合に該当します。BetterTransformerはパディングマスクが必要なタスクに対するモデルの微調整には適していません。
-
-</Tip>
-
-SDPAを使用したアクセラレーションとメモリの節約について詳しく知りたい場合は、この[ブログ記事](https://pytorch.org/blog/out-of-the-box-acceleration/)をチェックしてください。

@@ -225,22 +225,7 @@ NLP任务是最常见的类型之一，因为文本是我们进行交流的自�
 有两种常见的问答类型：
 
 * 提取式：给定一个问题和一些上下文，答案是从模型必须提取的上下文中的一段文本跨度。
-* 抽象式：给定一个问题和一些上下文，答案从上下文中生成；这种方法由[`Text2TextGenerationPipeline`]处理，而不是下面显示的[`QuestionAnsweringPipeline`]。
-
-
-```py
->>> from transformers import pipeline
-
->>> question_answerer = pipeline(task="question-answering")
->>> preds = question_answerer(
-...     question="What is the name of the repository?",
-...     context="The name of the repository is huggingface/transformers",
-... )
->>> print(
-...     f"score: {round(preds['score'], 4)}, start: {preds['start']}, end: {preds['end']}, answer: {preds['answer']}"
-... )
-score: 0.9327, start: 30, end: 54, answer: huggingface/transformers
-```
+* 抽象式：给定一个问题和一些上下文，答案从上下文中生成。
 
 ### 摘要
 
@@ -249,18 +234,7 @@ score: 0.9327, start: 30, end: 54, answer: huggingface/transformers
 像问答一样，摘要有两种类型：
 
 * 提取式：从原始文本中识别和提取最重要的句子
-* 抽象式：从原始文本生成目标摘要（可能包括不在输入文档中的新单词）；[`SummarizationPipeline`]使用抽象方法。
-
-
-```py
->>> from transformers import pipeline
-
->>> summarizer = pipeline(task="summarization")
->>> summarizer(
-...     "In this work, we presented the Transformer, the first sequence transduction model based entirely on attention, replacing the recurrent layers most commonly used in encoder-decoder architectures with multi-headed self-attention. For translation tasks, the Transformer can be trained significantly faster than architectures based on recurrent or convolutional layers. On both WMT 2014 English-to-German and WMT 2014 English-to-French translation tasks, we achieve a new state of the art. In the former task our best model outperforms even all previously reported ensembles."
-... )
-[{'summary_text': ' The Transformer is the first sequence transduction model based entirely on attention . It replaces the recurrent layers most commonly used in encoder-decoder architectures with multi-headed self-attention . For translation tasks, the Transformer can be trained significantly faster than architectures based on recurrent or convolutional layers .'}]
-```
+* 抽象式：从原始文本生成目标摘要（可能包括不在输入文档中的新单词）
 
 ### 翻译
 
@@ -272,7 +246,7 @@ score: 0.9327, start: 30, end: 54, answer: huggingface/transformers
 >>> from transformers import pipeline
 
 >>> text = "translate English to French: Hugging Face is a community-based open-source platform for machine learning."
->>> translator = pipeline(task="translation", model="t5-small")
+>>> translator = pipeline(task="translation", model="google-t5/t5-small")
 >>> translator(text)
 [{'translation_text': "Hugging Face est une tribune communautaire de l'apprentissage des machines."}]
 ```
@@ -284,7 +258,6 @@ score: 0.9327, start: 30, end: 54, answer: huggingface/transformers
 有两种类型的话语模型：
 
 * causal：模型的目标是预测序列中的下一个`token`，而未来的`tokens`被遮盖。
-  
 
     ```py
     >>> from transformers import pipeline
@@ -294,9 +267,8 @@ score: 0.9327, start: 30, end: 54, answer: huggingface/transformers
     >>> generator(prompt)  # doctest: +SKIP
     ```
 
-*  masked：模型的目标是预测序列中被遮蔽的`token`，同时具有对序列中所有`tokens`的完全访问权限。
+* masked：模型的目标是预测序列中被遮蔽的`token`，同时具有对序列中所有`tokens`的完全访问权限。
 
-    
     ```py
     >>> text = "Hugging Face is a community-based open-source <mask> for machine learning."
     >>> fill_mask = pipeline(task="fill-mask")
@@ -332,7 +304,7 @@ score: 0.9327, start: 30, end: 54, answer: huggingface/transformers
 >>> from PIL import Image
 >>> import requests
 
->>> url = "https://datasets-server.huggingface.co/assets/hf-internal-testing/example-documents/--/hf-internal-testing--example-documents/test/2/image/image.jpg"
+>>> url = "https://huggingface.co/datasets/hf-internal-testing/example-documents/resolve/main/jpeg_images/2.jpg"
 >>> image = Image.open(requests.get(url, stream=True).raw)
 
 >>> doc_question_answerer = pipeline("document-question-answering", model="magorshunov/layoutlm-invoices")

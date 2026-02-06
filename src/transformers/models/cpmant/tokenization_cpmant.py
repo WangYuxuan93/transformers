@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2022 The OpenBMB Team and The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,33 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Tokenization classes for CPMAnt."""
+
 import collections
 import os
-from typing import List, Optional, Tuple
 
-from transformers.utils import is_jieba_available, requires_backends
+from transformers.utils import is_rjieba_available, requires_backends
 
 
-if is_jieba_available():
-    import jieba
+if is_rjieba_available():
+    import rjieba
 
-from ...tokenization_utils import PreTrainedTokenizer
+from ...tokenization_python import PreTrainedTokenizer
 from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
 
 VOCAB_FILES_NAMES = {"vocab_file": "vocab.txt"}
-
-PRETRAINED_VOCAB_FILES_MAP = {
-    "vocab_file": {
-        "openbmb/cpm-ant-10b": "https://huggingface.co/openbmb/cpm-ant-10b/blob/main/vocab.txt",
-    },
-}
-
-PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {
-    "openbmb/cpm-ant-10b": 1024,
-}
 
 
 def load_vocab(vocab_file):
@@ -53,7 +42,7 @@ def load_vocab(vocab_file):
     return vocab
 
 
-class WordpieceTokenizer(object):
+class WordpieceTokenizer:
     def __init__(self, vocab, unk_token="<unk>", max_input_chars_per_word=200):
         self.vocab = vocab
         self.unk_token = unk_token
@@ -111,8 +100,6 @@ class CpmAntTokenizer(PreTrainedTokenizer):
     """
 
     vocab_files_names = VOCAB_FILES_NAMES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
-    max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
     model_input_names = ["input_ids", "attention_mask"]
     add_prefix_space = False
 
@@ -130,7 +117,7 @@ class CpmAntTokenizer(PreTrainedTokenizer):
         padding_side="left",
         **kwargs,
     ):
-        requires_backends(self, ["jieba"])
+        requires_backends(self, ["rjieba"])
         self.bod_token = bod_token
         self.eod_token = eod_token
         self.encoder = load_vocab(vocab_file)
@@ -155,8 +142,16 @@ class CpmAntTokenizer(PreTrainedTokenizer):
             line_token=line_token,
             space_token=space_token,
             padding_side=padding_side,
+            token_type_ids_pattern="all_zeros",
+            token_type_ids_include_special_tokens=True,
+            special_tokens_pattern="bos",
             **kwargs,
         )
+        for special_token in [space_token, line_token]:
+            token_id = self.added_tokens_encoder.pop(special_token, None)
+            if token_id is not None:
+                self._added_tokens_decoder.pop(token_id, None)
+        self._update_total_vocab_size()
 
     @property
     def bod_token_id(self):
@@ -180,7 +175,7 @@ class CpmAntTokenizer(PreTrainedTokenizer):
     def _tokenize(self, text):
         """Tokenize a string."""
         output_tokens = []
-        for x in jieba.cut(text, cut_all=False):
+        for x in rjieba.cut(text, False):
             output_tokens.extend(self.wordpiece_tokenizer.tokenize(x))
         return output_tokens
 
@@ -195,7 +190,7 @@ class CpmAntTokenizer(PreTrainedTokenizer):
     def check(self, token):
         return token in self.encoder
 
-    def convert_tokens_to_string(self, tokens: List[str]) -> str:
+    def convert_tokens_to_string(self, tokens: list[str]) -> str:
         return "".join(tokens)
 
     def _convert_token_to_id(self, token):
@@ -206,7 +201,7 @@ class CpmAntTokenizer(PreTrainedTokenizer):
         """Converts an index (integer) in a token (str) using the vocab."""
         return self.decoder.get(index, self.unk_token)
 
-    def save_vocabulary(self, save_directory: str, filename_prefix: Optional[str] = None) -> Tuple[str]:
+    def save_vocabulary(self, save_directory: str, filename_prefix: str | None = None) -> tuple[str]:
         if os.path.isdir(save_directory):
             vocab_file = os.path.join(
                 save_directory, (filename_prefix + "-" if filename_prefix else "") + VOCAB_FILES_NAMES["vocab_file"]
@@ -233,46 +228,5 @@ class CpmAntTokenizer(PreTrainedTokenizer):
                 index += 1
         return (vocab_file,)
 
-    def build_inputs_with_special_tokens(self, token_ids_0: List[int], token_ids_1: List[int] = None) -> List[int]:
-        """
-        Build model inputs from a sequence or a pair of sequence for sequence classification tasks by concatenating and
-        adding special tokens. A CPMAnt sequence has the following format:
 
-        - single sequence: `[BOS] Sequence`.
-
-        Args:
-            token_ids_0 (`List[int]`): The first tokenized sequence that special tokens will be added.
-            token_ids_1 (`List[int]`): The optional second tokenized sequence that special tokens will be added.
-
-        Returns:
-            `List[int]`: The model input with special tokens.
-        """
-        if token_ids_1 is None:
-            return [self.bos_token_id] + token_ids_0
-        return [self.bos_token_id] + token_ids_0 + [self.bos_token_id] + token_ids_1
-
-    def get_special_tokens_mask(
-        self, token_ids_0: List[int], token_ids_1: Optional[List[int]] = None, already_has_special_tokens: bool = False
-    ) -> List[int]:
-        """
-        Retrieve sequence ids from a token list that has no special tokens added. This method is called when adding
-        special tokens using the tokenizer `prepare_for_model` method.
-
-        Args:
-            token_ids_0 (`List[int]`): List of IDs.
-            token_ids_1 (`List[int]`, *optional*): Optional second list of IDs for sequence pairs.
-            already_has_special_tokens (`bool`, *optional*, defaults to `False`):
-                Whether or not the token list is already formatted with special tokens for the model.
-
-        Returns:
-            `List[int]`: A list of integers in the range [0, 1]: 1 for a special token, 0 for a sequence token.
-        """
-
-        if already_has_special_tokens:
-            return super().get_special_tokens_mask(
-                token_ids_0=token_ids_0, token_ids_1=token_ids_1, already_has_special_tokens=True
-            )
-
-        if token_ids_1 is not None:
-            return [1] + ([0] * len(token_ids_0)) + [1] + ([0] * len(token_ids_1))
-        return [1] + ([0] * len(token_ids_0))
+__all__ = ["CpmAntTokenizer"]

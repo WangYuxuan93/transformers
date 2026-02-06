@@ -23,11 +23,16 @@
     title: 使用🤗 PEFT加载和训练adapters
   - local: model_sharing
     title: 分享您的模型
-  - local: transformers_agents
-    title: agents教程
   - local: llm_tutorial
     title: 使用LLMs进行生成
+  - local: generation_strategies
+    title: 生成策略
   title: 教程
+- sections:
+  - isExpanded: false
+    sections:
+    - local: tasks/asr
+      title: 自动语音识别
 - sections:
   - local: fast_tokenizers
     title: 使用 🤗 Tokenizers 中的分词器
@@ -37,15 +42,29 @@
     title: 使用特定于模型的 API
   - local: custom_models
     title: 共享自定义模型
+  - local: chat_templating
+    title: 聊天模型的模板
   - local: serialization
     title: 导出为 ONNX
-  - local: tflite
-    title: 导出为 TFLite
+  - local: gguf
+    title: 与 GGUF 格式的互操作性
+  - local: tiktoken
+    title: 与 Tiktoken 文件的互操作性
+  - local: community
+    title: 社区资源
   title: 开发者指南
 - sections:
   - local: performance
     title: 综述
   - sections:
+    - local: fsdp
+      title: 完全分片数据并行
+    - local: perf_train_special
+      title: 在 Apple silicon 芯片上进行 PyTorch 训练
+    - local: perf_infer_gpu_multi
+      title: 多GPU推理
+    - local: perf_train_cpu
+      title: 在CPU上进行高效训练
     - local: perf_hardware
       title: 用于训练的定制硬件
     - local: hpo_train
@@ -55,41 +74,41 @@
     title: 实例化大模型
   - local: debugging
     title: 问题定位及解决
-  - local: tf_xla
-    title: TensorFlow模型的XLA集成
   - local: perf_torch_compile
     title: 使用 `torch.compile()` 优化推理
   title: 性能和可扩展性
 - sections:
   - local: contributing
     title: 如何为 🤗 Transformers 做贡献？
+  - local: add_new_pipeline
+    title: 如何将流水线添加到 🤗 Transformers？
   title: 贡献
 - sections:
+  - local: philosophy
+    title: Transformers的设计理念
   - local: task_summary
     title: 🤗Transformers能做什么
   - local: tokenizer_summary
     title: 分词器的摘要
+  - local: attention
+    title: 注意力机制
+  - local: bertology
+    title: 基于BERT进行的相关研究
   title: 概念指南
 - sections:
   - sections:
-    - local: main_classes/agent
-      title: Agents和工具
     - local: main_classes/callback
       title: Callbacks
     - local: main_classes/configuration
       title: Configuration
     - local: main_classes/data_collator
       title: Data Collator
-    - local: main_classes/keras_callbacks
-      title: Keras callbacks
     - local: main_classes/logging
       title: Logging
     - local: main_classes/model
       title: 模型
     - local: main_classes/text_generation
       title: 文本生成
-    - local: main_classes/onnx
-      title: ONNX
     - local: main_classes/optimizer_schedules
       title: Optimization
     - local: main_classes/output
@@ -130,8 +149,8 @@
       title: 通用工具
     - local: internal/time_series_utils
       title: 时序数据工具
+    - sections:
+      - local: model_doc/bert
+        title: BERT
     title: 内部辅助工具
-  title: 应用程序接口 (API) 
-
-
-
+  title: 应用程序接口 (API)

@@ -13,20 +13,27 @@ specific language governing permissions and limitations under the License.
 rendered properly in your Markdown viewer.
 
 -->
+*This model was released on 2021-04-14 and added to Hugging Face Transformers on 2021-09-01.*
 
 # Speech Encoder Decoder Models
+
+<div class="flex flex-wrap space-x-1">
+<img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-DE3412?style=flat&logo=pytorch&logoColor=white">
+<img alt="FlashAttention" src="https://img.shields.io/badge/%E2%9A%A1%EF%B8%8E%20FlashAttention-eae0c8?style=flat">
+<img alt="SDPA" src="https://img.shields.io/badge/SDPA-DE3412?style=flat&logo=pytorch&logoColor=white">
+</div>
 
 The [`SpeechEncoderDecoderModel`] can be used to initialize a speech-to-text model
 with any pretrained speech autoencoding model as the encoder (*e.g.* [Wav2Vec2](wav2vec2), [Hubert](hubert)) and any pretrained autoregressive model as the decoder.
 
 The effectiveness of initializing speech-sequence-to-text-sequence models with pretrained checkpoints for speech
 recognition and speech translation has *e.g.* been shown in [Large-Scale Self- and Semi-Supervised Learning for Speech
-Translation](https://arxiv.org/abs/2104.06678) by Changhan Wang, Anne Wu, Juan Pino, Alexei Baevski, Michael Auli,
+Translation](https://huggingface.co/papers/2104.06678) by Changhan Wang, Anne Wu, Juan Pino, Alexei Baevski, Michael Auli,
 Alexis Conneau.
 
 An example of how to use a [`SpeechEncoderDecoderModel`] for inference can be seen in [Speech2Text2](speech_to_text_2).
 
-## Randomly initializing `SpeechEncoderDecoderModel` from model configurations.
+## Randomly initializing `SpeechEncoderDecoderModel` from model configurations
 
 [`SpeechEncoderDecoderModel`] can be randomly initialized from an encoder and a decoder config. In the following example, we show how to do this using the default [`Wav2Vec2Model`] configuration for the encoder
 and the default [`BertForCausalLM`] configuration for the decoder.
@@ -41,7 +48,7 @@ and the default [`BertForCausalLM`] configuration for the decoder.
 >>> model = SpeechEncoderDecoderModel(config=config)
 ```
 
-## Initialising `SpeechEncoderDecoderModel` from a pretrained encoder and a pretrained decoder.
+## Initialising `SpeechEncoderDecoderModel` from a pretrained encoder and a pretrained decoder
 
 [`SpeechEncoderDecoderModel`] can be initialized from a pretrained encoder checkpoint and a pretrained decoder checkpoint. Note that any pretrained Transformer-based speech model, *e.g.* [Wav2Vec2](wav2vec2), [Hubert](hubert) can serve as the encoder and both pretrained auto-encoding models, *e.g.* BERT, pretrained causal language models, *e.g.* GPT2, as well as the pretrained decoder part of sequence-to-sequence models, *e.g.* decoder of BART, can be used as the decoder.
 Depending on which architecture you choose as the decoder, the cross-attention layers might be randomly initialized.
@@ -52,11 +59,11 @@ To do so, the `SpeechEncoderDecoderModel` class provides a [`SpeechEncoderDecode
 >>> from transformers import SpeechEncoderDecoderModel
 
 >>> model = SpeechEncoderDecoderModel.from_encoder_decoder_pretrained(
-...     "facebook/hubert-large-ll60k", "bert-base-uncased"
+...     "facebook/hubert-large-ll60k", "google-bert/bert-base-uncased"
 ... )
 ```
 
-## Loading an existing `SpeechEncoderDecoderModel` checkpoint and perform inference.
+## Loading an existing `SpeechEncoderDecoderModel` checkpoint and perform inference
 
 To load fine-tuned checkpoints of the `SpeechEncoderDecoderModel` class, [`SpeechEncoderDecoderModel`] provides the `from_pretrained(...)` method just like any other model architecture in Transformers.
 
@@ -93,7 +100,7 @@ speech inputs) and `labels` (which are the `input_ids` of the encoded target seq
 >>> from datasets import load_dataset
 
 >>> encoder_id = "facebook/wav2vec2-base-960h"  # acoustic model encoder
->>> decoder_id = "bert-base-uncased"  # text decoder
+>>> decoder_id = "google-bert/bert-base-uncased"  # text decoder
 
 >>> feature_extractor = AutoFeatureExtractor.from_pretrained(encoder_id)
 >>> tokenizer = AutoTokenizer.from_pretrained(decoder_id)
@@ -123,10 +130,4 @@ speech inputs) and `labels` (which are the `input_ids` of the encoded target seq
 
 [[autodoc]] SpeechEncoderDecoderModel
     - forward
-    - from_encoder_decoder_pretrained
-
-## FlaxSpeechEncoderDecoderModel
-
-[[autodoc]] FlaxSpeechEncoderDecoderModel
-    - __call__
     - from_encoder_decoder_pretrained

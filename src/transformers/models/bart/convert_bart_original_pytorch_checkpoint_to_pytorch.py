@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2020 The HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Convert BART checkpoint."""
-
 
 import argparse
 import os
@@ -72,7 +70,7 @@ def rename_key(dct, old, new):
 
 def load_xsum_checkpoint(checkpoint_path):
     """Checkpoint path should end in model.pt"""
-    sd = torch.load(checkpoint_path, map_location="cpu")
+    sd = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     hub_interface = torch.hub.load("pytorch/fairseq", "bart.large.cnn").eval()
     hub_interface.model.load_state_dict(sd["model"])
     return hub_interface

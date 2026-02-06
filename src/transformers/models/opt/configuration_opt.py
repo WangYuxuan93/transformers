@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2022 The Metaseq Authors and The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,32 +11,24 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" OPT model configuration"""
-from ...configuration_utils import PretrainedConfig
+"""OPT model configuration"""
+
+from ...configuration_utils import PreTrainedConfig
 from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
 
-OPT_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "facebook/opt-125m": "https://huggingface.co/facebook/opt-125m/blob/main/config.json",
-    "facebook/opt-350m": "https://huggingface.co/facebook/opt-350m/blob/main/config.json",
-    "facebook/opt-1.3b": "https://huggingface.co/facebook/opt-1.3b/blob/main/config.json",
-    "facebook/opt-2.7b": "https://huggingface.co/facebook/opt-2.7b/blob/main/config.json",
-    "facebook/opt-6.7b": "https://huggingface.co/facebook/opt-6.7b/blob/main/config.json",
-    "facebook/opt-13b": "https://huggingface.co/facebook/opt-13b/blob/main/config.json",
-}
 
-
-class OPTConfig(PretrainedConfig):
+class OPTConfig(PreTrainedConfig):
     r"""
     This is the configuration class to store the configuration of a [`OPTModel`]. It is used to instantiate a OPT model
     according to the specified arguments, defining the model architecture. Instantiating a configuration with the
     defaults will yield a similar configuration to that of the OPT
     [facebook/opt-350m](https://huggingface.co/facebook/opt-350m) architecture.
 
-    Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
-    documentation from [`PretrainedConfig`] for more information.
+    Configuration objects inherit from [`PreTrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PreTrainedConfig`] for more information.
 
 
     Args:
@@ -68,7 +59,7 @@ class OPTConfig(PretrainedConfig):
         attention_dropout (`float`, *optional*, defaults to 0.0):
             The dropout ratio for the attention probabilities.
         layerdrop (`float`, *optional*, defaults to 0.0):
-            The LayerDrop probability. See the [LayerDrop paper](see https://arxiv.org/abs/1909.11556) for more
+            The LayerDrop probability. See the [LayerDrop paper](see https://huggingface.co/papers/1909.11556) for more
             details.
         init_std (`float`, *optional*, defaults to 0.02):
             The standard deviation of the truncated_normal_initializer for initializing all weight matrices.
@@ -119,14 +110,14 @@ class OPTConfig(PretrainedConfig):
         eos_token_id=2,
         enable_bias=True,
         layer_norm_elementwise_affine=True,
+        tie_word_embeddings=True,
         **kwargs,
     ):
-        super().__init__(
-            pad_token_id=pad_token_id,
-            bos_token_id=bos_token_id,
-            eos_token_id=eos_token_id,
-            **kwargs,
-        )
+        super().__init__(**kwargs)
+        self.pad_token_id = pad_token_id
+        self.bos_token_id = bos_token_id
+        self.eos_token_id = eos_token_id
+        self.tie_word_embeddings = tie_word_embeddings
         self.vocab_size = vocab_size
         self.max_position_embeddings = max_position_embeddings
         self.num_attention_heads = num_attention_heads
@@ -149,3 +140,6 @@ class OPTConfig(PretrainedConfig):
         # with checkpoints that have been fine-tuned before transformers v4.20.1
         # see https://github.com/facebookresearch/metaseq/pull/164
         self._remove_final_layer_norm = _remove_final_layer_norm
+
+
+__all__ = ["OPTConfig"]

@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023 The HuggingFace Team and The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,31 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Tokenization classes for FastSpeech2Conformer."""
+
 import json
 import os
-from typing import Optional, Tuple
 
 import regex
 
-from ...tokenization_utils import PreTrainedTokenizer
+from ...tokenization_python import PreTrainedTokenizer
 from ...utils import logging, requires_backends
 
 
 logger = logging.get_logger(__name__)
 
 VOCAB_FILES_NAMES = {"vocab_file": "vocab.json"}
-
-PRETRAINED_VOCAB_FILES_MAP = {
-    "vocab_file": {
-        "espnet/fastspeech2_conformer": "https://huggingface.co/espnet/fastspeech2_conformer/raw/main/vocab.json",
-    },
-}
-
-PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {
-    # Set to somewhat arbitrary large number as the model input
-    # isn't constrained by the relative positional encoding
-    "espnet/fastspeech2_conformer": 4096,
-}
 
 
 class FastSpeech2ConformerTokenizer(PreTrainedTokenizer):
@@ -61,9 +48,7 @@ class FastSpeech2ConformerTokenizer(PreTrainedTokenizer):
     """
 
     vocab_files_names = VOCAB_FILES_NAMES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
     model_input_names = ["input_ids", "attention_mask"]
-    max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
 
     def __init__(
         self,
@@ -92,6 +77,7 @@ class FastSpeech2ConformerTokenizer(PreTrainedTokenizer):
             unk_token=unk_token,
             pad_token=pad_token,
             should_strip_spaces=should_strip_spaces,
+            special_tokens_pattern="none",
             **kwargs,
         )
 
@@ -144,19 +130,19 @@ class FastSpeech2ConformerTokenizer(PreTrainedTokenizer):
 
     # Override since phonemes cannot be converted back to strings
     def decode(self, token_ids, **kwargs):
-        logger.warn(
+        logger.warning(
             "Phonemes cannot be reliably converted to a string due to the one-many mapping, converting to tokens instead."
         )
         return self.convert_ids_to_tokens(token_ids)
 
     # Override since phonemes cannot be converted back to strings
     def convert_tokens_to_string(self, tokens, **kwargs):
-        logger.warn(
+        logger.warning(
             "Phonemes cannot be reliably converted to a string due to the one-many mapping, returning the tokens."
         )
         return tokens
 
-    def save_vocabulary(self, save_directory: str, filename_prefix: Optional[str] = None) -> Tuple[str]:
+    def save_vocabulary(self, save_directory: str, filename_prefix: str | None = None) -> tuple[str]:
         """
         Save the vocabulary and special tokens file to a directory.
 
@@ -196,3 +182,6 @@ class FastSpeech2ConformerTokenizer(PreTrainedTokenizer):
                 "You need to install g2p-en to use FastSpeech2ConformerTokenizer. "
                 "See https://pypi.org/project/g2p-en/ for installation."
             )
+
+
+__all__ = ["FastSpeech2ConformerTokenizer"]

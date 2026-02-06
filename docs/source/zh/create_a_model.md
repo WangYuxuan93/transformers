@@ -84,19 +84,19 @@ DistilBertConfig {
 }
 ```
 
-预训练模型的属性可以在 [`~PretrainedConfig.from_pretrained`] 函数中进行修改：
+预训练模型的属性可以在 [`~PreTrainedConfig.from_pretrained`] 函数中进行修改：
 
 ```py
->>> my_config = DistilBertConfig.from_pretrained("distilbert-base-uncased", activation="relu", attention_dropout=0.4)
+>>> my_config = DistilBertConfig.from_pretrained("distilbert/distilbert-base-uncased", activation="relu", attention_dropout=0.4)
 ```
 
-当你对模型配置满意时，可以使用 [`~PretrainedConfig.save_pretrained`] 来保存配置。你的配置文件将以 JSON 文件的形式存储在指定的保存目录中：
+当你对模型配置满意时，可以使用 [`~PreTrainedConfig.save_pretrained`] 来保存配置。你的配置文件将以 JSON 文件的形式存储在指定的保存目录中：
 
 ```py
 >>> my_config.save_pretrained(save_directory="./your_model_save_path")
 ```
 
-要重用配置文件，请使用 [`~PretrainedConfig.from_pretrained`] 进行加载：
+要重用配置文件，请使用 [`~PreTrainedConfig.from_pretrained`] 进行加载：
 
 ```py
 >>> my_config = DistilBertConfig.from_pretrained("./your_model_save_path/config.json")
@@ -110,10 +110,8 @@ DistilBertConfig {
 
 ## 模型
 
-接下来，创建一个[模型](main_classes/models)。模型，也可泛指架构，定义了每一层网络的行为以及进行的操作。配置中的 `num_hidden_layers` 等属性用于定义架构。每个模型都共享基类 [`PreTrainedModel`] 和一些常用方法，例如调整输入嵌入的大小和修剪自注意力头。此外，所有模型都是 [`torch.nn.Module`](https://pytorch.org/docs/stable/generated/torch.nn.Module.html)、[`tf.keras.Model`](https://www.tensorflow.org/api_docs/python/tf/keras/Model) 或 [`flax.linen.Module`](https://flax.readthedocs.io/en/latest/api_reference/flax.linen/module.html) 的子类。这意味着模型与各自框架的用法兼容。
+接下来，创建一个[模型](main_classes/models)。模型，也可泛指架构，定义了每一层网络的行为以及进行的操作。配置中的 `num_hidden_layers` 等属性用于定义架构。每个模型都共享基类 [`PreTrainedModel`] 和一些常用方法，例如调整输入嵌入的大小和修剪自注意力头。此外，所有模型都是 [`torch.nn.Module`](https://pytorch.org/docs/stable/generated/torch.nn.Module.html) 的子类。这意味着模型与各自框架的用法兼容。
 
-<frameworkcontent>
-<pt>
 将自定义配置属性加载到模型中：
 
 ```py
@@ -128,53 +126,25 @@ DistilBertConfig {
 使用 [`~PreTrainedModel.from_pretrained`] 创建预训练模型：
 
 ```py
->>> model = DistilBertModel.from_pretrained("distilbert-base-uncased")
+>>> model = DistilBertModel.from_pretrained("distilbert/distilbert-base-uncased")
 ```
 
 当加载预训练权重时，如果模型是由 🤗 Transformers 提供的，将自动加载默认模型配置。然而，如果你愿意，仍然可以将默认模型配置的某些或者所有属性替换成你自己的配置：
 
 ```py
->>> model = DistilBertModel.from_pretrained("distilbert-base-uncased", config=my_config)
+>>> model = DistilBertModel.from_pretrained("distilbert/distilbert-base-uncased", config=my_config)
 ```
-</pt>
-<tf>
-将自定义配置属性加载到模型中：
-
-```py
->>> from transformers import TFDistilBertModel
-
->>> my_config = DistilBertConfig.from_pretrained("./your_model_save_path/my_config.json")
->>> tf_model = TFDistilBertModel(my_config)
-```
-
-这段代码创建了一个具有随机参数而不是预训练权重的模型。在训练该模型之前，您还无法将该模型用于任何用途。训练是一项昂贵且耗时的过程。通常来说，最好使用预训练模型来更快地获得更好的结果，同时仅使用训练所需资源的一小部分。
-
-使用 [`~TFPreTrainedModel.from_pretrained`] 创建预训练模型：
-
-```py
->>> tf_model = TFDistilBertModel.from_pretrained("distilbert-base-uncased")
-```
-
-当加载预训练权重时，如果模型是由 🤗 Transformers 提供的，将自动加载默认模型配置。然而，如果你愿意，仍然可以将默认模型配置的某些或者所有属性替换成自己的配置：
-
-```py
->>> tf_model = TFDistilBertModel.from_pretrained("distilbert-base-uncased", config=my_config)
-```
-</tf>
-</frameworkcontent>
 
 ### 模型头（Model heads）
 
 此时，你已经有了一个输出*隐藏状态*的基础 DistilBERT 模型。隐藏状态作为输入传递到模型头以生成最终输出。🤗 Transformers 为每个任务提供不同的模型头，只要模型支持该任务（即，您不能使用 DistilBERT 来执行像翻译这样的序列到序列任务）。
 
-<frameworkcontent>
-<pt>
 例如，[`DistilBertForSequenceClassification`] 是一个带有序列分类头（sequence classification head）的基础 DistilBERT 模型。序列分类头是池化输出之上的线性层。
 
 ```py
 >>> from transformers import DistilBertForSequenceClassification
 
->>> model = DistilBertForSequenceClassification.from_pretrained("distilbert-base-uncased")
+>>> model = DistilBertForSequenceClassification.from_pretrained("distilbert/distilbert-base-uncased")
 ```
 
 通过切换到不同的模型头，可以轻松地将此检查点重复用于其他任务。对于问答任务，你可以使用 [`DistilBertForQuestionAnswering`] 模型头。问答头（question answering head）与序列分类头类似，不同点在于它是隐藏状态输出之上的线性层。
@@ -182,27 +152,8 @@ DistilBertConfig {
 ```py
 >>> from transformers import DistilBertForQuestionAnswering
 
->>> model = DistilBertForQuestionAnswering.from_pretrained("distilbert-base-uncased")
+>>> model = DistilBertForQuestionAnswering.from_pretrained("distilbert/distilbert-base-uncased")
 ```
-</pt>
-<tf>
-例如，[`TFDistilBertForSequenceClassification`] 是一个带有序列分类头（sequence classification head）的基础 DistilBERT 模型。序列分类头是池化输出之上的线性层。
-
-```py
->>> from transformers import TFDistilBertForSequenceClassification
-
->>> tf_model = TFDistilBertForSequenceClassification.from_pretrained("distilbert-base-uncased")
-```
-
-通过切换到不同的模型头,可以轻松地将此检查点重复用于其他任务。对于问答任务，你可以使用 [`TFDistilBertForQuestionAnswering`] 模型头。问答头（question answering head）与序列分类头类似，不同点在于它是隐藏状态输出之上的线性层。
-
-```py
->>> from transformers import TFDistilBertForQuestionAnswering
-
->>> tf_model = TFDistilBertForQuestionAnswering.from_pretrained("distilbert-base-uncased")
-```
-</tf>
-</frameworkcontent>
 
 ## 分词器
 
@@ -232,7 +183,7 @@ DistilBertConfig {
 ```py
 >>> from transformers import DistilBertTokenizer
 
->>> slow_tokenizer = DistilBertTokenizer.from_pretrained("distilbert-base-uncased")
+>>> slow_tokenizer = DistilBertTokenizer.from_pretrained("distilbert/distilbert-base-uncased")
 ```
 
 使用 [`DistilBertTokenizerFast`] 类创建快速分词器：
@@ -240,7 +191,7 @@ DistilBertConfig {
 ```py
 >>> from transformers import DistilBertTokenizerFast
 
->>> fast_tokenizer = DistilBertTokenizerFast.from_pretrained("distilbert-base-uncased")
+>>> fast_tokenizer = DistilBertTokenizerFast.from_pretrained("distilbert/distilbert-base-uncased")
 ```
 
 <Tip>

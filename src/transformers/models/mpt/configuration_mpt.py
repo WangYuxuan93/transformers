@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023 HuggingFace Inc. team and MosaicML NLP team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,25 +11,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Mpt configuration"""
-from typing import TYPE_CHECKING, Optional, Union
+"""Mpt configuration"""
 
-
-if TYPE_CHECKING:
-    pass
-
-from ...configuration_utils import PretrainedConfig
+from ...configuration_utils import PreTrainedConfig
 from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
 
-MPT_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "mosaicml/mpt-7b": "https://huggingface.co/mosaicml/mpt-7b/resolve/main/config.json",
-}
 
-
-class MptAttentionConfig(PretrainedConfig):
+class MptAttentionConfig(PreTrainedConfig):
     """
     This is the configuration class to store the configuration of a [`MptAttention`] class. It is used to instantiate
     attention layers according to the specified arguments, defining the layers architecture. Instantiating a
@@ -38,28 +28,28 @@ class MptAttentionConfig(PretrainedConfig):
     [mosaicml/mpt-7b](https://huggingface.co/mosaicml/mpt-7b) architecture. Most of the arguments are kept for backward
     compatibility with previous MPT models that are hosted on the Hub (previously with `trust_remote_code=True`).
 
-    Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
-    documentation from [`PretrainedConfig`] for more information.
+    Configuration objects inherit from [`PreTrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PreTrainedConfig`] for more information.
 
     Args:
         attn_type (`str`, *optional*, defaults to `"multihead_attention"`):
             type of attention to use. Options: `"multihead_attention"`, `"multiquery_attention"`.
-        attn_pdrop (`float`, *optional*, defaults to 0.0):
+        attn_pdrop (`float`, *optional*, defaults to `0.0`):
             The dropout probability for the attention layers.
         attn_impl (`str`, *optional*, defaults to `"torch"`):
             The attention implementation to use. One of `"torch"`, `"flash"`, or `"triton"`.
         clip_qkv (`float`, *optional*):
             If not `None`, clip the queries, keys, and values in the attention layer to this value.
-        softmax_scale (`float`, *optional*, defaults to `None`):
+        softmax_scale (`float`, *optional*):
             If not `None`, scale the softmax in the attention layer by this value. If `None`, will default to
             `1/sqrt(hidden_size)`.
-        prefix_lm (`bool`, *optional*, defaults to `False`)):
+        prefix_lm (`bool`, *optional*, defaults to `False`):
             Whether the model should operate as a Prefix LM. This requires passing an extra `prefix_mask` argument
             which indicates which tokens belong to the prefix. Tokens in the prefix can attend to one another
             bi-directionally. Tokens outside the prefix use causal attention.
         qk_ln (`bool`, *optional*, defaults to `False`):
             Whether to apply layer normalization to the queries and keys in the attention layer.
-        attn_uses_sequence_id (`bool`, *optional*, defaults to `False`)):
+        attn_uses_sequence_id (`bool`, *optional*, defaults to `False`):
             Whether to restrict attention to tokens that have the same token_type_ids. When the model is in `train`
             mode, this requires passing an extra *token_type_ids* argument which indicates which sub-sequence each
             token belongs to. Defaults to `False` meaning any provided *token_type_ids* will be ignored.
@@ -68,6 +58,8 @@ class MptAttentionConfig(PretrainedConfig):
         alibi_bias_max (`int`, *optional*, defaults to 8):
             The maximum value of the alibi bias.
     """
+
+    base_config_key = "attn_config"
 
     def __init__(
         self,
@@ -100,33 +92,16 @@ class MptAttentionConfig(PretrainedConfig):
                 f"`attn_type` has to be either `multihead_attention` or `multiquery_attention`. Received: {attn_type}"
             )
 
-    @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path, **kwargs) -> "PretrainedConfig":
-        cls._set_token_in_kwargs(kwargs)
 
-        config_dict, kwargs = cls.get_config_dict(pretrained_model_name_or_path, **kwargs)
-
-        if config_dict.get("model_type") == "mpt":
-            config_dict = config_dict["attn_config"]
-
-        if "model_type" in config_dict and hasattr(cls, "model_type") and config_dict["model_type"] != cls.model_type:
-            logger.warning(
-                f"You are using a model of type {config_dict['model_type']} to instantiate a model of type "
-                f"{cls.model_type}. This is not supported for all configurations of models and can yield errors."
-            )
-
-        return cls.from_dict(config_dict, **kwargs)
-
-
-class MptConfig(PretrainedConfig):
+class MptConfig(PreTrainedConfig):
     """
     This is the configuration class to store the configuration of a [`MptModel`]. It is used to instantiate a Mpt model
     according to the specified arguments, defining the model architecture. Instantiating a configuration with the
     defaults will yield a similar configuration to the Mpt-7b architecture
     [mosaicml/mpt-7b](https://huggingface.co/mosaicml/mpt-7b).
 
-    Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
-    documentation from [`PretrainedConfig`] for more information.
+    Configuration objects inherit from [`PreTrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PreTrainedConfig`] for more information.
 
 
     Args:
@@ -161,9 +136,6 @@ class MptConfig(PretrainedConfig):
             If not None, scale the logits by this value.
         no_bias (`bool`, *optional*, defaults to `True`):
             Whether to use bias in all linear layers.
-        verbose (`int`, *optional*, defaults to 0):
-            The verbosity level to use for logging. Used in the previous versions of MPT models for logging. This
-            argument is deprecated.
         embedding_fraction (`float`, *optional*, defaults to 1.0):
             The fraction to scale the gradients of the embedding layer by.
         norm_type (`str`, *optional*, defaults to `"low_precision_layernorm"`):
@@ -173,6 +145,14 @@ class MptConfig(PretrainedConfig):
             Whether or not the model should return the last key/values attentions (not used by all models).
         initializer_range (`float`, *optional*, defaults to 0.02):
             The standard deviation of the truncated_normal_initializer for initializing all weight matrices.
+        tie_word_embeddings (`bool`, *optional*, defaults to `True`):
+            Whether to tie weight embeddings
+        pad_token_id (`int`, *optional*):
+            The id of the padding token.
+        bos_token_id (`int`, *optional*):
+            The id of the beginning of sequence token.
+        eos_token_id (`int`, *optional*):
+            The id of the end of sequence token.
 
     Example:
 
@@ -191,6 +171,7 @@ class MptConfig(PretrainedConfig):
     """
 
     model_type = "mpt"
+    sub_configs = {"attn_config": MptAttentionConfig}
     attribute_map = {
         "num_attention_heads": "n_heads",
         "hidden_size": "d_model",
@@ -211,13 +192,16 @@ class MptConfig(PretrainedConfig):
         learned_pos_emb: bool = True,
         attn_config: MptAttentionConfig = None,
         init_device: str = "cpu",
-        logit_scale: Optional[Union[float, str]] = None,
+        logit_scale: float | str | None = None,
         no_bias: bool = True,
-        verbose: int = 0,
         embedding_fraction: float = 1.0,
         norm_type: str = "low_precision_layernorm",
         use_cache: bool = False,
         initializer_range=0.02,
+        tie_word_embeddings=True,
+        pad_token_id=None,
+        bos_token_id=None,
+        eos_token_id=None,
         **kwargs,
     ):
         if attn_config is None:
@@ -238,10 +222,16 @@ class MptConfig(PretrainedConfig):
         self.init_device = init_device
         self.logit_scale = logit_scale
         self.no_bias = no_bias
-        self.verbose = verbose
         self.embedding_fraction = embedding_fraction
         self.norm_type = norm_type
         self.layer_norm_epsilon = layer_norm_epsilon
         self.use_cache = use_cache
         self.initializer_range = initializer_range
+        self.tie_word_embeddings = tie_word_embeddings
+        self.pad_token_id = pad_token_id
+        self.bos_token_id = bos_token_id
+        self.eos_token_id = eos_token_id
         super().__init__(**kwargs)
+
+
+__all__ = ["MptConfig"]

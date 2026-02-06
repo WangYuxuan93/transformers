@@ -28,11 +28,13 @@ class ZeroShotAudioClassificationPipelineTests(unittest.TestCase):
     # model_mapping = {CLAPConfig: CLAPModel}
 
     @require_torch
-    def test_small_model_pt(self):
+    def test_small_model_pt(self, dtype="float32"):
         audio_classifier = pipeline(
-            task="zero-shot-audio-classification", model="hf-internal-testing/tiny-clap-htsat-unfused"
+            task="zero-shot-audio-classification",
+            model="hf-internal-testing/tiny-clap-htsat-unfused",
+            dtype=dtype,
         )
-        dataset = load_dataset("ashraq/esc50")
+        dataset = load_dataset("hf-internal-testing/ashraq-esc50-1-dog-example")
         audio = dataset["train"]["audio"][-1]["array"]
         output = audio_classifier(audio, candidate_labels=["Sound of a dog", "Sound of vaccum cleaner"])
         self.assertEqual(
@@ -40,9 +42,9 @@ class ZeroShotAudioClassificationPipelineTests(unittest.TestCase):
             [{"score": 0.501, "label": "Sound of a dog"}, {"score": 0.499, "label": "Sound of vaccum cleaner"}],
         )
 
-    @unittest.skip("No models are available in TF")
-    def test_small_model_tf(self):
-        pass
+    @require_torch
+    def test_small_model_pt_fp16(self):
+        self.test_small_model_pt(dtype="float16")
 
     @slow
     @require_torch
@@ -52,15 +54,15 @@ class ZeroShotAudioClassificationPipelineTests(unittest.TestCase):
             model="laion/clap-htsat-unfused",
         )
         # This is an audio of a dog
-        dataset = load_dataset("ashraq/esc50")
+        dataset = load_dataset("hf-internal-testing/ashraq-esc50-1-dog-example")
         audio = dataset["train"]["audio"][-1]["array"]
         output = audio_classifier(audio, candidate_labels=["Sound of a dog", "Sound of vaccum cleaner"])
 
         self.assertEqual(
             nested_simplify(output),
             [
-                {"score": 0.999, "label": "Sound of a dog"},
-                {"score": 0.001, "label": "Sound of vaccum cleaner"},
+                {"score": 1.0, "label": "Sound of a dog"},
+                {"score": 0.0, "label": "Sound of vaccum cleaner"},
             ],
         )
 
@@ -69,8 +71,8 @@ class ZeroShotAudioClassificationPipelineTests(unittest.TestCase):
             nested_simplify(output),
             [
                 [
-                    {"score": 0.999, "label": "Sound of a dog"},
-                    {"score": 0.001, "label": "Sound of vaccum cleaner"},
+                    {"score": 1.0, "label": "Sound of a dog"},
+                    {"score": 0.0, "label": "Sound of vaccum cleaner"},
                 ],
             ]
             * 5,
@@ -82,13 +84,9 @@ class ZeroShotAudioClassificationPipelineTests(unittest.TestCase):
             nested_simplify(output),
             [
                 [
-                    {"score": 0.999, "label": "Sound of a dog"},
-                    {"score": 0.001, "label": "Sound of vaccum cleaner"},
+                    {"score": 1.0, "label": "Sound of a dog"},
+                    {"score": 0.0, "label": "Sound of vaccum cleaner"},
                 ],
             ]
             * 5,
         )
-
-    @unittest.skip("No models are available in TF")
-    def test_large_model_tf(self):
-        pass

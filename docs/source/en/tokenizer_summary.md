@@ -42,7 +42,7 @@ For instance, let's look at the sentence `"Don't you love 🤗 Transformers? We 
 
 A simple way of tokenizing this text is to split it by spaces, which would give:
 
-```
+```text
 ["Don't", "you", "love", "🤗", "Transformers?", "We", "sure", "do."]
 ```
 
@@ -52,7 +52,7 @@ punctuation into account so that a model does not have to learn a different repr
 punctuation symbol that could follow it, which would explode the number of representations the model has to learn.
 Taking punctuation into account, tokenizing our exemplary text would give:
 
-```
+```text
 ["Don", "'", "t", "you", "love", "🤗", "Transformers", "?", "We", "sure", "do", "."]
 ```
 
@@ -65,7 +65,7 @@ input that was tokenized with the same rules that were used to tokenize its trai
 [spaCy](https://spacy.io/) and [Moses](http://www.statmt.org/moses/?n=Development.GetStarted) are two popular
 rule-based tokenizers. Applying them on our example, *spaCy* and *Moses* would output something like:
 
-```
+```text
 ["Do", "n't", "you", "love", "🤗", "Transformers", "?", "We", "sure", "do", "."]
 ```
 
@@ -73,7 +73,7 @@ As can be seen space and punctuation tokenization, as well as rule-based tokeniz
 punctuation tokenization and rule-based tokenization are both examples of word tokenization, which is loosely defined
 as splitting sentences into words. While it's the most intuitive way to split texts into smaller chunks, this
 tokenization method can lead to problems for massive text corpora. In this case, space and punctuation tokenization
-usually generates a very big vocabulary (the set of all unique words and tokens used). *E.g.*, [Transformer XL](model_doc/transformerxl) uses space and punctuation tokenization, resulting in a vocabulary size of 267,735!
+usually generates a very big vocabulary (the set of all unique words and tokens used). *E.g.*, [Transformer XL](model_doc/transfo-xl) uses space and punctuation tokenization, resulting in a vocabulary size of 267,735!
 
 Such a big vocabulary size forces the model to have an enormous embedding matrix as the input and output layer, which
 causes both an increased memory and time complexity. In general, transformers models rarely have a vocabulary size
@@ -109,7 +109,7 @@ seen before, by decomposing them into known subwords. For instance, the [`~trans
 ```py
 >>> from transformers import BertTokenizer
 
->>> tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+>>> tokenizer = BertTokenizer.from_pretrained("google-bert/bert-base-uncased")
 >>> tokenizer.tokenize("I have a new GPU!")
 ["i", "have", "a", "new", "gp", "##u", "!"]
 ```
@@ -123,7 +123,7 @@ As another example, [`~transformers.XLNetTokenizer`] tokenizes our previously ex
 ```py
 >>> from transformers import XLNetTokenizer
 
->>> tokenizer = XLNetTokenizer.from_pretrained("xlnet-base-cased")
+>>> tokenizer = XLNetTokenizer.from_pretrained("xlnet/xlnet-base-cased")
 >>> tokenizer.tokenize("Don't you love 🤗 Transformers? We sure do.")
 ["▁Don", "'", "t", "▁you", "▁love", "▁", "🤗", "▁", "Transform", "ers", "?", "▁We", "▁sure", "▁do", "."]
 ```
@@ -140,10 +140,10 @@ on.
 ### Byte-Pair Encoding (BPE)
 
 Byte-Pair Encoding (BPE) was introduced in [Neural Machine Translation of Rare Words with Subword Units (Sennrich et
-al., 2015)](https://arxiv.org/abs/1508.07909). BPE relies on a pre-tokenizer that splits the training data into
+al., 2015)](https://huggingface.co/papers/1508.07909). BPE relies on a pre-tokenizer that splits the training data into
 words. Pretokenization can be as simple as space tokenization, e.g. [GPT-2](model_doc/gpt2), [RoBERTa](model_doc/roberta). More advanced pre-tokenization include rule-based tokenization, e.g. [XLM](model_doc/xlm),
-[FlauBERT](model_doc/flaubert) which uses Moses for most languages, or [GPT](model_doc/gpt) which uses
-Spacy and ftfy, to count the frequency of each word in the training corpus.
+[FlauBERT](model_doc/flaubert) which uses Moses for most languages, or [GPT](model_doc/openai-gpt) which uses
+spaCy and ftfy, to count the frequency of each word in the training corpus.
 
 After pre-tokenization, a set of unique words has been created and the frequency with which each word occurred in the
 training data has been determined. Next, BPE creates a base vocabulary consisting of all symbols that occur in the set
@@ -154,25 +154,25 @@ define before training the tokenizer.
 As an example, let's assume that after pre-tokenization, the following set of words including their frequency has been
 determined:
 
-```
+```text
 ("hug", 10), ("pug", 5), ("pun", 12), ("bun", 4), ("hugs", 5)
 ```
 
 Consequently, the base vocabulary is `["b", "g", "h", "n", "p", "s", "u"]`. Splitting all words into symbols of the
 base vocabulary, we obtain:
 
-```
+```text
 ("h" "u" "g", 10), ("p" "u" "g", 5), ("p" "u" "n", 12), ("b" "u" "n", 4), ("h" "u" "g" "s", 5)
 ```
 
 BPE then counts the frequency of each possible symbol pair and picks the symbol pair that occurs most frequently. In
-the example above `"h"` followed by `"u"` is present _10 + 5 = 15_ times (10 times in the 10 occurrences of
+the example above `"h"` followed by `"u"` is present *10 + 5 = 15* times (10 times in the 10 occurrences of
 `"hug"`, 5 times in the 5 occurrences of `"hugs"`). However, the most frequent symbol pair is `"u"` followed by
-`"g"`, occurring _10 + 5 + 5 = 20_ times in total. Thus, the first merge rule the tokenizer learns is to group all
+`"g"`, occurring *10 + 5 + 5 = 20* times in total. Thus, the first merge rule the tokenizer learns is to group all
 `"u"` symbols followed by a `"g"` symbol together. Next, `"ug"` is added to the vocabulary. The set of words then
 becomes
 
-```
+```text
 ("h" "ug", 10), ("p" "ug", 5), ("p" "u" "n", 12), ("b" "u" "n", 4), ("h" "ug" "s", 5)
 ```
 
@@ -183,7 +183,7 @@ BPE then identifies the next most common symbol pair. It's `"u"` followed by `"n
 At this stage, the vocabulary is `["b", "g", "h", "n", "p", "s", "u", "ug", "un", "hug"]` and our set of unique words
 is represented as
 
-```
+```text
 ("hug", 10), ("p" "ug", 5), ("p" "un", 12), ("b" "un", 4), ("hug" "s", 5)
 ```
 
@@ -195,7 +195,7 @@ the symbol `"m"` is not in the base vocabulary. In general, single letters such 
 to happen for very special characters like emojis.
 
 As mentioned earlier, the vocabulary size, *i.e.* the base vocabulary size + the number of merges, is a hyperparameter
-to choose. For instance [GPT](model_doc/gpt) has a vocabulary size of 40,478 since they have 478 base characters
+to choose. For instance [GPT](model_doc/openai-gpt) has a vocabulary size of 40,478 since they have 478 base characters
 and chose to stop training after 40,000 merges.
 
 #### Byte-level BPE
@@ -222,15 +222,15 @@ So what does this mean exactly? Referring to the previous example, maximizing th
 equivalent to finding the symbol pair, whose probability divided by the probabilities of its first symbol followed by
 its second symbol is the greatest among all symbol pairs. *E.g.* `"u"`, followed by `"g"` would have only been
 merged if the probability of `"ug"` divided by `"u"`, `"g"` would have been greater than for any other symbol
-pair. Intuitively, WordPiece is slightly different to BPE in that it evaluates what it _loses_ by merging two symbols
-to ensure it's _worth it_.
+pair. Intuitively, WordPiece is slightly different to BPE in that it evaluates what it *loses* by merging two symbols
+to ensure it's *worth it*.
 
 <a id='unigram'></a>
 
 ### Unigram
 
 Unigram is a subword tokenization algorithm introduced in [Subword Regularization: Improving Neural Network Translation
-Models with Multiple Subword Candidates (Kudo, 2018)](https://arxiv.org/pdf/1804.10959.pdf). In contrast to BPE or
+Models with Multiple Subword Candidates (Kudo, 2018)](https://huggingface.co/papers/1804.10959). In contrast to BPE or
 WordPiece, Unigram initializes its base vocabulary to a large number of symbols and progressively trims down each
 symbol to obtain a smaller vocabulary. The base vocabulary could for instance correspond to all pre-tokenized words and
 the most common substrings. Unigram is not used directly for any of the models in the transformers, but it's used in
@@ -246,7 +246,7 @@ reached the desired size. The Unigram algorithm always keeps the base characters
 Because Unigram is not based on merge rules (in contrast to BPE and WordPiece), the algorithm has several ways of
 tokenizing new text after training. As an example, if a trained Unigram tokenizer exhibits the vocabulary:
 
-```
+```text
 ["b", "g", "h", "n", "p", "s", "u", "ug", "un", "hug"],
 ```
 
@@ -257,8 +257,8 @@ likely tokenization in practice, but also offers the possibility to sample a pos
 probabilities.
 
 Those probabilities are defined by the loss the tokenizer is trained on. Assuming that the training data consists of
-the words \\(x_{1}, \dots, x_{N}\\) and that the set of all possible tokenizations for a word \\(x_{i}\\) is
-defined as \\(S(x_{i})\\), then the overall loss is defined as
+the words $x_{1}, \dots, x_{N}$ and that the set of all possible tokenizations for a word $x_{i}$ is
+defined as $S(x_{i})$, then the overall loss is defined as
 
 $$\mathcal{L} = -\sum_{i=1}^{N} \log \left ( \sum_{x \in S(x_{i})} p(x) \right )$$
 
@@ -268,9 +268,9 @@ $$\mathcal{L} = -\sum_{i=1}^{N} \log \left ( \sum_{x \in S(x_{i})} p(x) \right )
 
 All tokenization algorithms described so far have the same problem: It is assumed that the input text uses spaces to
 separate words. However, not all languages use spaces to separate words. One possible solution is to use language
-specific pre-tokenizers, *e.g.* [XLM](model_doc/xlm) uses a specific Chinese, Japanese, and Thai pre-tokenizer).
+specific pre-tokenizers, *e.g.* [XLM](model_doc/xlm) uses a specific Chinese, Japanese, and Thai pre-tokenizer.
 To solve this problem more generally, [SentencePiece: A simple and language independent subword tokenizer and
-detokenizer for Neural Text Processing (Kudo et al., 2018)](https://arxiv.org/pdf/1808.06226.pdf) treats the input
+detokenizer for Neural Text Processing (Kudo et al., 2018)](https://huggingface.co/papers/1808.06226) treats the input
 as a raw input stream, thus including the space in the set of characters to use. It then uses the BPE or unigram
 algorithm to construct the appropriate vocabulary.
 

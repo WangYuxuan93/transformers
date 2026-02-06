@@ -23,25 +23,15 @@ rendered properly in your Markdown viewer.
 시작하기 전에 필요한 라이브러리가 모두 설치되어 있는지 확인하세요:
 
 ```bash
-!pip install transformers datasets
+!pip install transformers datasets evaluate accelerate
 ```
 
 또한 선호하는 머신 러닝 프레임워크를 설치해야 합니다:
 
-<frameworkcontent>
-<pt>
 
 ```bash
 pip install torch
 ```
-</pt>
-<tf>
-
-```bash
-pip install tensorflow
-```
-</tf>
-</frameworkcontent>
 
 ## 파이프라인 [[pipeline]]
 
@@ -81,7 +71,7 @@ pip install tensorflow
 >>> classifier = pipeline("sentiment-analysis")
 ```
 
-[`pipeline`]은 감정 분석을 위한 [사전 훈련된 모델](https://huggingface.co/distilbert-base-uncased-finetuned-sst-2-english)과 토크나이저를 자동으로 다운로드하고 캐시합니다. 이제 `classifier`를 대상 텍스트에 사용할 수 있습니다:
+[`pipeline`]은 감정 분석을 위한 [사전 훈련된 모델](https://huggingface.co/distilbert/distilbert-base-uncased-finetuned-sst-2-english)과 토크나이저를 자동으로 다운로드하고 캐시합니다. 이제 `classifier`를 대상 텍스트에 사용할 수 있습니다:
 
 ```py
 >>> classifier("We are very happy to show you the 🤗 Transformers library.")
@@ -139,8 +129,6 @@ label: NEGATIVE, with score: 0.5309
 >>> model_name = "nlptown/bert-base-multilingual-uncased-sentiment"
 ```
 
-<frameworkcontent>
-<pt>
 [`AutoModelForSequenceClassification`]과 [`AutoTokenizer`]를 사용하여 사전 훈련된 모델과 관련된 토크나이저를 로드하세요 (다음 섹션에서 [`AutoClass`]에 대해 더 자세히 알아보겠습니다):
 
 ```py
@@ -149,18 +137,6 @@ label: NEGATIVE, with score: 0.5309
 >>> model = AutoModelForSequenceClassification.from_pretrained(model_name)
 >>> tokenizer = AutoTokenizer.from_pretrained(model_name)
 ```
-</pt>
-<tf>
-[`TFAutoModelForSequenceClassification`]과 [`AutoTokenizer`]를 사용하여 사전 훈련된 모델과 관련된 토크나이저를 로드하세요 (다음 섹션에서 [`TFAutoClass`]에 대해 더 자세히 알아보겠습니다):
-
-```py
->>> from transformers import AutoTokenizer, TFAutoModelForSequenceClassification
-
->>> model = TFAutoModelForSequenceClassification.from_pretrained(model_name)
->>> tokenizer = AutoTokenizer.from_pretrained(model_name)
-```
-</tf>
-</frameworkcontent>
 
 [`pipeline`]에서 모델과 토크나이저를 지정하면, 이제 `classifier`를 프랑스어 텍스트에 적용할 수 있습니다:
 
@@ -210,8 +186,6 @@ label: NEGATIVE, with score: 0.5309
 
 토크나이저는 입력을 리스트 형태로도 받을 수 있으며, 텍스트를 패딩하고 잘라내어 일정한 길이의 묶음을 반환할 수도 있습니다:
 
-<frameworkcontent>
-<pt>
 
 ```py
 >>> pt_batch = tokenizer(
@@ -222,20 +196,6 @@ label: NEGATIVE, with score: 0.5309
 ...     return_tensors="pt",
 ... )
 ```
-</pt>
-<tf>
-
-```py
->>> tf_batch = tokenizer(
-...     ["We are very happy to show you the 🤗 Transformers library.", "We hope you don't hate it."],
-...     padding=True,
-...     truncation=True,
-...     max_length=512,
-...     return_tensors="tf",
-... )
-```
-</tf>
-</frameworkcontent>
 
 <Tip>
 
@@ -245,8 +205,6 @@ label: NEGATIVE, with score: 0.5309
 
 ### AutoModel [[automodel]]
 
-<frameworkcontent>
-<pt>
 🤗 Transformers는 사전 훈련된 인스턴스를 간단하고 통합된 방법으로 로드할 수 있습니다. 즉, [`AutoTokenizer`]처럼 [`AutoModel`]을 로드할 수 있습니다. 유일한 차이점은 과업에 알맞은 [`AutoModel`]을 선택해야 한다는 점입니다. 텍스트 (또는 시퀀스) 분류의 경우 [`AutoModelForSequenceClassification`]을 로드해야 합니다:
 
 ```py
@@ -278,39 +236,6 @@ label: NEGATIVE, with score: 0.5309
 tensor([[0.0021, 0.0018, 0.0115, 0.2121, 0.7725],
         [0.2084, 0.1826, 0.1969, 0.1755, 0.2365]], grad_fn=<SoftmaxBackward0>)
 ```
-</pt>
-<tf>
-🤗 Transformers는 사전 훈련된 인스턴스를 간단하고 통합된 방법으로 로드할 수 있습니다. 즉, [`AutoTokenizer`]처럼 [`TFAutoModel`]을 로드할 수 있습니다. 유일한 차이점은 과업에 알맞은 [`TFAutoModel`]을 선택해야 한다는 점입니다. 텍스트 (또는 시퀀스) 분류의 경우 [`TFAutoModelForSequenceClassification`]을 로드해야 합니다:
-
-```py
->>> from transformers import TFAutoModelForSequenceClassification
-
->>> model_name = "nlptown/bert-base-multilingual-uncased-sentiment"
->>> tf_model = TFAutoModelForSequenceClassification.from_pretrained(model_name)
-```
-
-<Tip>
-
-[`AutoModel`] 클래스에서 지원하는 과업에 대해서는 [과업 요약](./task_summary)을 참조하세요.
-
-</Tip>
-
-이제 전처리된 입력 묶음을 직접 모델에 전달해야 합니다. 아래처럼 그대로 텐서를 전달하면 됩니다:
-
-```py
->>> tf_outputs = tf_model(tf_batch)
-```
-
-모델의 최종 활성화 함수 출력은 `logits` 속성에 담겨있습니다. `logits`에 softmax 함수를 적용하여 확률을 얻을 수 있습니다:
-
-```py
->>> import tensorflow as tf
-
->>> tf_predictions = tf.nn.softmax(tf_outputs.logits, axis=-1)
->>> tf_predictions  # doctest: +IGNORE_RESULT
-```
-</tf>
-</frameworkcontent>
 
 <Tip>
 
@@ -320,8 +245,6 @@ tensor([[0.0021, 0.0018, 0.0115, 0.2121, 0.7725],
 
 ### 모델 저장하기 [[save-a-model]]
 
-<frameworkcontent>
-<pt>
 미세조정된 모델을 토크나이저와 함께 저장하려면 [`PreTrainedModel.save_pretrained`]를 사용하세요:
 
 ```py
@@ -335,46 +258,16 @@ tensor([[0.0021, 0.0018, 0.0115, 0.2121, 0.7725],
 ```py
 >>> pt_model = AutoModelForSequenceClassification.from_pretrained("./pt_save_pretrained")
 ```
-</pt>
-<tf>
-미세조정된 모델을 토크나이저와 함께 저장하려면 [`TFPreTrainedModel.save_pretrained`]를 사용하세요:
-
-```py
->>> tf_save_directory = "./tf_save_pretrained"
->>> tokenizer.save_pretrained(tf_save_directory)  # doctest: +IGNORE_RESULT
->>> tf_model.save_pretrained(tf_save_directory)
-```
-
-모델을 다시 사용하려면 [`TFPreTrainedModel.from_pretrained`]로 모델을 다시 로드하세요:
-
-```py
->>> tf_model = TFAutoModelForSequenceClassification.from_pretrained("./tf_save_pretrained")
-```
-</tf>
-</frameworkcontent>
 
 🤗 Transformers의 멋진 기능 중 하나는 모델을 PyTorch 또는 TensorFlow 모델로 저장해뒀다가 다른 프레임워크로 다시 로드할 수 있는 점입니다. `from_pt` 또는 `from_tf` 매개변수를 사용하여 모델을 한 프레임워크에서 다른 프레임워크로 변환할 수 있습니다:
 
-<frameworkcontent>
-<pt>
 
 ```py
 >>> from transformers import AutoModel
 
->>> tokenizer = AutoTokenizer.from_pretrained(tf_save_directory)
->>> pt_model = AutoModelForSequenceClassification.from_pretrained(tf_save_directory, from_tf=True)
-```
-</pt>
-<tf>
-
-```py
->>> from transformers import TFAutoModel
-
 >>> tokenizer = AutoTokenizer.from_pretrained(pt_save_directory)
->>> tf_model = TFAutoModelForSequenceClassification.from_pretrained(pt_save_directory, from_pt=True)
+>>> pt_model = AutoModelForSequenceClassification.from_pretrained(pt_save_directory, from_pt=True)
 ```
-</tf>
-</frameworkcontent>
 
 ## 커스텀 모델 구축하기 [[custom-model-builds]]
 
@@ -385,11 +278,9 @@ tensor([[0.0021, 0.0018, 0.0115, 0.2121, 0.7725],
 ```py
 >>> from transformers import AutoConfig
 
->>> my_config = AutoConfig.from_pretrained("distilbert-base-uncased", n_heads=12)
+>>> my_config = AutoConfig.from_pretrained("distilbert/distilbert-base-uncased", n_heads=12)
 ```
 
-<frameworkcontent>
-<pt>
 [`AutoModel.from_config`]를 사용하여 바꾼 구성대로 모델을 생성하세요:
 
 ```py
@@ -397,17 +288,6 @@ tensor([[0.0021, 0.0018, 0.0115, 0.2121, 0.7725],
 
 >>> my_model = AutoModel.from_config(my_config)
 ```
-</pt>
-<tf>
-[`TFAutoModel.from_config`]를 사용하여 바꾼 구성대로 모델을 생성하세요:
-
-```py
->>> from transformers import TFAutoModel
-
->>> my_model = TFAutoModel.from_config(my_config)
-```
-</tf>
-</frameworkcontent>
 
 커스텀 구성에 대한 자세한 내용은 [커스텀 아키텍처 만들기](./create_a_model) 가이드를 확인하세요.
 
@@ -422,7 +302,7 @@ tensor([[0.0021, 0.0018, 0.0115, 0.2121, 0.7725],
    ```py
    >>> from transformers import AutoModelForSequenceClassification
 
-   >>> model = AutoModelForSequenceClassification.from_pretrained("distilbert-base-uncased")
+   >>> model = AutoModelForSequenceClassification.from_pretrained("distilbert/distilbert-base-uncased")
    ```
 
 2. [`TrainingArguments`]는 학습률, 배치 크기, 훈련할 에포크 수와 같은 모델 하이퍼파라미터를 포함합니다. 훈련 인자를 지정하지 않으면 기본값이 사용됩니다:
@@ -444,7 +324,7 @@ tensor([[0.0021, 0.0018, 0.0115, 0.2121, 0.7725],
    ```py
    >>> from transformers import AutoTokenizer
 
-   >>> tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+   >>> tokenizer = AutoTokenizer.from_pretrained("distilbert/distilbert-base-uncased")
    ```
 
 4. 데이터셋을 로드하세요:
@@ -486,7 +366,7 @@ tensor([[0.0021, 0.0018, 0.0115, 0.2121, 0.7725],
 ...     args=training_args,
 ...     train_dataset=dataset["train"],
 ...     eval_dataset=dataset["test"],
-...     tokenizer=tokenizer,
+...     processing_class=tokenizer,
 ...     data_collator=data_collator,
 ... )  # doctest: +SKIP
 ```
@@ -505,7 +385,7 @@ tensor([[0.0021, 0.0018, 0.0115, 0.2121, 0.7725],
 
 [`Trainer`] 내의 메서드를 서브클래스화하여 훈련 루프를 바꿀 수도 있습니다. 이러면 손실 함수, 옵티마이저, 스케줄러와 같은 기능 또한 바꿀 수 있게 됩니다. 변경 가능한 메소드에 대해서는 [`Trainer`] 문서를 참고하세요.
 
-훈련 루프를 수정하는 다른 방법은 [Callbacks](./main_classes/callbacks)를 사용하는 것입니다. Callbacks로 다른 라이브러리와 통합하고, 훈련 루프를 체크하여 진행 상황을 보고받거나, 훈련을 조기에 중단할 수 있습니다. Callbacks은 훈련 루프 자체를 바꾸지는 않습니다. 손실 함수와 같은 것을 바꾸려면 [`Trainer`]를 서브클래스화해야 합니다.
+훈련 루프를 수정하는 다른 방법은 [Callbacks](./main_classes/callback)를 사용하는 것입니다. Callbacks로 다른 라이브러리와 통합하고, 훈련 루프를 체크하여 진행 상황을 보고받거나, 훈련을 조기에 중단할 수 있습니다. Callbacks은 훈련 루프 자체를 바꾸지는 않습니다. 손실 함수와 같은 것을 바꾸려면 [`Trainer`]를 서브클래스화해야 합니다.
 
 ## TensorFlow로 훈련시키기 [[train-with-tensorflow]]
 
@@ -516,7 +396,7 @@ tensor([[0.0021, 0.0018, 0.0115, 0.2121, 0.7725],
    ```py
    >>> from transformers import TFAutoModelForSequenceClassification
 
-   >>> model = TFAutoModelForSequenceClassification.from_pretrained("distilbert-base-uncased")
+   >>> model = TFAutoModelForSequenceClassification.from_pretrained("distilbert/distilbert-base-uncased")
    ```
 
 2. 토크나이저, 이미지 프로세서, 특징 추출기(feature extractor) 또는 프로세서와 같은 전처리 클래스를 로드하세요:
@@ -524,7 +404,7 @@ tensor([[0.0021, 0.0018, 0.0115, 0.2121, 0.7725],
    ```py
    >>> from transformers import AutoTokenizer
 
-   >>> tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+   >>> tokenizer = AutoTokenizer.from_pretrained("distilbert/distilbert-base-uncased")
    ```
 
 3. 데이터셋을 토큰화하는 함수를 생성하세요:

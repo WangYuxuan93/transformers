@@ -23,7 +23,7 @@ La generación de resúmenes (summarization, en inglés) crea una versión más 
 - Extractiva: Extrae la información más relevante de un documento.
 - Abstractiva: Genera un texto nuevo que captura la información más importante.
 
-Esta guía te mostrará cómo puedes hacer fine-tuning del modelo [T5](https://huggingface.co/t5-small) sobre el subset de proyectos de ley del estado de California, dentro del dataset [BillSum](https://huggingface.co/datasets/billsum) para hacer generación de resúmenes abstractiva.
+Esta guía te mostrará cómo puedes hacer fine-tuning del modelo [T5](https://huggingface.co/google-t5/t5-small) sobre el subset de proyectos de ley del estado de California, dentro del dataset [BillSum](https://huggingface.co/datasets/billsum) para hacer generación de resúmenes abstractiva.
 
 <Tip>
 
@@ -65,7 +65,7 @@ Carga el tokenizador T5 para procesar `text` y `summary`:
 ```py
 >>> from transformers import AutoTokenizer
 
->>> tokenizer = AutoTokenizer.from_pretrained("t5-small")
+>>> tokenizer = AutoTokenizer.from_pretrained("google-t5/t5-small")
 ```
 
 La función de preprocesamiento necesita:
@@ -96,33 +96,20 @@ Usa la función [`~datasets.Dataset.map`] de 🤗 Datasets para aplicar la funci
 
 Usa [`DataCollatorForSeq2Seq`] para crear un lote de ejemplos. Esto también *rellenará dinámicamente* tu texto y etiquetas a la dimensión del elemento más largo del lote para que tengan un largo uniforme. Si bien es posible rellenar tu texto en la función `tokenizer` mediante el argumento `padding=True`, el rellenado dinámico es más eficiente.
 
-<frameworkcontent>
-<pt>
 ```py
 >>> from transformers import DataCollatorForSeq2Seq
 
 >>> data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model)
 ```
-</pt>
-<tf>
-```py
->>> from transformers import DataCollatorForSeq2Seq
-
->>> data_collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, model=model, return_tensors="tf")
-```
-</tf>
-</frameworkcontent>
 
 ## Entrenamiento
 
-<frameworkcontent>
-<pt>
 Carga T5 con [`AutoModelForSeq2SeqLM`]:
 
 ```py
 >>> from transformers import AutoModelForSeq2SeqLM, Seq2SeqTrainingArguments, Seq2SeqTrainer
 
->>> model = AutoModelForSeq2SeqLM.from_pretrained("t5-small")
+>>> model = AutoModelForSeq2SeqLM.from_pretrained("google-t5/t5-small")
 ```
 
 <Tip>
@@ -140,7 +127,7 @@ En este punto, solo faltan tres pasos:
 ```py
 >>> training_args = Seq2SeqTrainingArguments(
 ...     output_dir="./results",
-...     evaluation_strategy="epoch",
+...     eval_strategy="epoch",
 ...     learning_rate=2e-5,
 ...     per_device_train_batch_size=16,
 ...     per_device_eval_batch_size=16,
@@ -155,67 +142,12 @@ En este punto, solo faltan tres pasos:
 ...     args=training_args,
 ...     train_dataset=tokenized_billsum["train"],
 ...     eval_dataset=tokenized_billsum["test"],
-...     tokenizer=tokenizer,
+...     processing_class=tokenizer,
 ...     data_collator=data_collator,
 ... )
 
 >>> trainer.train()
 ```
-</pt>
-<tf>
-Para hacer fine-tuning de un modelo en TensorFlow, comienza por convertir tus datasets al formato `tf.data.Dataset` con [`~datasets.Dataset.to_tf_dataset`]. Especifica los inputs y etiquetas en `columns`, el tamaño de lote, el data collator, y si es necesario mezclar el dataset:
-
-```py
->>> tf_train_set = tokenized_billsum["train"].to_tf_dataset(
-...     columns=["attention_mask", "input_ids", "labels"],
-...     shuffle=True,
-...     batch_size=16,
-...     collate_fn=data_collator,
-... )
-
->>> tf_test_set = tokenized_billsum["test"].to_tf_dataset(
-...     columns=["attention_mask", "input_ids", "labels"],
-...     shuffle=False,
-...     batch_size=16,
-...     collate_fn=data_collator,
-... )
-```
-
-<Tip>
-
-Para familiarizarte con el fine-tuning con Keras, ¡mira el tutorial básico [aquí](training#finetune-with-keras)!
-
-</Tip>
-
-Crea la función optimizadora, establece la tasa de aprendizaje y algunos hiperparámetros de entrenamiento:
-
-```py
->>> from transformers import create_optimizer, AdamWeightDecay
-
->>> optimizer = AdamWeightDecay(learning_rate=2e-5, weight_decay_rate=0.01)
-```
-
-Carga T5 con [`TFAutoModelForSeq2SeqLM`]:
-
-```py
->>> from transformers import TFAutoModelForSeq2SeqLM
-
->>> model = TFAutoModelForSeq2SeqLM.from_pretrained("t5-small")
-```
-
-Configura el modelo para entrenamiento con [`compile`](https://keras.io/api/models/model_training_apis/#compile-method):
-
-```py
->>> model.compile(optimizer=optimizer)
-```
-
-Llama a [`fit`](https://keras.io/api/models/model_training_apis/#fit-method) para realizar el fine-tuning del modelo:
-
-```py
->>> model.fit(x=tf_train_set, validation_data=tf_test_set, epochs=3)
-```
-</tf>
-</frameworkcontent>
 
 <Tip>
 

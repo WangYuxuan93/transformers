@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2020 HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -353,8 +352,6 @@ class FunnelModelTester:
 
 @require_torch
 class FunnelModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
-    test_head_masking = False
-    test_pruning = False
     all_model_classes = (
         (
             FunnelModel,
@@ -378,6 +375,8 @@ class FunnelModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
         if is_torch_available()
         else {}
     )
+
+    test_torch_exportable = False
 
     # special case for ForPreTraining model
     def _prepare_for_class(self, inputs_dict, model_class, return_labels=False):
@@ -420,9 +419,9 @@ class FunnelModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
     # overwrite from test_modeling_common
     def _mock_init_weights(self, module):
         if hasattr(module, "weight") and module.weight is not None:
-            module.weight.data.fill_(3)
+            module.weight.fill_(3)
         if hasattr(module, "bias") and module.bias is not None:
-            module.bias.data.fill_(3)
+            module.bias.fill_(3)
 
         for param in ["r_w_bias", "r_r_bias", "r_kernel", "r_s_bias", "seg_embed"]:
             if hasattr(module, param) and getattr(module, param) is not None:
@@ -432,11 +431,11 @@ class FunnelModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
 
 @require_torch
 class FunnelBaseModelTest(ModelTesterMixin, unittest.TestCase):
-    test_head_masking = False
-    test_pruning = False
     all_model_classes = (
         (FunnelBaseModel, FunnelForMultipleChoice, FunnelForSequenceClassification) if is_torch_available() else ()
     )
+
+    test_torch_exportable = False
 
     def setUp(self):
         self.model_tester = FunnelModelTester(self, base=True)
@@ -475,9 +474,9 @@ class FunnelBaseModelTest(ModelTesterMixin, unittest.TestCase):
     # overwrite from test_modeling_common
     def _mock_init_weights(self, module):
         if hasattr(module, "weight") and module.weight is not None:
-            module.weight.data.fill_(3)
+            module.weight.fill_(3)
         if hasattr(module, "bias") and module.bias is not None:
-            module.bias.data.fill_(3)
+            module.bias.fill_(3)
 
         for param in ["r_w_bias", "r_r_bias", "r_kernel", "r_s_bias", "seg_embed"]:
             if hasattr(module, param) and getattr(module, param) is not None:
@@ -501,16 +500,16 @@ class FunnelModelIntegrationTest(unittest.TestCase):
 
         expected_output_sum = torch.tensor(2344.8352)
         expected_output_mean = torch.tensor(0.8052)
-        self.assertTrue(torch.allclose(output.sum(), expected_output_sum, atol=1e-4))
-        self.assertTrue(torch.allclose(output.mean(), expected_output_mean, atol=1e-4))
+        torch.testing.assert_close(output.sum(), expected_output_sum, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_close(output.mean(), expected_output_mean, rtol=1e-4, atol=1e-4)
 
         attention_mask = torch.tensor([[1] * 7, [1] * 4 + [0] * 3] * 6 + [[0, 1, 1, 0, 0, 1, 1]])
         output = model(input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids)[0].abs()
 
         expected_output_sum = torch.tensor(2343.8425)
         expected_output_mean = torch.tensor(0.8049)
-        self.assertTrue(torch.allclose(output.sum(), expected_output_sum, atol=1e-4))
-        self.assertTrue(torch.allclose(output.mean(), expected_output_mean, atol=1e-4))
+        torch.testing.assert_close(output.sum(), expected_output_sum, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_close(output.mean(), expected_output_mean, rtol=1e-4, atol=1e-4)
 
     @slow
     def test_inference_model(self):
@@ -521,5 +520,5 @@ class FunnelModelIntegrationTest(unittest.TestCase):
 
         expected_output_sum = torch.tensor(235.7246)
         expected_output_mean = torch.tensor(0.0256)
-        self.assertTrue(torch.allclose(output.sum(), expected_output_sum, atol=1e-4))
-        self.assertTrue(torch.allclose(output.mean(), expected_output_mean, atol=1e-4))
+        torch.testing.assert_close(output.sum(), expected_output_sum, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_close(output.mean(), expected_output_mean, rtol=1e-4, atol=1e-4)

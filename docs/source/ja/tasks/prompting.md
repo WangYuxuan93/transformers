@@ -35,7 +35,7 @@ Falcon、LLaMA などの大規模言語モデルは、事前にトレーニン�
 このガイドでは、より優れた LLM プロンプトを作成し、さまざまな NLP タスクを解決するのに役立つプロンプト エンジニアリングのベスト プラクティスについて説明します。
 次のことを学びます:
 
-- [プロンプトの基本](#basic-prompts)
+- [プロンプトの基本](#basics-of-prompting)
 - [LLM プロンプトのベスト プラクティス](#best-practices-of-llm-prompting)
 - [高度なプロンプト テクニック: 数回のプロンプトと思考の連鎖](#advanced-prompting-techniques)
 - [プロンプトを表示する代わりに微調整する場合](#prompting-vs-fine-tuning)
@@ -76,7 +76,7 @@ Falcon、LLaMA などの大規模言語モデルは、事前にトレーニン�
 
 >>> torch.manual_seed(0) # doctest: +IGNORE_RESULT
 
->>> generator = pipeline('text-generation', model = 'gpt2')
+>>> generator = pipeline('text-generation', model = 'openai-community/gpt2')
 >>> prompt = "Hello, I'm a language model"
 
 >>> generator(prompt, max_length = 30)
@@ -128,7 +128,7 @@ pip install -q transformers accelerate
 ...     "text-generation",
 ...     model=model,
 ...     tokenizer=tokenizer,
-...     torch_dtype=torch.bfloat16,
+...     dtype=torch.bfloat16,
 ...     device_map="auto",
 ... )
 ```

@@ -16,12 +16,14 @@ limitations under the License.
 
 # Generating the documentation
 
-To generate the documentation, you first have to build it. Several packages are necessary to build the doc, 
-you can install them with the following command, at the root of the code repository:
+Several packages are required to build the documentation. Install these packages with the following command at the root of the repository.
 
 ```bash
-pip install -e ".[docs]"
+pip install -e ".[dev]"
 ```
+
+> [!NOTE]
+> This command might fail for some OS that are missing dependencies. Check step 4 in [Create a Pull Request](https://github.com/huggingface/transformers/blob/main/CONTRIBUTING.md#create-a-pull-request) to work around it.
 
 Then you need to install our special tool that builds the documentation:
 
@@ -29,17 +31,13 @@ Then you need to install our special tool that builds the documentation:
 pip install git+https://github.com/huggingface/doc-builder
 ```
 
----
-**NOTE**
-
-You only need to generate the documentation to inspect it locally (if you're planning changes and want to
-check how they look before committing for instance). You don't have to commit the built documentation.
-
----
+> [!NOTE]
+> You only need to generate the documentation to inspect it locally (if you're planning changes and want to
+> check how they look before committing for instance). You don't have to commit the built documentation.
 
 ## Building the documentation
 
-Once you have setup the `doc-builder` and additional packages, you can generate the documentation by 
+Once you have set up the `doc-builder` and additional packages, you can generate the documentation by 
 typing the following command:
 
 ```bash
@@ -72,12 +70,8 @@ doc-builder preview transformers docs/source/en/
 
 The docs will be viewable at [http://localhost:3000](http://localhost:3000). You can also preview the docs once you have opened a PR. You will see a bot add a comment to a link where the documentation with your changes lives.
 
----
-**NOTE**
-
-The `preview` command only works with existing doc files. When you add a completely new file, you need to update `_toctree.yml` & restart `preview` command (`ctrl-c` to stop it & call `doc-builder preview ...` again).
-
----
+> [!NOTE]
+> The `preview` command only works with existing doc files. When you add a completely new file, you need to update `_toctree.yml` & restart `preview` command (`ctrl-c` to stop it & call `doc-builder preview ...` again).
 
 ## Adding a new element to the navigation bar
 
@@ -164,6 +158,9 @@ These classes should be added using our Markdown syntax. Usually as follows:
 [[autodoc]] XXXConfig
 ```
 
+> [!IMPORTANT]
+> Always add a blank line after `[[autodoc]]` to ensure it passes the CI/CD checks.
+
 This will include every public method of the configuration that is documented. If for some reason you wish for a method
 not to be displayed in the documentation, you can do so by specifying which methods should be in the docs:
 
@@ -202,7 +199,7 @@ provide its path. For instance: \[\`utils.ModelOutput\`\]. This will be converte
 `utils.ModelOutput` in the description. To get rid of the path and only keep the name of the object you are
 linking to in the description, add a ~: \[\`~utils.ModelOutput\`\] will generate a link with `ModelOutput` in the description.
 
-The same works for methods so you can either use \[\`XXXClass.method\`\] or \[~\`XXXClass.method\`\].
+The same works for methods so you can either use \[\`XXXClass.method\`\] or \[\`~XXXClass.method\`\].
 
 #### Defining arguments in a method
 
@@ -276,14 +273,14 @@ building the return.
 
 Here's an example of a single value return:
 
-```
+```python
     Returns:
-        `List[int]`: A list of integers in the range [0, 1] --- 1 for a special token, 0 for a sequence token.
+        `list[int]`: A list of integers in the range [0, 1] --- 1 for a special token, 0 for a sequence token.
 ```
 
 Here's an example of a tuple return, comprising several objects:
 
-```
+```python
     Returns:
         `tuple(torch.FloatTensor)` comprising various elements depending on the configuration ([`BertConfig`]) and inputs:
         - ** loss** (*optional*, returned when `masked_lm_labels` is provided) `torch.FloatTensor` of shape `(1,)` --
@@ -297,12 +294,11 @@ Here's an example of a tuple return, comprising several objects:
 Due to the rapidly growing repository, it is important to make sure that no files that would significantly weigh down the repository are added. This includes images, videos, and other non-text files. We prefer to leverage a hf.co hosted `dataset` like
 the ones hosted on [`hf-internal-testing`](https://huggingface.co/hf-internal-testing) in which to place these files and reference
 them by URL. We recommend putting them in the following dataset: [huggingface/documentation-images](https://huggingface.co/datasets/huggingface/documentation-images).
-If an external contribution, feel free to add the images to your PR and ask a Hugging Face member to migrate your images
-to this dataset.
+If an external contribution, feel free to add the images to your PR and ask a Hugging Face member to migrate them to this dataset.
 
 ## Styling the docstring
 
-We have an automatic script running with the `make style` comment that will make sure that:
+We have an automatic script running with the `make style` command that will make sure that:
 - the docstrings fully take advantage of the line width
 - all code examples are formatted using black, like the code of the Transformers library
 
@@ -322,10 +318,9 @@ includes an example of how to transcribe speech to text in the
 
 The syntax for Example docstrings can look as follows:
 
-```
+```python
     Example:
 
-    ```python
     >>> from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
     >>> from datasets import load_dataset
     >>> import torch
@@ -347,7 +342,6 @@ The syntax for Example docstrings can look as follows:
     >>> transcription = processor.batch_decode(predicted_ids)
     >>> transcription[0]
     'MISTER QUILTER IS THE APOSTLE OF THE MIDDLE CLASSES AND WE ARE GLAD TO WELCOME HIS GOSPEL'
-    ```
 ```
 
 The docstring should give a minimal, clear example of how the respective model 

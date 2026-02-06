@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,35 +11,25 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" DINOv2 model configuration"""
+"""DINOv2 model configuration"""
 
-from collections import OrderedDict
-from typing import Mapping
-
-from packaging import version
-
-from ...configuration_utils import PretrainedConfig
-from ...onnx import OnnxConfig
+from ...backbone_utils import BackboneConfigMixin
+from ...configuration_utils import PreTrainedConfig
 from ...utils import logging
-from ...utils.backbone_utils import BackboneConfigMixin, get_aligned_output_features_output_indices
 
 
 logger = logging.get_logger(__name__)
 
-DINOV2_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "facebook/dinov2-base": "https://huggingface.co/facebook/dinov2-base/resolve/main/config.json",
-}
 
-
-class Dinov2Config(BackboneConfigMixin, PretrainedConfig):
+class Dinov2Config(BackboneConfigMixin, PreTrainedConfig):
     r"""
     This is the configuration class to store the configuration of a [`Dinov2Model`]. It is used to instantiate an
     Dinov2 model according to the specified arguments, defining the model architecture. Instantiating a configuration
     with the defaults will yield a similar configuration to that of the Dinov2
     [google/dinov2-base-patch16-224](https://huggingface.co/google/dinov2-base-patch16-224) architecture.
 
-    Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
-    documentation from [`PretrainedConfig`] for more information.
+    Configuration objects inherit from [`PreTrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PreTrainedConfig`] for more information.
 
     Args:
         hidden_size (`int`, *optional*, defaults to 768):
@@ -64,7 +53,7 @@ class Dinov2Config(BackboneConfigMixin, PretrainedConfig):
             The epsilon used by the layer normalization layers.
         image_size (`int`, *optional*, defaults to 224):
             The size (resolution) of each image.
-        patch_size (`int`, *optional*, defaults to 16):
+        patch_size (`int`, *optional*, defaults to 14):
             The size (resolution) of each patch.
         num_channels (`int`, *optional*, defaults to 3):
             The number of input channels.
@@ -76,12 +65,12 @@ class Dinov2Config(BackboneConfigMixin, PretrainedConfig):
             Stochastic depth rate per sample (when applied in the main path of residual layers).
         use_swiglu_ffn (`bool`, *optional*, defaults to `False`):
             Whether to use the SwiGLU feedforward neural network.
-        out_features (`List[str]`, *optional*):
+        out_features (`list[str]`, *optional*):
             If used as backbone, list of features to output. Can be any of `"stem"`, `"stage1"`, `"stage2"`, etc.
             (depending on how many stages the model has). If unset and `out_indices` is set, will default to the
             corresponding stages. If unset and `out_indices` is unset, will default to the last stage. Must be in the
             same order as defined in the `stage_names` attribute.
-        out_indices (`List[int]`, *optional*):
+        out_indices (`list[int]`, *optional*):
             If used as backbone, list of indices of features to output. Can be any of 0, 1, 2, etc. (depending on how
             many stages the model has). If unset and `out_features` is set, will default to the corresponding stages.
             If unset and `out_features` is unset, will default to the last stage. Must be in the
@@ -92,6 +81,8 @@ class Dinov2Config(BackboneConfigMixin, PretrainedConfig):
             Whether to reshape the feature maps to 4D tensors of shape `(batch_size, hidden_size, height, width)` in
             case the model is used as backbone. If `False`, the feature maps will be 3D tensors of shape `(batch_size,
             seq_len, hidden_size)`.
+        use_mask_token (`bool`, *optional*, defaults to `True`):
+            Whether to use mask_token in embeddings.
 
     Example:
 
@@ -122,7 +113,7 @@ class Dinov2Config(BackboneConfigMixin, PretrainedConfig):
         initializer_range=0.02,
         layer_norm_eps=1e-6,
         image_size=224,
-        patch_size=16,
+        patch_size=14,
         num_channels=3,
         qkv_bias=True,
         layerscale_value=1.0,
@@ -132,6 +123,7 @@ class Dinov2Config(BackboneConfigMixin, PretrainedConfig):
         out_indices=None,
         apply_layernorm=True,
         reshape_hidden_states=True,
+        use_mask_token=True,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -153,24 +145,10 @@ class Dinov2Config(BackboneConfigMixin, PretrainedConfig):
         self.drop_path_rate = drop_path_rate
         self.use_swiglu_ffn = use_swiglu_ffn
         self.stage_names = ["stem"] + [f"stage{idx}" for idx in range(1, num_hidden_layers + 1)]
-        self._out_features, self._out_indices = get_aligned_output_features_output_indices(
-            out_features=out_features, out_indices=out_indices, stage_names=self.stage_names
-        )
+        self.set_output_features_output_indices(out_indices=out_indices, out_features=out_features)
         self.apply_layernorm = apply_layernorm
         self.reshape_hidden_states = reshape_hidden_states
+        self.use_mask_token = use_mask_token
 
 
-class Dinov2OnnxConfig(OnnxConfig):
-    torch_onnx_minimum_version = version.parse("1.11")
-
-    @property
-    def inputs(self) -> Mapping[str, Mapping[int, str]]:
-        return OrderedDict(
-            [
-                ("pixel_values", {0: "batch", 1: "num_channels", 2: "height", 3: "width"}),
-            ]
-        )
-
-    @property
-    def atol_for_validation(self) -> float:
-        return 1e-4
+__all__ = ["Dinov2Config"]

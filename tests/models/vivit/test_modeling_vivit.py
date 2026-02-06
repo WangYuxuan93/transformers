@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,20 +11,20 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch ViViT model. """
-
+"""Testing suite for the PyTorch ViViT model."""
 
 import copy
 import inspect
 import unittest
+from functools import cached_property
 
 import numpy as np
 from huggingface_hub import hf_hub_download
 
 from transformers import VivitConfig
 from transformers.models.auto import get_values
-from transformers.testing_utils import require_torch, require_vision, slow, torch_device
-from transformers.utils import cached_property, is_torch_available, is_vision_available
+from transformers.testing_utils import Expectations, require_torch, require_vision, slow, torch_device
+from transformers.utils import is_torch_available, is_vision_available
 
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ModelTesterMixin, floats_tensor, ids_tensor
@@ -37,7 +36,6 @@ if is_torch_available():
     from torch import nn
 
     from transformers import MODEL_FOR_VIDEO_CLASSIFICATION_MAPPING, VivitForVideoClassification, VivitModel
-    from transformers.models.vivit.modeling_vivit import VIVIT_PRETRAINED_MODEL_ARCHIVE_LIST
 
 
 if is_vision_available():
@@ -67,6 +65,8 @@ class VivitModelTester:
         layer_norm_eps=1e-06,
         qkv_bias=True,
         scope=None,
+        attn_implementation="eager",
+        mask_ratio=0.5,
     ):
         self.parent = parent
         self.batch_size = batch_size
@@ -88,12 +88,15 @@ class VivitModelTester:
         self.layer_norm_eps = layer_norm_eps
         self.qkv_bias = qkv_bias
         self.scope = scope
+        self.attn_implementation = attn_implementation
 
         self.seq_length = (
             (self.image_size // self.tubelet_size[2])
             * (self.image_size // self.tubelet_size[1])
             * (self.num_frames // self.tubelet_size[0])
         ) + 1  # CLS token
+        self.mask_ratio = mask_ratio
+        self.num_masks = int(mask_ratio * self.seq_length)
 
     def prepare_config_and_inputs(self):
         pixel_values = floats_tensor(
@@ -124,6 +127,7 @@ class VivitModelTester:
             initializer_range=self.initializer_range,
             layer_norm_eps=self.layer_norm_eps,
             qkv_bias=self.qkv_bias,
+            attn_implementation=self.attn_implementation,
         )
         config.num_labels = self.num_labels
         return config
@@ -167,10 +171,7 @@ class VivitModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
         else {}
     )
 
-    test_pruning = False
-    test_torchscript = False
     test_resize_embeddings = False
-    test_head_masking = False
 
     def setUp(self):
         self.model_tester = VivitModelTester(self)
@@ -194,7 +195,7 @@ class VivitModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
     def test_inputs_embeds(self):
         pass
 
-    def test_model_common_attributes(self):
+    def test_model_get_set_embeddings(self):
         config, _ = self.model_tester.prepare_config_and_inputs_for_common()
 
         for model_class in self.all_model_classes:
@@ -212,8 +213,7 @@ class VivitModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
             # signature.parameters is an OrderedDict => so arg_names order is deterministic
             arg_names = [*signature.parameters.keys()]
 
-            expected_arg_names = ["pixel_values", "head_mask"]
-            self.assertListEqual(arg_names[:2], expected_arg_names)
+            self.assertEqual(arg_names[0], "pixel_values")
 
     def test_model(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
@@ -225,9 +225,9 @@ class VivitModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in VIVIT_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = VivitModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "google/vivit-b-16x2-kinetics400"
+        model = VivitModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
     def test_attention_outputs(self):
         config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
@@ -239,7 +239,8 @@ class VivitModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
             inputs_dict["output_attentions"] = True
             inputs_dict["output_hidden_states"] = False
             config.return_dict = True
-            model = model_class(config)
+            model = model_class._from_config(config, attn_implementation="eager")
+            config = model.config
             model.to(torch_device)
             model.eval()
             with torch.no_grad():
@@ -350,7 +351,34 @@ class VivitModelIntegrationTest(unittest.TestCase):
         expected_shape = torch.Size((1, 400))
         self.assertEqual(outputs.logits.shape, expected_shape)
 
-        # taken from original model
-        expected_slice = torch.tensor([-0.9498, 2.7971, -1.4049, 0.1024, -1.8353]).to(torch_device)
+        expectations = Expectations(
+            {
+                (None, None): [-0.9498, 2.7971, -1.4049, 0.1024, -1.8353],
+                ("cuda", 8): [-0.9502, 2.7967, -1.4046, 0.1027, -1.8345],
+            }
+        )
+        expected_slice = torch.tensor(expectations.get_expectation()).to(torch_device)
+        torch.testing.assert_close(outputs.logits[0, :5], expected_slice, rtol=2e-4, atol=2e-4)
 
-        self.assertTrue(torch.allclose(outputs.logits[0, :5], expected_slice, atol=1e-4))
+    @slow
+    def test_inference_interpolate_pos_encoding(self):
+        # Vivit models have an `interpolate_pos_encoding` argument in their forward method,
+        # allowing to interpolate the pre-trained position embeddings in order to use
+        # the model on higher resolutions. The DINO model by Facebook AI leverages this
+        # to visualize self-attention on higher resolution images.
+        model = VivitModel.from_pretrained("google/vivit-b-16x2-kinetics400").to(torch_device)
+
+        image_processor = VivitImageProcessor.from_pretrained("google/vivit-b-16x2-kinetics400")
+        video = prepare_video()
+        inputs = image_processor(
+            video, size={"shortest_edge": 480}, crop_size={"height": 232, "width": 232}, return_tensors="pt"
+        )
+        pixel_values = inputs.pixel_values.to(torch_device)
+
+        # forward pass
+        with torch.no_grad():
+            outputs = model(pixel_values, interpolate_pos_encoding=True)
+
+        # verify the logits shape
+        expected_shape = torch.Size((1, 3137, 768))
+        self.assertEqual(outputs.last_hidden_state.shape, expected_shape)

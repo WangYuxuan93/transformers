@@ -626,7 +626,7 @@
         "model_classes": [
             "Blip2ForConditionalGeneration"
         ],
-        "sha": "35e1ef43da3554af62eb29a7b3dbbef3f3bef48e"
+        "sha": "d0de11fd1f8ca481231c07ee0934924be96cb281"
     },
     "Blip2Model": {
         "tokenizer_classes": [
@@ -1718,7 +1718,7 @@
         "model_classes": [
             "EfficientNetForImageClassification"
         ],
-        "sha": "6ed195ee636d2c0b885139da8c7b45d57ebaeee0"
+        "sha": "993d088cf937b8a90b61f68677cd8f261321c745"
     },
     "EfficientNetModel": {
         "tokenizer_classes": [],
@@ -2896,7 +2896,7 @@
         "model_classes": [
             "IdeficsForVisionText2Text"
         ],
-        "sha": "2c2f2e2cd6b02a77d0cdd8c3767ba9a6267dbd20"
+        "sha": "a6be81294ff7a3d44f3aef0ed18e42b97c426831"
     },
     "IdeficsModel": {
         "tokenizer_classes": [
@@ -2986,17 +2986,6 @@
             "LEDForQuestionAnswering"
         ],
         "sha": "47c7a75a1e650dae60ff6e9bbab0f2386946670c"
-    },
-    "LEDForSequenceClassification": {
-        "tokenizer_classes": [
-            "LEDTokenizer",
-            "LEDTokenizerFast"
-        ],
-        "processor_classes": [],
-        "model_classes": [
-            "LEDForSequenceClassification"
-        ],
-        "sha": "3571e2c9d9f2f2ec0b8fe47090330b128be05126"
     },
     "LEDModel": {
         "tokenizer_classes": [
@@ -4917,50 +4906,6 @@
         ],
         "sha": "b8c8d479e29e9ee048e2d0b05b001ac835ad8859"
     },
-    "PhiForCausalLM": {
-        "tokenizer_classes": [
-            "CodeGenTokenizer",
-            "CodeGenTokenizerFast"
-        ],
-        "processor_classes": [],
-        "model_classes": [
-            "PhiForCausalLM"
-        ],
-        "sha": "3fecc0109a4a3a230e3a5509eaf47a26eba85d79"
-    },
-    "PhiForSequenceClassification": {
-        "tokenizer_classes": [
-            "CodeGenTokenizer",
-            "CodeGenTokenizerFast"
-        ],
-        "processor_classes": [],
-        "model_classes": [
-            "PhiForSequenceClassification"
-        ],
-        "sha": "e1c9f8ebf1317516acc1cd6338de71a53e770245"
-    },
-    "PhiForTokenClassification": {
-        "tokenizer_classes": [
-            "CodeGenTokenizer",
-            "CodeGenTokenizerFast"
-        ],
-        "processor_classes": [],
-        "model_classes": [
-            "PhiForTokenClassification"
-        ],
-        "sha": "d3a8054903753b5c96c05eaf9877905a116a1d5e"
-    },
-    "PhiModel": {
-        "tokenizer_classes": [
-            "CodeGenTokenizer",
-            "CodeGenTokenizerFast"
-        ],
-        "processor_classes": [],
-        "model_classes": [
-            "PhiModel"
-        ],
-        "sha": "99c38d5ce7ace35127d00ed3eeb3561308ea6b21"
-    },
     "Pix2StructForConditionalGeneration": {
         "tokenizer_classes": [
             "T5TokenizerFast"
@@ -5043,6 +4988,17 @@
             "PvtModel"
         ],
         "sha": "c40765c382515ae627652d60e9077b6478448d48"
+    },
+    "Qwen2_5OmniForConditionalGeneration": {
+        "tokenizer_classes": [
+            "Qwen2Tokenizer",
+            "Qwen2TokenizerFast"
+        ],
+        "processor_classes": ["Qwen2_5OmniProcessor"],
+        "model_classes": [
+            "Qwen2_5OmniForConditionalGeneration"
+        ],
+        "sha": "9bc7a812cc447b430acb994f8d42e8e64c7b61f6"
     },
     "ReformerForMaskedLM": {
         "tokenizer_classes": [
@@ -6703,18 +6659,6 @@
             "Wav2Vec2ForCTC"
         ],
         "sha": "6245fbb1cb99cea5c4de1e73f81fba978fb275ac"
-    },
-    "Wav2Vec2ForMaskedLM": {
-        "tokenizer_classes": [
-            "Wav2Vec2CTCTokenizer"
-        ],
-        "processor_classes": [
-            "Wav2Vec2FeatureExtractor"
-        ],
-        "model_classes": [
-            "Wav2Vec2ForMaskedLM"
-        ],
-        "sha": "e083cf4fefec4df3c241dbbe5e17a84a794a89bd"
     },
     "Wav2Vec2ForPreTraining": {
         "tokenizer_classes": [

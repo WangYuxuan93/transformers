@@ -23,16 +23,12 @@
     title: 🤗 PEFT を使用してアダプターをロードしてトレーニングする
   - local: model_sharing
     title: モデルを共有する
-  - local: transformers_agents
-    title: エージェント
   - local: llm_tutorial
     title: LLM を使用した生成
   title: Tutorials
 - sections:
   - isExpanded: false
     sections:
-    - local: tasks/sequence_classification
-      title: テキストの分類
     - local: tasks/token_classification
       title: トークンの分類
     - local: tasks/question_answering
@@ -113,16 +109,8 @@
     title: チャットモデルのテンプレート
   - local: serialization
     title: ONNX へのエクスポート
-  - local: tflite
-    title: TFLite へのエクスポート
-  - local: torchscript
-    title: トーチスクリプトへのエクスポート
-  - local: benchmarks
-    title: ベンチマーク
   - local: community
     title: コミュニティリソース
-  - local: custom_tools
-    title: カスタムツールとプロンプト
   - local: troubleshooting
     title: トラブルシューティング
   title: 開発者ガイド
@@ -140,8 +128,6 @@
       title: 分散CPUトレーニング
     - local: perf_train_tpu
       title: TPU に関するトレーニング
-    - local: perf_train_tpu_tf
-      title: TensorFlow を使用した TPU のトレーニング
     - local: perf_train_special
       title: 特殊なハードウェアに関するトレーニング
     - local: perf_hardware
@@ -161,16 +147,12 @@
     title: 推論の最適化
   - local: big_models
     title: 大きなモデルのインスタンス化
-  - local: tf_xla
-    title: TensorFlowモデルのXLA統合
   - local: perf_torch_compile
     title: torch.compile()を使用した推論の最適化
   title: パフォーマンスとスケーラビリティ
 - sections:
   - local: add_new_model
     title: 🤗 Transformersにモデルを追加する方法
-  - local: add_tensorflow_model
-    title: 🤗 TransformersモデルをTensorFlowに変換する方法
   - local: testing
     title: テスト
   - local: pr_checks
@@ -204,8 +186,6 @@
   title: コンセプチュアルガイド
 - sections:
   - sections:
-    - local: main_classes/agent
-      title: エージェントとツール
     - local: model_doc/auto
       title: Auto Classes
     - local: main_classes/callback
@@ -214,16 +194,12 @@
       title: 構成
     - local: main_classes/data_collator
       title: データ照合者
-    - local: main_classes/keras_callbacks
-      title: Keras コールバック
     - local: main_classes/logging
       title: ロギング
     - local: main_classes/model
       title: モデル
     - local: main_classes/text_generation
       title: テキストの生成
-    - local: main_classes/onnx
-      title: ONNX
     - local: main_classes/optimizer_schedules
       title: 最適化
     - local: main_classes/output
@@ -276,8 +252,6 @@
         title: Blenderbot Small
       - local: model_doc/bloom
         title: BLOOM
-      - local: model_doc/bort
-        title: BORT
       - local: model_doc/byt5
         title: ByT5
       - local: model_doc/camembert
@@ -300,6 +274,8 @@
         title: DeBERTa
       - local: model_doc/deberta-v2
         title: DeBERTa-v2
+      - local: model_doc/dialogpt
+        title: DialoGPT
       title: 文章モデル
     - isExpanded: false
       sections:
@@ -317,6 +293,12 @@
         title: CvT
       - local: model_doc/deformable_detr
         title: Deformable DETR
+      - local: model_doc/deit
+        title: DeiT
+      - local: model_doc/detr
+        title: DETR
+      - local: model_doc/dinat
+        title: DiNAT
       title: ビジョンモデル
     - isExpanded: false
       sections:
@@ -351,6 +333,8 @@
         title: CLVP
       - local: model_doc/data2vec
         title: Data2Vec
+      - local: model_doc/deplot
+        title: DePlot
       title: マルチモーダルモデル
     - isExpanded: false
       sections:

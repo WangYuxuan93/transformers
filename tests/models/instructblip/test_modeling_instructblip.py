@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,24 +11,27 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch InstructBLIP model. """
-
+"""Testing suite for the PyTorch InstructBLIP model."""
 
 import inspect
 import tempfile
 import unittest
 
 import numpy as np
+import pytest
 import requests
 
 from transformers import (
     CONFIG_MAPPING,
+    BitsAndBytesConfig,
     InstructBlipConfig,
     InstructBlipProcessor,
     InstructBlipQFormerConfig,
     InstructBlipVisionConfig,
 )
 from transformers.testing_utils import (
+    Expectations,
+    cleanup,
     require_accelerate,
     require_bitsandbytes,
     require_torch,
@@ -39,6 +41,7 @@ from transformers.testing_utils import (
 )
 from transformers.utils import is_torch_available, is_vision_available
 
+from ...generation.test_utils import GenerationTesterMixin
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import (
     ModelTesterMixin,
@@ -52,8 +55,7 @@ if is_torch_available():
     import torch
     from torch import nn
 
-    from transformers import InstructBlipForConditionalGeneration, InstructBlipVisionModel
-    from transformers.models.instructblip.modeling_instructblip import INSTRUCTBLIP_PRETRAINED_MODEL_ARCHIVE_LIST
+    from transformers import InstructBlipForConditionalGeneration, InstructBlipModel, InstructBlipVisionModel
 
 
 if is_vision_available():
@@ -148,15 +150,16 @@ class InstructBlipVisionModelTest(ModelTesterMixin, unittest.TestCase):
     """
 
     all_model_classes = (InstructBlipVisionModel,) if is_torch_available() else ()
-    fx_compatible = False
-    test_pruning = False
+
     test_resize_embeddings = False
-    test_head_masking = False
 
     def setUp(self):
         self.model_tester = InstructBlipVisionModelTester(self)
         self.config_tester = ConfigTester(
-            self, config_class=InstructBlipVisionConfig, has_text_modality=False, hidden_size=37
+            self,
+            config_class=InstructBlipConfig,
+            has_text_modality=False,
+            common_properties=["num_query_tokens", "image_token_index"],
         )
 
     def test_config(self):
@@ -166,7 +169,7 @@ class InstructBlipVisionModelTest(ModelTesterMixin, unittest.TestCase):
     def test_inputs_embeds(self):
         pass
 
-    def test_model_common_attributes(self):
+    def test_model_get_set_embeddings(self):
         config, _ = self.model_tester.prepare_config_and_inputs_for_common()
 
         for model_class in self.all_model_classes:
@@ -191,39 +194,27 @@ class InstructBlipVisionModelTest(ModelTesterMixin, unittest.TestCase):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_model(*config_and_inputs)
 
-    @unittest.skip(reason="InstructBlipVisionModel is an internal building block, doesn't support standalone training")
+    @unittest.skip(reason="This module does not support standalone training")
     def test_training(self):
         pass
 
-    @unittest.skip(reason="InstructBlipVisionModel is an internal building block, doesn't support standalone training")
+    @unittest.skip(reason="This module does not support standalone training")
     def test_training_gradient_checkpointing(self):
         pass
 
-    @unittest.skip(
-        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
-    )
-    def test_training_gradient_checkpointing_use_reentrant(self):
-        pass
-
-    @unittest.skip(
-        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
-    )
+    @unittest.skip(reason="This module does not support standalone training")
     def test_training_gradient_checkpointing_use_reentrant_false(self):
         pass
 
-    @unittest.skip(reason="InstructBlipVisionModel has no base class and is not available in MODEL_MAPPING")
-    def test_save_load_fast_init_from_base(self):
-        pass
-
-    @unittest.skip(reason="InstructBlipVisionModel has no base class and is not available in MODEL_MAPPING")
-    def test_save_load_fast_init_to_base(self):
+    @unittest.skip(reason="This module does not support standalone training")
+    def test_training_gradient_checkpointing_use_reentrant_true(self):
         pass
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in INSTRUCTBLIP_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = InstructBlipVisionModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "Salesforce/instructblip-flan-t5-xl"
+        model = InstructBlipVisionModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
 
 class InstructBlipQFormerModelTester:
@@ -320,7 +311,7 @@ class InstructBlipTextModelDecoderOnlyTester:
         hidden_act="gelu",
         hidden_dropout_prob=0.1,
         attention_probs_dropout_prob=0.1,
-        max_position_embeddings=20,
+        max_position_embeddings=100,
         eos_token_id=2,
         pad_token_id=1,
         bos_token_id=0,
@@ -384,7 +375,14 @@ class InstructBlipTextModelDecoderOnlyTester:
 # this model tester uses a decoder-only language model (OPT)
 class InstructBlipForConditionalGenerationDecoderOnlyModelTester:
     def __init__(
-        self, parent, vision_kwargs=None, qformer_kwargs=None, text_kwargs=None, is_training=True, num_query_tokens=10
+        self,
+        parent,
+        vision_kwargs=None,
+        qformer_kwargs=None,
+        text_kwargs=None,
+        is_training=True,
+        num_query_tokens=10,
+        image_token_index=4,
     ):
         if vision_kwargs is None:
             vision_kwargs = {}
@@ -397,8 +395,11 @@ class InstructBlipForConditionalGenerationDecoderOnlyModelTester:
         self.vision_model_tester = InstructBlipVisionModelTester(parent, **vision_kwargs)
         self.qformer_model_tester = InstructBlipQFormerModelTester(parent, **qformer_kwargs)
         self.text_model_tester = InstructBlipTextModelDecoderOnlyTester(parent, **text_kwargs)
+        self.batch_size = self.text_model_tester.batch_size  # need bs for batching_equivalence test
+        self.seq_length = self.text_model_tester.seq_length + num_query_tokens  # need seq_length for common tests
         self.is_training = is_training
         self.num_query_tokens = num_query_tokens
+        self.image_token_index = image_token_index
 
     def prepare_config_and_inputs(self):
         _, pixel_values = self.vision_model_tester.prepare_config_and_inputs()
@@ -406,15 +407,24 @@ class InstructBlipForConditionalGenerationDecoderOnlyModelTester:
         _, input_ids, attention_mask = self.text_model_tester.prepare_config_and_inputs()
 
         config = self.get_config()
+        vision_tokens = (
+            torch.ones((input_ids.shape[0], self.num_query_tokens), device=torch_device, dtype=input_ids.dtype)
+            * self.image_token_index
+        )
+        input_ids[input_ids == self.image_token_index] = self.text_model_tester.pad_token_id
+        input_ids = torch.cat([vision_tokens, input_ids], dim=-1)
+        vision_attention_mask = torch.ones_like(vision_tokens)
+        attention_mask = torch.cat([vision_attention_mask, attention_mask], dim=-1)
 
         return config, input_ids, attention_mask, qformer_input_ids, qformer_attention_mask, pixel_values
 
     def get_config(self):
-        return InstructBlipConfig.from_vision_qformer_text_configs(
+        return InstructBlipConfig(
             vision_config=self.vision_model_tester.get_config(),
             qformer_config=self.qformer_model_tester.get_config(),
             text_config=self.text_model_tester.get_config(),
             num_query_tokens=self.num_query_tokens,
+            image_token_index=self.image_token_index,
         )
 
     def create_and_check_for_conditional_generation(
@@ -445,27 +455,48 @@ class InstructBlipForConditionalGenerationDecoderOnlyModelTester:
             "attention_mask": attention_mask,
             "qformer_input_ids": qformer_input_ids,
             "qformer_attention_mask": qformer_attention_mask,
-            "labels": input_ids,
         }
         return config, inputs_dict
 
 
 @require_torch
-class InstructBlipForConditionalGenerationDecoderOnlyTest(ModelTesterMixin, unittest.TestCase):
-    all_model_classes = (InstructBlipForConditionalGeneration,) if is_torch_available() else ()
-    fx_compatible = False
-    test_head_masking = False
-    test_pruning = False
-    test_resize_embeddings = False
+class InstructBlipForConditionalGenerationDecoderOnlyTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase):
+    all_model_classes = (
+        (
+            InstructBlipModel,
+            InstructBlipForConditionalGeneration,
+        )
+        if is_torch_available()
+        else ()
+    )
+    pipeline_model_mapping = {"image-text-to-text": InstructBlipForConditionalGeneration}
+    additional_model_inputs = ["qformer_input_ids", "input_ids"]
+
+    test_resize_embeddings = True
     test_attention_outputs = False
-    test_torchscript = False
+    _is_composite = True
 
     def setUp(self):
         self.model_tester = InstructBlipForConditionalGenerationDecoderOnlyModelTester(self)
+        self.config_tester = ConfigTester(
+            self,
+            config_class=InstructBlipConfig,
+            has_text_modality=False,
+            common_properties=["num_query_tokens", "image_token_index"],
+        )
+
+    def test_config(self):
+        self.config_tester.run_common_tests()
 
     def test_for_conditional_generation(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_for_conditional_generation(*config_and_inputs)
+
+    @unittest.skip(
+        reason=" InstructBlipQFormerModel does not support an attention implementation through torch.nn.functional.scaled_dot_product_attention yet."
+    )
+    def test_eager_matches_sdpa_generate(self):
+        pass
 
     @unittest.skip(reason="Hidden_states is tested in individual model tests")
     def test_hidden_states_output(self):
@@ -484,15 +515,16 @@ class InstructBlipForConditionalGenerationDecoderOnlyTest(ModelTesterMixin, unit
         pass
 
     @unittest.skip(reason="InstructBlipModel does not have input/output embeddings")
-    def test_model_common_attributes(self):
+    def test_model_get_set_embeddings(self):
         pass
 
-    @unittest.skip(reason="There's no base InstructBlipModel")
-    def test_save_load_fast_init_from_base(self):
+    @pytest.mark.generate
+    @unittest.skip(reason="InstructBlip does not support generation from no inputs")
+    def test_generate_without_input_ids(self):
         pass
 
-    @unittest.skip(reason="There's no base InstructBlipModel")
-    def test_save_load_fast_init_to_base(self):
+    @unittest.skip(reason="InstructBLIP has no separate base model without a head.")
+    def test_model_base_model_prefix(self):
         pass
 
     def test_forward_signature(self):
@@ -524,9 +556,76 @@ class InstructBlipForConditionalGenerationDecoderOnlyTest(ModelTesterMixin, unit
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in INSTRUCTBLIP_PRETRAINED_MODEL_ARCHIVE_LIST:
-            model = InstructBlipForConditionalGeneration.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "Salesforce/instructblip-flan-t5-xl"
+        model = InstructBlipForConditionalGeneration.from_pretrained(model_name)
+        self.assertIsNotNone(model)
+
+    # overwrite because InstructBLIP internally calls LM.generate() with embeds thus it cannot operate in no cache format
+    def _check_generate_outputs(self, output, config, use_cache=False, num_return_sequences=1, num_beams=1):
+        use_cache = True  # force this to be True in case False is passed
+        super()._check_generate_outputs(
+            output, config, use_cache=use_cache, num_return_sequences=num_return_sequences, num_beams=num_beams
+        )
+
+    def test_sdpa_can_dispatch_composite_models(self):
+        """
+        Tests if composite models dispatch correctly on SDPA/eager when requested so when loading the model.
+        This tests only by looking at layer names, as usually SDPA layers are called "SDPAAttention".
+        In contrast to the above test, this one checks if the "config._attn_implementation" is a dict after the model
+        is loaded, because we manually replicate requested attn implementation on each sub-config when loading.
+        See https://github.com/huggingface/transformers/pull/32238 for more info
+
+        The test tries to cover most general cases of composite models, VLMs with vision and text configs. Any model
+        that has a different set of sub-configs has to overwrite this test.
+        """
+        if not self.has_attentions:
+            self.skipTest(reason="Model architecture does not support attentions")
+
+        if not self._is_composite:
+            self.skipTest(f"{self.all_model_classes[0].__name__} does not support SDPA")
+
+        for model_class in self.all_model_classes:
+            config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
+            model = model_class(config)
+
+            with tempfile.TemporaryDirectory() as tmpdirname:
+                model.save_pretrained(tmpdirname)
+                model_sdpa = model_class.from_pretrained(tmpdirname)
+                model_sdpa = model_sdpa.eval().to(torch_device)
+
+                # `None` as it is the requested one which will be assigned to each sub-config
+                # Sub-model will dispatch to SDPA if it can (checked below that `SDPA` layers are present)
+                self.assertTrue(model.language_model.config._attn_implementation == "sdpa")
+                self.assertTrue(model.vision_model.config._attn_implementation == "sdpa")
+                self.assertTrue(model.qformer.config._attn_implementation == "eager")
+
+                model_eager = model_class.from_pretrained(tmpdirname, attn_implementation="eager")
+                model_eager = model_eager.eval().to(torch_device)
+                self.assertTrue(model_eager.config._attn_implementation == "eager")
+                self.assertTrue(model_eager.language_model.config._attn_implementation == "eager")
+                self.assertTrue(model_eager.vision_model.config._attn_implementation == "eager")
+                self.assertTrue(model_eager.qformer.config._attn_implementation == "eager")
+
+                for name, submodule in model_eager.named_modules():
+                    class_name = submodule.__class__.__name__
+                    if (
+                        class_name.endswith("Attention")
+                        and getattr(submodule, "config", None)
+                        and submodule.config._attn_implementation == "sdpa"
+                    ):
+                        raise ValueError("The eager model should not have SDPA attention layers")
+
+    def _image_features_prepare_config_and_inputs(self):
+        """
+        Helper method to extract only image-related inputs from the full set of inputs, for testing `get_image_features`.
+
+        InstructBlip's `get_image_features` uses `qformer_input_ids` and `qformer_attention_mask` along with `pixel_values`,
+        so we override this method to keep those, and only discard `input_ids` and `attention_mask`.
+        """
+        config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
+        del inputs_dict["input_ids"]
+        del inputs_dict["attention_mask"]
+        return config, inputs_dict
 
 
 # We will verify our results on an image of cute cats
@@ -540,12 +639,15 @@ def prepare_img():
 @require_torch
 @slow
 class InstructBlipModelIntegrationTest(unittest.TestCase):
+    def tearDown(self):
+        cleanup(torch_device, gc_collect=False)
+
     @require_bitsandbytes
     @require_accelerate
     def test_inference_vicuna_7b(self):
         processor = InstructBlipProcessor.from_pretrained("Salesforce/instructblip-vicuna-7b")
         model = InstructBlipForConditionalGeneration.from_pretrained(
-            "Salesforce/instructblip-vicuna-7b", load_in_8bit=True, low_cpu_mem_usage=True
+            "Salesforce/instructblip-vicuna-7b", quantization_config=BitsAndBytesConfig(load_in_8bit=True)
         )
 
         url = "https://raw.githubusercontent.com/salesforce/LAVIS/main/docs/_static/Confusing-Pictures.jpg"
@@ -553,33 +655,34 @@ class InstructBlipModelIntegrationTest(unittest.TestCase):
         prompt = "What is unusual about this image?"
         inputs = processor(images=image, text=prompt, return_tensors="pt").to(torch_device, torch.float16)
 
-        # verify logits
-        with torch.no_grad():
-            logits = model(**inputs).logits
-
-        expected_slice = torch.tensor(
-            [[-3.4902, -12.5078, 8.4141], [-5.1211, -12.1328, 7.8281], [-4.0312, -13.5938, 9.1172]],
-            device=torch_device,
-        )
-        self.assertTrue(torch.allclose(logits[0, :3, :3].float(), expected_slice, atol=1e-3))
-
         # verify generation
         outputs = model.generate(**inputs, max_new_tokens=30)
         generated_text = processor.batch_decode(outputs, skip_special_tokens=True)[0].strip()
 
-        expected_outputs = [2, 450, 22910, 9565, 310, 445, 1967, 338, 393, 263, 767, 338, 13977, 292, 22095, 373, 278, 1250, 310, 263, 13328, 20134, 29963, 1550, 19500, 1623, 263, 19587, 4272, 11952, 29889]  # fmt: skip
-        self.assertEqual(outputs[0].tolist(), expected_outputs)
-        self.assertEqual(
-            generated_text,
-            "The unusual aspect of this image is that a man is ironing clothes on the back of a yellow SUV while driving down a busy city street.",
-        )
+        expected_outputs = Expectations(
+            {
+                ("xpu", 3): [32001] * 32 + [2, 1724, 338, 22910, 1048, 445, 1967, 29973, 450, 22910, 9565, 310, 445, 1967, 338, 393, 263, 767, 338, 13977, 292, 22095, 373, 278, 1250, 310, 263, 13328, 20134, 29963, 1550, 19500, 1623, 263, 19587, 4272, 11952, 29889],
+                ("cuda", None): [32001] * 32 + [2, 1724, 338, 22910, 1048, 445, 1967, 29973, 450, 22910, 9565, 310, 445, 1967, 338, 393, 263, 767, 338, 13977, 292, 22095, 373, 278, 1250, 310, 263, 13328, 20134, 29963, 1550, 19500, 373, 263, 19587, 4272, 11952, 29889],
+            }
+        )  # fmt: off
+        expected_output = expected_outputs.get_expectation()
+
+        expected_texts = Expectations(
+            {
+                ("xpu", 3): "What is unusual about this image? The unusual aspect of this image is that a man is ironing clothes on the back of a yellow SUV while driving down a busy city street.",
+                ("cuda", None): "What is unusual about this image? The unusual aspect of this image is that a man is ironing clothes on the back of a yellow SUV while driving on a busy city street.",
+            }
+        )  # fmt: off
+        expected_text = expected_texts.get_expectation()
+
+        self.assertEqual(outputs[0].tolist(), expected_output)
+        self.assertEqual(generated_text, expected_text)
 
     def test_inference_flant5_xl(self):
         processor = InstructBlipProcessor.from_pretrained("Salesforce/instructblip-flan-t5-xl")
         model = InstructBlipForConditionalGeneration.from_pretrained(
             "Salesforce/instructblip-flan-t5-xl",
-            torch_dtype=torch.bfloat16,
-            low_cpu_mem_usage=True,
+            dtype=torch.bfloat16,
         ).to(torch_device)
 
         url = "https://raw.githubusercontent.com/salesforce/LAVIS/main/docs/_static/Confusing-Pictures.jpg"
@@ -597,16 +700,37 @@ class InstructBlipModelIntegrationTest(unittest.TestCase):
             num_beams=5,
             max_length=256,
             min_length=1,
-            top_p=0.9,
             repetition_penalty=1.5,
             length_penalty=1.0,
             temperature=1,
         )
         generated_text = processor.batch_decode(outputs, skip_special_tokens=True)[0]
+        # fmt: off
+        expected_outputs = [0, 37, 1023, 9850, 7, 3, 9, 388, 3575, 53, 4954, 30, 8, 223, 13, 3, 9, 4459, 4049, 16, 8, 2214, 13, 3, 9, 3164, 690, 2815, 5, 37, 388, 19, 5119, 3, 9, 4459, 8677, 28, 3, 9, 4459, 6177, 6, 11, 3, 88, 19, 3609, 46, 3575, 53, 1476, 16, 80, 609, 11, 3, 9, 10428, 8235, 16, 8, 119, 5, 37, 1023, 19, 7225, 16, 24, 34, 1267, 3, 9, 388, 3575, 53, 4954, 30, 8, 223, 13, 3, 9, 4049, 16, 8, 2214, 13, 3, 9, 3164, 690, 2815, 5, 1]
+        # fmt: on
 
-        expected_outputs = [0, 37, 1023, 9850, 7, 3, 9, 388, 3575, 53, 4954, 30, 8, 223, 13, 3, 9, 4459, 4049, 16, 8, 2214, 13, 3, 9, 3164, 690, 2815, 5, 37, 388, 19, 5119, 3, 9, 4459, 8677, 28, 3, 9, 2756, 4459, 6177, 6, 11, 3, 88, 19, 338, 46, 3575, 53, 1476, 12, 743, 112, 2491, 5, 37, 1023, 19, 7225, 788, 12, 8, 685, 24, 34, 1267, 3, 9, 388, 3575, 53, 4954, 30, 8, 223, 13, 3, 9, 4049, 16, 8, 2214, 13, 3, 9, 3164, 690, 2815, 5, 94, 19, 487, 24, 8, 388, 19, 1119, 12, 1097, 540, 57, 692, 112, 10428, 30, 8, 223, 13, 8, 4049, 6, 68, 34, 19, 92, 487, 24, 3, 88, 19, 1119, 12, 1097, 97, 57, 692, 112, 10428, 30, 8, 223, 13, 8, 4049, 16, 8, 2214, 13, 3, 9, 3164, 690, 2815, 5, 3, 13865, 13, 8, 1053, 21, 8, 388, 31, 7, 2874, 6, 34, 19, 964, 24, 3, 88, 19, 1119, 12, 1097, 97, 57, 692, 112, 10428, 30, 8, 223, 13, 8, 4049, 16, 8, 2214, 13, 3, 9, 3164, 690, 2815, 5, 1]  # fmt: skip
         self.assertEqual(outputs[0].tolist(), expected_outputs)
         self.assertEqual(
             generated_text,
-            "The image depicts a man ironing clothes on the back of a yellow van in the middle of a busy city street. The man is wearing a yellow shirt with a bright yellow tie, and he is using an ironing board to complete his task. The image is unusual due to the fact that it shows a man ironing clothes on the back of a van in the middle of a busy city street. It is possible that the man is trying to save money by doing his laundry on the back of the van, but it is also possible that he is trying to save time by doing his laundry on the back of the van in the middle of a busy city street. Regardless of the reason for the man's actions, it is clear that he is trying to save time by doing his laundry on the back of the van in the middle of a busy city street.",
+            "The image depicts a man ironing clothes on the back of a yellow van in the middle of a busy city street. The man is wearing a yellow shirt with a yellow tie, and he is holding an ironing board in one hand and a laundry basket in the other. The image is unusual in that it shows a man ironing clothes on the back of a van in the middle of a busy city street.",
         )
+
+    def test_inference_interpolate_pos_encoding(self):
+        processor = InstructBlipProcessor.from_pretrained("Salesforce/instructblip-flan-t5-xl")
+        model = InstructBlipForConditionalGeneration.from_pretrained(
+            "Salesforce/instructblip-flan-t5-xl",
+            dtype=torch.bfloat16,
+        ).to(torch_device)
+        processor.image_processor.size = {"height": 500, "width": 500}
+
+        image = prepare_img()
+        prompt = "What's in the image?"
+        inputs = processor(images=image, text=prompt, return_tensors="pt").to(torch_device)
+
+        predictions = model.generate(**inputs, interpolate_pos_encoding=True)
+        generated_text = processor.batch_decode(predictions, skip_special_tokens=True)[0].strip()
+
+        self.assertEqual(
+            predictions[0].tolist(), [0, 37, 1023, 753, 3, 9, 2335, 3823, 30, 8, 2608, 28, 3, 9, 1782, 5, 1]
+        )
+        self.assertEqual(generated_text, "The image features a woman sitting on the beach with a dog.")

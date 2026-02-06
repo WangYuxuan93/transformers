@@ -20,7 +20,7 @@ rendered properly in your Markdown viewer.
 
 A classificação de tokens atribui um rótulo a tokens individuais em uma frase. Uma das tarefas de classificação de tokens mais comuns é o Reconhecimento de Entidade Nomeada, também chamada de NER (sigla em inglês para Named Entity Recognition). O NER tenta encontrar um rótulo para cada entidade em uma frase, como uma pessoa, local ou organização.
 
-Este guia mostrará como realizar o fine-tuning do [DistilBERT](https://huggingface.co/distilbert-base-uncased) no conjunto de dados [WNUT 17](https://huggingface.co/datasets/wnut_17) para detectar novas entidades.
+Este guia mostrará como realizar o fine-tuning do [DistilBERT](https://huggingface.co/distilbert/distilbert-base-uncased) no conjunto de dados [WNUT 17](https://huggingface.co/datasets/wnut_17) para detectar novas entidades.
 
 <Tip>
 
@@ -85,7 +85,7 @@ Carregue o tokenizer do DistilBERT para processar os `tokens`:
 ```py
 >>> from transformers import AutoTokenizer
 
->>> tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
+>>> tokenizer = AutoTokenizer.from_pretrained("distilbert/distilbert-base-uncased")
 ```
 
 Como a entrada já foi dividida em palavras, defina `is_split_into_words=True` para tokenizar as palavras em subpalavras:
@@ -136,33 +136,20 @@ Use a função [`map`](https://huggingface.co/docs/datasets/process#map) do 🤗
 
 Use o [`DataCollatorForTokenClassification`] para criar um batch de exemplos. Ele também *preencherá dinamicamente* seu texto e rótulos para o comprimento do elemento mais longo em seu batch, para que tenham um comprimento uniforme. Embora seja possível preencher seu texto na função `tokenizer` configurando `padding=True`, o preenchimento dinâmico é mais eficiente.
 
-<frameworkcontent>
-<pt>
 ```py
 >>> from transformers import DataCollatorForTokenClassification
 
 >>> data_collator = DataCollatorForTokenClassification(tokenizer=tokenizer)
 ```
-</pt>
-<tf>
-```py
->>> from transformers import DataCollatorForTokenClassification
-
->>> data_collator = DataCollatorForTokenClassification(tokenizer=tokenizer, return_tensors="tf")
-```
-</tf>
-</frameworkcontent>
 
 ## Treinamento
 
-<frameworkcontent>
-<pt>
 Carregue o DistilBERT com o [`AutoModelForTokenClassification`] junto com o número de rótulos esperados:
 
 ```py
 >>> from transformers import AutoModelForTokenClassification, TrainingArguments, Trainer
 
->>> model = AutoModelForTokenClassification.from_pretrained("distilbert-base-uncased", num_labels=14)
+>>> model = AutoModelForTokenClassification.from_pretrained("distilbert/distilbert-base-uncased", num_labels=14)
 ```
 
 <Tip>
@@ -180,7 +167,7 @@ Nesse ponto, restam apenas três passos:
 ```py
 >>> training_args = TrainingArguments(
 ...     output_dir="./results",
-...     evaluation_strategy="epoch",
+...     eval_strategy="epoch",
 ...     learning_rate=2e-5,
 ...     per_device_train_batch_size=16,
 ...     per_device_eval_batch_size=16,
@@ -193,77 +180,12 @@ Nesse ponto, restam apenas três passos:
 ...     args=training_args,
 ...     train_dataset=tokenized_wnut["train"],
 ...     eval_dataset=tokenized_wnut["test"],
-...     tokenizer=tokenizer,
+...     processing_class=tokenizer,
 ...     data_collator=data_collator,
 ... )
 
 >>> trainer.train()
 ```
-</pt>
-<tf>
-Para executar o fine-tuning de um modelo no TensorFlow, comece convertendo seu conjunto de dados para o formato `tf.data.Dataset` com [`to_tf_dataset`](https://huggingface.co/docs/datasets/package_reference/main_classes#datasets.Dataset.to_tf_dataset). Nessa execução você deverá especificar as entradas e rótulos (no parâmetro `columns`), se deseja embaralhar o conjunto de dados, o tamanho do batch e o data collator:
-
-```py
->>> tf_train_set = tokenized_wnut["train"].to_tf_dataset(
-...     columns=["attention_mask", "input_ids", "labels"],
-...     shuffle=True,
-...     batch_size=16,
-...     collate_fn=data_collator,
-... )
-
->>> tf_validation_set = tokenized_wnut["validation"].to_tf_dataset(
-...     columns=["attention_mask", "input_ids", "labels"],
-...     shuffle=False,
-...     batch_size=16,
-...     collate_fn=data_collator,
-... )
-```
-
-<Tip>
-
-Se você não estiver familiarizado com o fine-tuning de um modelo com o Keras, dê uma olhada no tutorial básico [aqui](training#finetune-with-keras)!
-
-</Tip>
-
-Configure o otimizador e alguns hiperparâmetros de treinamento:
-
-```py
->>> from transformers import create_optimizer
-
->>> batch_size = 16
->>> num_train_epochs = 3
->>> num_train_steps = (len(tokenized_wnut["train"]) // batch_size) * num_train_epochs
->>> optimizer, lr_schedule = create_optimizer(
-...     init_lr=2e-5,
-...     num_train_steps=num_train_steps,
-...     weight_decay_rate=0.01,
-...     num_warmup_steps=0,
-... )
-```
-
-Carregue o DistilBERT com o [`TFAutoModelForTokenClassification`] junto com o número de rótulos esperados:
-
-```py
->>> from transformers import TFAutoModelForTokenClassification
-
->>> model = TFAutoModelForTokenClassification.from_pretrained("distilbert-base-uncased", num_labels=2)
-```
-
-Configure o modelo para treinamento com o método [`compile`](https://keras.io/api/models/model_training_apis/#compile-method):
-
-```py
->>> import tensorflow as tf
-
->>> model.compile(optimizer=optimizer)
-```
-
-Chame o método [`fit`](https://keras.io/api/models/model_training_apis/#fit-method) para executar o fine-tuning do modelo:
-
-```py
->>> model.fit(x=tf_train_set, validation_data=tf_validation_set, epochs=3)
-```
-</tf>
-</frameworkcontent>
 
 <Tip>
 

@@ -16,16 +16,7 @@ rendered properly in your Markdown viewer.
 
 # 用于生成的工具
 
-此页面列出了所有由 [`~generation.GenerationMixin.generate`],
-[`~generation.GenerationMixin.greedy_search`],
-[`~generation.GenerationMixin.contrastive_search`],
-[`~generation.GenerationMixin.sample`],
-[`~generation.GenerationMixin.beam_search`],
-[`~generation.GenerationMixin.beam_sample`],
-[`~generation.GenerationMixin.group_beam_search`], 和
-[`~generation.GenerationMixin.constrained_beam_search`]使用的实用函数。
-
-其中大多数仅在您研究库中生成方法的代码时才有用。
+此页面列出了所有由 [`~generation.GenerationMixin.generate`]。
 
 ## 生成输出
 
@@ -36,8 +27,8 @@ rendered properly in your Markdown viewer.
 ```python
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
 
-tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-model = GPT2LMHeadModel.from_pretrained("gpt2")
+tokenizer = GPT2Tokenizer.from_pretrained("openai-community/gpt2")
+model = GPT2LMHeadModel.from_pretrained("openai-community/gpt2")
 
 inputs = tokenizer("Hello, my dog is cute and ", return_tensors="pt")
 generation_output = model.generate(**inputs, return_dict_in_generate=True, output_scores=True)
@@ -78,36 +69,6 @@ generation_output[:2]
 
 [[autodoc]] generation.GenerateBeamEncoderDecoderOutput
 
-### TensorFlow
-
-[[autodoc]] generation.TFGreedySearchEncoderDecoderOutput
-
-[[autodoc]] generation.TFGreedySearchDecoderOnlyOutput
-
-[[autodoc]] generation.TFSampleEncoderDecoderOutput
-
-[[autodoc]] generation.TFSampleDecoderOnlyOutput
-
-[[autodoc]] generation.TFBeamSearchEncoderDecoderOutput
-
-[[autodoc]] generation.TFBeamSearchDecoderOnlyOutput
-
-[[autodoc]] generation.TFBeamSampleEncoderDecoderOutput
-
-[[autodoc]] generation.TFBeamSampleDecoderOnlyOutput
-
-[[autodoc]] generation.TFContrastiveSearchEncoderDecoderOutput
-
-[[autodoc]] generation.TFContrastiveSearchDecoderOnlyOutput
-
-### FLAX
-
-[[autodoc]] generation.FlaxSampleOutput
-
-[[autodoc]] generation.FlaxGreedySearchOutput
-
-[[autodoc]] generation.FlaxBeamSearchOutput
-
 ## LogitsProcessor
 
 [`LogitsProcessor`] 可以用于修改语言模型头的预测分数以进行生成
@@ -142,12 +103,6 @@ generation_output[:2]
 [[autodoc]] ForcedEOSTokenLogitsProcessor
     - __call__
 
-[[autodoc]] ForceTokensLogitsProcessor
-    - __call__
-
-[[autodoc]] HammingDiversityLogitsProcessor
-    - __call__
-
 [[autodoc]] InfNanRemoveLogitsProcessor
     - __call__
 
@@ -158,9 +113,6 @@ generation_output[:2]
     - __call__
 
 [[autodoc]] LogitsProcessorList
-    - __call__
-
-[[autodoc]] LogitsWarper
     - __call__
 
 [[autodoc]] MinLengthLogitsProcessor
@@ -208,94 +160,6 @@ generation_output[:2]
 [[autodoc]] WhisperTimeStampLogitsProcessor
     - __call__
 
-### TensorFlow
-
-[[autodoc]] TFForcedBOSTokenLogitsProcessor
-    - __call__
-
-[[autodoc]] TFForcedEOSTokenLogitsProcessor
-    - __call__
-
-[[autodoc]] TFForceTokensLogitsProcessor
-    - __call__
-
-[[autodoc]] TFLogitsProcessor
-    - __call__
-
-[[autodoc]] TFLogitsProcessorList
-    - __call__
-
-[[autodoc]] TFLogitsWarper
-    - __call__
-
-[[autodoc]] TFMinLengthLogitsProcessor
-    - __call__
-
-[[autodoc]] TFNoBadWordsLogitsProcessor
-    - __call__
-
-[[autodoc]] TFNoRepeatNGramLogitsProcessor
-    - __call__
-
-[[autodoc]] TFRepetitionPenaltyLogitsProcessor
-    - __call__
-
-[[autodoc]] TFSuppressTokensAtBeginLogitsProcessor
-    - __call__
-
-[[autodoc]] TFSuppressTokensLogitsProcessor
-    - __call__
-
-[[autodoc]] TFTemperatureLogitsWarper
-    - __call__
-
-[[autodoc]] TFTopKLogitsWarper
-    - __call__
-
-[[autodoc]] TFTopPLogitsWarper
-    - __call__
-
-### FLAX
-
-[[autodoc]] FlaxForcedBOSTokenLogitsProcessor
-    - __call__
-
-[[autodoc]] FlaxForcedEOSTokenLogitsProcessor
-    - __call__
-
-[[autodoc]] FlaxForceTokensLogitsProcessor
-    - __call__
-
-[[autodoc]] FlaxLogitsProcessor
-    - __call__
-
-[[autodoc]] FlaxLogitsProcessorList
-    - __call__
-
-[[autodoc]] FlaxLogitsWarper
-    - __call__
-
-[[autodoc]] FlaxMinLengthLogitsProcessor
-    - __call__
-
-[[autodoc]] FlaxSuppressTokensAtBeginLogitsProcessor
-    - __call__
-
-[[autodoc]] FlaxSuppressTokensLogitsProcessor
-    - __call__
-
-[[autodoc]] FlaxTemperatureLogitsWarper
-    - __call__
-
-[[autodoc]] FlaxTopKLogitsWarper
-    - __call__
-
-[[autodoc]] FlaxTopPLogitsWarper
-    - __call__
-
-[[autodoc]] FlaxWhisperTimeStampLogitsProcessor
-    - __call__
-
 ## StoppingCriteria
 
 可以使用[`StoppingCriteria`]来更改停止生成的时间（除了EOS token以外的方法）。请注意，这仅适用于我们的PyTorch实现。
@@ -312,38 +176,6 @@ generation_output[:2]
 
 [[autodoc]] MaxTimeCriteria
     - __call__
-
-## Constraints
-
-可以使用[`Constraint`]来强制生成结果包含输出中的特定tokens或序列。请注意，这仅适用于我们的PyTorch实现。
-
-[[autodoc]] Constraint
-
-[[autodoc]] PhrasalConstraint
-
-[[autodoc]] DisjunctiveConstraint
-
-[[autodoc]] ConstraintListState
-
-## BeamSearch
-
-[[autodoc]] BeamScorer
-    - process
-    - finalize
-
-[[autodoc]] BeamSearchScorer
-    - process
-    - finalize
-
-[[autodoc]] ConstrainedBeamSearchScorer
-    - process
-    - finalize
-
-## Utilities
-
-[[autodoc]] top_k_top_p_filtering
-
-[[autodoc]] tf_top_k_top_p_filtering
 
 ## Streamers
 

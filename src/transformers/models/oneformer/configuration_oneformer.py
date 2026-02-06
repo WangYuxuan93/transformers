@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2022 SHI Labs and The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,24 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """OneFormer model configuration"""
-from typing import Dict, Optional
 
-from ...configuration_utils import PretrainedConfig
+from ...backbone_utils import consolidate_backbone_kwargs_to_config
+from ...configuration_utils import PreTrainedConfig
 from ...utils import logging
-from ..auto import CONFIG_MAPPING
+from ..auto import AutoConfig
 
 
 logger = logging.get_logger(__name__)
 
-ONEFORMER_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "shi-labs/oneformer_ade20k_swin_tiny": (
-        "https://huggingface.co/shi-labs/oneformer_ade20k_swin_tiny/blob/main/config.json"
-    ),
-    # See all OneFormer models at https://huggingface.co/models?filter=oneformer
-}
 
-
-class OneFormerConfig(PretrainedConfig):
+class OneFormerConfig(PreTrainedConfig):
     r"""
     This is the configuration class to store the configuration of a [`OneFormerModel`]. It is used to instantiate a
     OneFormer model according to the specified arguments, defining the model architecture. Instantiating a
@@ -38,11 +30,11 @@ class OneFormerConfig(PretrainedConfig):
     [shi-labs/oneformer_ade20k_swin_tiny](https://huggingface.co/shi-labs/oneformer_ade20k_swin_tiny) architecture
     trained on [ADE20k-150](https://huggingface.co/datasets/scene_parse_150).
 
-    Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
-    documentation from [`PretrainedConfig`] for more information.
+    Configuration objects inherit from [`PreTrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PreTrainedConfig`] for more information.
 
     Args:
-        backbone_config (`PretrainedConfig`, *optional*, defaults to `SwinConfig`):
+        backbone_config (`Union[dict, "PreTrainedConfig"]`, *optional*, defaults to `SwinConfig()`):
             The configuration of the backbone model.
         ignore_value (`int`, *optional*, defaults to 255):
             Values to be ignored in GT label while calculating loss.
@@ -67,7 +59,7 @@ class OneFormerConfig(PretrainedConfig):
         importance_sample_ratio (`float`, *optional*, defaults to 0.75):
             Ratio of points that are sampled via importance sampling.
         init_std (`float`, *optional*, defaults to 0.02):
-            Standard deviation for normal intialization.
+            Standard deviation for normal initialization.
         init_xavier_std (`float`, *optional*, defaults to 1.0):
             Standard deviation for xavier uniform initialization.
         layer_norm_eps (`float`, *optional*, defaults to 1e-05):
@@ -139,11 +131,12 @@ class OneFormerConfig(PretrainedConfig):
     """
 
     model_type = "oneformer"
+    sub_configs = {"backbone_config": AutoConfig}
     attribute_map = {"hidden_size": "hidden_dim"}
 
     def __init__(
         self,
-        backbone_config: Optional[Dict] = None,
+        backbone_config: dict | PreTrainedConfig | None = None,
         ignore_value: int = 255,
         num_queries: int = 150,
         no_object_weight: int = 0.1,
@@ -161,7 +154,7 @@ class OneFormerConfig(PretrainedConfig):
         is_training: bool = False,
         use_auxiliary_loss: bool = True,
         output_auxiliary_logits: bool = True,
-        strides: Optional[list] = [4, 8, 16, 32],
+        strides: list | None = [4, 8, 16, 32],
         task_seq_len: int = 77,
         text_encoder_width: int = 256,
         text_encoder_context_length: int = 77,
@@ -186,27 +179,17 @@ class OneFormerConfig(PretrainedConfig):
         common_stride: int = 4,
         **kwargs,
     ):
-        if backbone_config is None:
-            logger.info("`backbone_config` is unset. Initializing the config with the default `Swin` backbone.")
-            backbone_config = CONFIG_MAPPING["swin"](
-                image_size=224,
-                in_channels=3,
-                patch_size=4,
-                embed_dim=96,
-                depths=[2, 2, 6, 2],
-                num_heads=[3, 6, 12, 24],
-                window_size=7,
-                drop_path_rate=0.3,
-                use_absolute_embeddings=False,
-                out_features=["stage1", "stage2", "stage3", "stage4"],
-            )
-        elif isinstance(backbone_config, dict):
-            backbone_model_type = backbone_config.get("model_type")
-            config_class = CONFIG_MAPPING[backbone_model_type]
-            backbone_config = config_class.from_dict(backbone_config)
+        backbone_config, kwargs = consolidate_backbone_kwargs_to_config(
+            backbone_config=backbone_config,
+            default_config_type="swin",
+            default_config_kwargs={
+                "drop_path_rate": 0.3,
+                "out_features": ["stage1", "stage2", "stage3", "stage4"],
+            },
+            **kwargs,
+        )
 
         self.backbone_config = backbone_config
-
         self.ignore_value = ignore_value
         self.num_queries = num_queries
         self.no_object_weight = no_object_weight
@@ -250,3 +233,6 @@ class OneFormerConfig(PretrainedConfig):
         self.num_hidden_layers = decoder_layers
 
         super().__init__(**kwargs)
+
+
+__all__ = ["OneFormerConfig"]

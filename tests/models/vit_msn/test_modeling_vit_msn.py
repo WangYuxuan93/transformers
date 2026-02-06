@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2022 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,14 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch ViTMSN model. """
-
+"""Testing suite for the PyTorch ViTMSN model."""
 
 import unittest
+from functools import cached_property
 
 from transformers import ViTMSNConfig
 from transformers.testing_utils import require_torch, require_vision, slow, torch_device
-from transformers.utils import cached_property, is_torch_available, is_vision_available
+from transformers.utils import is_torch_available, is_vision_available
 
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ModelTesterMixin, floats_tensor, ids_tensor
@@ -31,7 +30,6 @@ if is_torch_available():
     from torch import nn
 
     from transformers import ViTMSNForImageClassification, ViTMSNModel
-    from transformers.models.vit_msn.modeling_vit_msn import VIT_MSN_PRETRAINED_MODEL_ARCHIVE_LIST
 
 
 if is_vision_available():
@@ -60,6 +58,8 @@ class ViTMSNModelTester:
         type_sequence_label_size=10,
         initializer_range=0.02,
         scope=None,
+        attn_implementation="eager",
+        mask_ratio=0.5,
     ):
         self.parent = parent
         self.batch_size = batch_size
@@ -78,10 +78,13 @@ class ViTMSNModelTester:
         self.type_sequence_label_size = type_sequence_label_size
         self.initializer_range = initializer_range
         self.scope = scope
+        self.attn_implementation = attn_implementation
 
         # in ViT MSN, the seq length equals the number of patches + 1 (we add 1 for the [CLS] token)
         num_patches = (image_size // patch_size) ** 2
         self.seq_length = num_patches + 1
+        self.num_masks = int(mask_ratio * self.seq_length)
+        self.mask_length = self.seq_length - 1
 
     def prepare_config_and_inputs(self):
         pixel_values = floats_tensor([self.batch_size, self.num_channels, self.image_size, self.image_size])
@@ -107,6 +110,7 @@ class ViTMSNModelTester:
             hidden_dropout_prob=self.hidden_dropout_prob,
             attention_probs_dropout_prob=self.attention_probs_dropout_prob,
             initializer_range=self.initializer_range,
+            attn_implementation=self.attn_implementation,
         )
 
     def create_and_check_model(self, config, pixel_values, labels):
@@ -152,15 +156,12 @@ class ViTMSNModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
 
     all_model_classes = (ViTMSNModel, ViTMSNForImageClassification) if is_torch_available() else ()
     pipeline_model_mapping = (
-        {"feature-extraction": ViTMSNModel, "image-classification": ViTMSNForImageClassification}
+        {"image-feature-extraction": ViTMSNModel, "image-classification": ViTMSNForImageClassification}
         if is_torch_available()
         else {}
     )
 
-    test_pruning = False
-    test_torchscript = False
     test_resize_embeddings = False
-    test_head_masking = False
 
     def setUp(self):
         self.model_tester = ViTMSNModelTester(self)
@@ -173,7 +174,7 @@ class ViTMSNModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
     def test_inputs_embeds(self):
         pass
 
-    def test_model_common_attributes(self):
+    def test_model_get_set_embeddings(self):
         config, _ = self.model_tester.prepare_config_and_inputs_for_common()
 
         for model_class in self.all_model_classes:
@@ -192,9 +193,9 @@ class ViTMSNModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in VIT_MSN_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = ViTMSNModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "facebook/vit-msn-small"
+        model = ViTMSNModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
 
 # We will verify our results on an image of cute cats
@@ -229,4 +230,4 @@ class ViTMSNModelIntegrationTest(unittest.TestCase):
 
         expected_slice = torch.tensor([0.5588, 0.6853, -0.5929]).to(torch_device)
 
-        self.assertTrue(torch.allclose(outputs.logits[0, :3], expected_slice, atol=1e-4))
+        torch.testing.assert_close(outputs.logits[0, :3], expected_slice, rtol=1e-4, atol=1e-4)

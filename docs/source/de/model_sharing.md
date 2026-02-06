@@ -43,7 +43,7 @@ Folglich können Sie eine bestimmte Modellversion mit dem Parameter "Revision" l
 
 ```py
 >>> model = AutoModel.from_pretrained(
-...     "julien-c/EsperBERTo-small", revision="v2.0.1"  # tag name, or branch name, or commit hash
+...     "julien-c/EsperBERTo-small", revision="4c77982"  # tag name, or branch name, or commit hash
 ... )
 ```
 
@@ -56,7 +56,7 @@ Dateien lassen sich auch in einem Repository leicht bearbeiten, und Sie können 
 Bevor Sie ein Modell für den Hub freigeben, benötigen Sie Ihre Hugging Face-Anmeldedaten. Wenn Sie Zugang zu einem Terminal haben, führen Sie den folgenden Befehl in der virtuellen Umgebung aus, in der 🤗 Transformers installiert ist. Dadurch werden Ihre Zugangsdaten in Ihrem Hugging Face-Cache-Ordner (standardmäßig `~/.cache/`) gespeichert:
 
 ```bash
-huggingface-cli login
+hf auth login
 ```
 
 Wenn Sie ein Notebook wie Jupyter oder Colaboratory verwenden, stellen Sie sicher, dass Sie die [`huggingface_hub`](https://huggingface.co/docs/hub/adding-a-library) Bibliothek installiert haben. Diese Bibliothek ermöglicht Ihnen die programmatische Interaktion mit dem Hub.
@@ -79,43 +79,15 @@ Um sicherzustellen, dass Ihr Modell von jemandem verwendet werden kann, der mit 
 
 Die Konvertierung eines Checkpoints für ein anderes Framework ist einfach. Stellen Sie sicher, dass Sie PyTorch und TensorFlow installiert haben (siehe [hier](installation) für Installationsanweisungen), und finden Sie dann das spezifische Modell für Ihre Aufgabe in dem anderen Framework. 
 
-<frameworkcontent>
-<pt>
 Geben Sie `from_tf=True` an, um einen Prüfpunkt von TensorFlow nach PyTorch zu konvertieren:
 
 ```py
 >>> pt_model = DistilBertForSequenceClassification.from_pretrained("path/to/awesome-name-you-picked", from_tf=True)
 >>> pt_model.save_pretrained("path/to/awesome-name-you-picked")
 ```
-</pt>
-<tf>
-Geben Sie `from_pt=True` an, um einen Prüfpunkt von PyTorch nach TensorFlow zu konvertieren:
-
-```py
->>> tf_model = TFDistilBertForSequenceClassification.from_pretrained("path/to/awesome-name-you-picked", from_pt=True)
-```
-
-Dann können Sie Ihr neues TensorFlow-Modell mit seinem neuen Checkpoint speichern:
-
-```py
->>> tf_model.save_pretrained("path/to/awesome-name-you-picked")
-```
-</tf>
-<jax>
-Wenn ein Modell in Flax verfügbar ist, können Sie auch einen Kontrollpunkt von PyTorch nach Flax konvertieren:
-
-```py
->>> flax_model = FlaxDistilBertForSequenceClassification.from_pretrained(
-...     "path/to/awesome-name-you-picked", from_pt=True
-... )
-```
-</jax>
-</frameworkcontent>
 
 ## Ein Modell während des Trainings hochladen
 
-<frameworkcontent>
-<pt>
 <Youtube id="Z1-XMy-GNLQ"/>
 
 Die Weitergabe eines Modells an den Hub ist so einfach wie das Hinzufügen eines zusätzlichen Parameters oder Rückrufs. Erinnern Sie sich an das [Feinabstimmungs-Tutorial](training), in der Klasse [`TrainingArguments`] geben Sie Hyperparameter und zusätzliche Trainingsoptionen an. Eine dieser Trainingsoptionen beinhaltet die Möglichkeit, ein Modell direkt an den Hub zu pushen. Setzen Sie `push_to_hub=True` in Ihrer [`TrainingArguments`]:
@@ -141,29 +113,6 @@ Nach der Feinabstimmung Ihres Modells rufen Sie [`~transformers.Trainer.push_to_
 ```py
 >>> trainer.push_to_hub()
 ```
-</pt>
-<tf>
-Geben Sie ein Modell mit [`PushToHubCallback`] an den Hub weiter. In der [`PushToHubCallback`] Funktion, fügen Sie hinzu:
-
-- Ein Ausgabeverzeichnis für Ihr Modell.
-- Einen Tokenizer.
-- Die `hub_model_id`, die Ihr Hub-Benutzername und Modellname ist.
-
-```py
->>> from transformers import PushToHubCallback
-
->>> push_to_hub_callback = PushToHubCallback(
-...     output_dir="./your_model_save_path", tokenizer=tokenizer, hub_model_id="your-username/my-awesome-model"
-... )
-```
-
-Fügen Sie den Callback zu [`fit`](https://keras.io/api/models/model_training_apis/) hinzu, und 🤗 Transformers wird das trainierte Modell an den Hub weiterleiten:
-
-```py
->>> model.fit(tf_train_dataset, validation_data=tf_validation_dataset, epochs=3, callbacks=push_to_hub_callback)
-```
-</tf>
-</frameworkcontent>
 
 ## Verwenden Sie die Funktion `push_to_hub`.
 
@@ -229,4 +178,4 @@ Um sicherzustellen, dass die Benutzer die Fähigkeiten, Grenzen, möglichen Verz
 * Manuelles Erstellen und Hochladen einer "README.md"-Datei.
 * Klicken Sie auf die Schaltfläche **Modellkarte bearbeiten** in Ihrem Modell-Repository.
 
-Werfen Sie einen Blick auf die DistilBert [model card](https://huggingface.co/distilbert-base-uncased) als gutes Beispiel für die Art von Informationen, die eine Modellkarte enthalten sollte. Weitere Details über andere Optionen, die Sie in der Datei "README.md" einstellen können, wie z.B. den Kohlenstoff-Fußabdruck eines Modells oder Beispiele für Widgets, finden Sie in der Dokumentation [hier](https://huggingface.co/docs/hub/models-cards).
+Werfen Sie einen Blick auf die DistilBert [model card](https://huggingface.co/distilbert/distilbert-base-uncased) als gutes Beispiel für die Art von Informationen, die eine Modellkarte enthalten sollte. Weitere Details über andere Optionen, die Sie in der Datei "README.md" einstellen können, wie z.B. den Kohlenstoff-Fußabdruck eines Modells oder Beispiele für Widgets, finden Sie in der Dokumentation [hier](https://huggingface.co/docs/hub/models-cards).

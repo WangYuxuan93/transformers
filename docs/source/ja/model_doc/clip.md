@@ -18,7 +18,7 @@ rendered properly in your Markdown viewer.
 
 ## Overview
 
-CLIP モデルは、Alec Radford、Jong Wook Kim、Chris Hallacy、Aditya Ramesh、Gabriel Goh Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, Gretchen Krueger, Ilya Sutskever [Learning Transferable Visual Models From Natural Language Supervision](https://arxiv.org/abs/2103.00020) で提案されました。
+CLIP モデルは、Alec Radford、Jong Wook Kim、Chris Hallacy、Aditya Ramesh、Gabriel Goh Sandhini Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, Gretchen Krueger, Ilya Sutskever [Learning Transferable Visual Models From Natural Language Supervision](https://huggingface.co/papers/2103.00020) で提案されました。
 サンディニ・アガルワル、ギリッシュ・サストリー、アマンダ・アスケル、パメラ・ミシュキン、ジャック・クラーク、グレッチェン・クルーガー、イリヤ・サツケヴァー。クリップ
 (Contrastive Language-Image Pre-Training) は、さまざまな (画像、テキスト) ペアでトレーニングされたニューラル ネットワークです。かもね
 直接最適化することなく、与えられた画像から最も関連性の高いテキスト スニペットを予測するように自然言語で指示されます。
@@ -94,7 +94,7 @@ CLIP を使い始めるのに役立つ公式 Hugging Face およびコミュニ�
 - 事前トレーニングされた CLIP を使用した画像検索と MRR (平均相互ランク) スコアの計算に関する [ノートブック](https://colab.research.google.com/drive/1bLVwVKpAndpEDHqjzxVPr_9nGrSbuOQd?usp=sharing)。 🌎
 - 画像の取得と類似性スコアの表示に関する [ノートブック](https://colab.research.google.com/github/deep-diver/image_search_with_natural_language/blob/main/notebooks/Image_Search_CLIP.ipynb)。 🌎
 - 多言語 CLIP を使用して画像とテキストを同じベクトル空間にマッピングする方法に関する [ノートブック](https://colab.research.google.com/drive/1xO-wC_m_GNzgjIBQ4a4znvQkvDoZJvH4?usp=sharing)。 🌎
-- を使用してセマンティック イメージ検索で CLIP を実行する方法に関する [ノートブック](https://colab.research.google.com/github/vivien000/clip-demo/blob/master/clip.ipynb#scrollTo=uzdFhRGqiWkR) [Unsplash](https://unsplash.com) および [TMBD](https://www.themoviedb.org/) データセット。 🌎
+- を使用してセマンティック イメージ検索で CLIP を実行する方法に関する [ノートブック](https://colab.research.google.com/github/vivien000/clip-demo/blob/master/clip.ipynb#scrollTo=uzdFhRGqiWkR) [Unsplash](https://unsplash.com) および [TMDB](https://www.themoviedb.org/) データセット。 🌎
 
 **説明可能性**
 
@@ -106,7 +106,6 @@ CLIP を使い始めるのに役立つ公式 Hugging Face およびコミュニ�
 ## CLIPConfig
 
 [[autodoc]] CLIPConfig
-    - from_text_vision_configs
 
 ## CLIPTextConfig
 
@@ -119,9 +118,7 @@ CLIP を使い始めるのに役立つ公式 Hugging Face およびコミュニ�
 ## CLIPTokenizer
 
 [[autodoc]] CLIPTokenizer
-    - build_inputs_with_special_tokens
     - get_special_tokens_mask
-    - create_token_type_ids_from_sequences
     - save_vocabulary
 
 ## CLIPTokenizerFast
@@ -133,16 +130,15 @@ CLIP を使い始めるのに役立つ公式 Hugging Face およびコミュニ�
 [[autodoc]] CLIPImageProcessor
     - preprocess
 
-## CLIPFeatureExtractor
+## CLIPImageProcessorFast
 
-[[autodoc]] CLIPFeatureExtractor
+[[autodoc]] CLIPImageProcessorFast
+    - preprocess
 
 ## CLIPProcessor
 
 [[autodoc]] CLIPProcessor
 
-<frameworkcontent>
-<pt>
 
 ## CLIPModel
 
@@ -170,51 +166,3 @@ CLIP を使い始めるのに役立つ公式 Hugging Face およびコミュニ�
 
 [[autodoc]] CLIPVisionModel
     - forward
-
-</pt>
-<tf>
-
-## TFCLIPModel
-
-[[autodoc]] TFCLIPModel
-    - call
-    - get_text_features
-    - get_image_features
-
-## TFCLIPTextModel
-
-[[autodoc]] TFCLIPTextModel
-    - call
-
-## TFCLIPVisionModel
-
-[[autodoc]] TFCLIPVisionModel
-    - call
-
-</tf>
-<jax>
-
-## FlaxCLIPModel
-
-[[autodoc]] FlaxCLIPModel
-    - __call__
-    - get_text_features
-    - get_image_features
-
-## FlaxCLIPTextModel
-
-[[autodoc]] FlaxCLIPTextModel
-    - __call__
-
-## FlaxCLIPTextModelWithProjection
-
-[[autodoc]] FlaxCLIPTextModelWithProjection
-    - __call__
-
-## FlaxCLIPVisionModel
-
-[[autodoc]] FlaxCLIPVisionModel
-    - __call__
-
-</jax>
-</frameworkcontent>

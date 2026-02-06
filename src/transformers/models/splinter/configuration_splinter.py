@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2021 Tel AViv University, AllenAI and The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,32 +11,24 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Splinter model configuration"""
+"""Splinter model configuration"""
 
-from ...configuration_utils import PretrainedConfig
+from ...configuration_utils import PreTrainedConfig
 from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
 
-SPLINTER_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "tau/splinter-base": "https://huggingface.co/tau/splinter-base/resolve/main/config.json",
-    "tau/splinter-base-qass": "https://huggingface.co/tau/splinter-base-qass/resolve/main/config.json",
-    "tau/splinter-large": "https://huggingface.co/tau/splinter-large/resolve/main/config.json",
-    "tau/splinter-large-qass": "https://huggingface.co/tau/splinter-large-qass/resolve/main/config.json",
-    # See all Splinter models at https://huggingface.co/models?filter=splinter
-}
 
-
-class SplinterConfig(PretrainedConfig):
+class SplinterConfig(PreTrainedConfig):
     r"""
     This is the configuration class to store the configuration of a [`SplinterModel`]. It is used to instantiate an
     Splinter model according to the specified arguments, defining the model architecture. Instantiating a configuration
     with the defaults will yield a similar configuration to that of the Splinter
     [tau/splinter-base](https://huggingface.co/tau/splinter-base) architecture.
 
-    Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
-    documentation from [`PretrainedConfig`] for more information.
+    Configuration objects inherit from [`PreTrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PreTrainedConfig`] for more information.
 
 
     Args:
@@ -56,7 +47,7 @@ class SplinterConfig(PretrainedConfig):
             The non-linear activation function (function or string) in the encoder and pooler. If string, `"gelu"`,
             `"relu"`, `"selu"` and `"gelu_new"` are supported.
         hidden_dropout_prob (`float`, *optional*, defaults to 0.1):
-            The dropout probabilitiy for all fully connected layers in the embeddings, encoder, and pooler.
+            The dropout probability for all fully connected layers in the embeddings, encoder, and pooler.
         attention_probs_dropout_prob (`float`, *optional*, defaults to 0.1):
             The dropout ratio for the attention probabilities.
         max_position_embeddings (`int`, *optional*, defaults to 512):
@@ -68,9 +59,6 @@ class SplinterConfig(PretrainedConfig):
             The standard deviation of the truncated_normal_initializer for initializing all weight matrices.
         layer_norm_eps (`float`, *optional*, defaults to 1e-12):
             The epsilon used by the layer normalization layers.
-        use_cache (`bool`, *optional*, defaults to `True`):
-            Whether or not the model should return the last key/values attentions (not used by all models). Only
-            relevant if `config.is_decoder=True`.
         question_token_id (`int`, *optional*, defaults to 104):
             The id of the `[QUESTION]` token.
 
@@ -105,13 +93,17 @@ class SplinterConfig(PretrainedConfig):
         type_vocab_size=2,
         initializer_range=0.02,
         layer_norm_eps=1e-12,
-        use_cache=True,
         pad_token_id=0,
+        bos_token_id=None,
+        eos_token_id=None,
         question_token_id=104,
         **kwargs,
     ):
-        super().__init__(pad_token_id=pad_token_id, **kwargs)
+        super().__init__(**kwargs)
 
+        self.pad_token_id = pad_token_id
+        self.bos_token_id = bos_token_id
+        self.eos_token_id = eos_token_id
         self.vocab_size = vocab_size
         self.max_position_embeddings = max_position_embeddings
         self.hidden_size = hidden_size
@@ -124,5 +116,7 @@ class SplinterConfig(PretrainedConfig):
         self.initializer_range = initializer_range
         self.type_vocab_size = type_vocab_size
         self.layer_norm_eps = layer_norm_eps
-        self.use_cache = use_cache
         self.question_token_id = question_token_id
+
+
+__all__ = ["SplinterConfig"]

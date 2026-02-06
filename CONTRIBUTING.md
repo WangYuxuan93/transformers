@@ -40,8 +40,7 @@ There are several ways you can contribute to 🤗 Transformers:
 
 If you don't know where to start, there is a special [Good First
 Issue](https://github.com/huggingface/transformers/contribute) listing. It will give you a list of
-open issues that are beginner-friendly and help you start contributing to open-source. Just comment on the issue that you'd like to work
-on. 
+open issues that are beginner-friendly and help you start contributing to open-source. The best way to do that is to open a Pull Request and link it to the issue that you'd like to work on. We try to give priority to opened PRs as we can easily track the progress of the fix, and if the contributor does not have time anymore, someone else can take the PR over.
 
 For something slightly more challenging, you can also take a look at the [Good Second Issue](https://github.com/huggingface/transformers/labels/Good%20Second%20Issue) list. In general though, if you feel like you know what you're doing, go for it and we'll help you get there! 🚀
 
@@ -49,7 +48,7 @@ For something slightly more challenging, you can also take a look at the [Good S
 
 ## Fixing outstanding issues
 
-If you notice an issue with the existing code and have a fix in mind, feel free to [start contributing](https://github.com/huggingface/transformers/blob/main/CONTRIBUTING.md/#create-a-pull-request) and open a Pull Request!
+If you notice an issue with the existing code and have a fix in mind, feel free to [start contributing](#create-a-pull-request) and open a Pull Request!
 
 ## Submitting a bug-related issue or feature request
 
@@ -62,12 +61,14 @@ feedback.
 The 🤗 Transformers library is robust and reliable thanks to users who report the problems they encounter.
 
 Before you report an issue, we would really appreciate it if you could **make sure the bug was not
-already reported** (use the search bar on GitHub under Issues). Your issue should also be related to bugs in the library itself, and not your code. If you're unsure whether the bug is in your code or the library, please ask in the [forum](https://discuss.huggingface.co/) first. This helps us respond quicker to fixing issues related to the library versus general questions.
+already reported** (use the search bar on GitHub under Issues). Your issue should also be related to bugs in the library itself, and not your code. If you're unsure whether the bug is in your code or the library, please ask in the [forum](https://discuss.huggingface.co/) or on our [discord](https://discord.com/invite/hugging-face-879548962464493619) first. This helps us respond quicker to fixing issues related to the library versus general questions.
+
+> [!TIP]
+> We have a [docs bot](https://huggingface.co/spaces/huggingchat/hf-docs-chat), and we highly encourage you to ask all your questions there. There is always a chance your bug can be fixed with a simple flag 👾🔫
 
 Once you've confirmed the bug hasn't already been reported, please include the following information in your issue so we can quickly resolve it:
 
-* Your **OS type and version** and **Python**, **PyTorch** and
-  **TensorFlow** versions when applicable.
+* Your **OS type and version** and **Python**, and **PyTorch** versions when applicable.
 * A short, self-contained, code snippet that allows us to reproduce the bug in
   less than 30s.
 * The *full* traceback if an exception is raised.
@@ -76,7 +77,7 @@ Once you've confirmed the bug hasn't already been reported, please include the f
 To get the OS and software versions automatically, run the following command:
 
 ```bash
-transformers-cli env
+transformers env
 ```
 
 You can also run the same command from the root of the repository:
@@ -103,7 +104,7 @@ We have added [templates](https://github.com/huggingface/transformers/tree/main/
 
 ## Do you want to implement a new model?
 
-New models are constantly released and if you want to implement a new model, please provide the following information
+New models are constantly released and if you want to implement a new model, please provide the following information:
 
 * A short description of the model and a link to the paper.
 * Link to the implementation if it is open-sourced.
@@ -111,7 +112,127 @@ New models are constantly released and if you want to implement a new model, ple
 
 If you are willing to contribute the model yourself, let us know so we can help you add it to 🤗 Transformers!
 
-We have added a [detailed guide and templates](https://github.com/huggingface/transformers/tree/main/templates) to help you get started with adding a new model, and we also have a more technical guide for [how to add a model to 🤗 Transformers](https://huggingface.co/docs/transformers/add_new_model).
+We have a technical guide for [how to add a model to 🤗 Transformers](https://huggingface.co/docs/transformers/modular_transformers).
+
+### Vision-Language Model Contribution Checklist
+
+If you're contributing a **vision-language model** (or any multimodal model that processes images/videos), please follow this checklist. Maintainers will use this to review your PR, and completing these steps will significantly increase the likelihood of your PR being merged quickly.
+
+**Required checklist for all vision-language model contributions:**
+
+☐ **1. Implement a modular file**
+
+All new models should use the modular architecture pattern. Create a `modular_<model_name>.py` file using the modular model converter:
+
+- Use the CLI, [`transformers add-new-model-like`](https://github.com/huggingface/transformers/blob/main/src/transformers/cli/add_new_model_like.py) to generate a modular skeleton and get started
+- All code should be in the modular file if possible. Modeling must be in it, it's better if configuration is in it as well. [Modular guide](https://huggingface.co/docs/transformers/modular_transformers#implementing-a-modular-file) shows a quick way to set up a modular file.
+- Reuse existing patterns from similar models as much as possible
+- You can make the model compatible with inference engines such as vLLM or SGLang, and enable zero-effort integration. See specific requirements for model implementation in ["Transformers modeling backend"](https://huggingface.co/docs/transformers/transformers_as_backend#multimodal-models)
+
+To verify your modular file is correct, run:
+
+```bash
+python utils/modular_model_converter.py <model_name>
+```
+
+This will generate the separate files (`modeling_*.py`, `configuration_*.py`, etc.) from your modular file. The CI will enforce that these generated files match your modular file.
+
+☐ **2. Add a fast image processor (for image models)**
+
+If your model processes images, implement a fast image processor that uses `torch` and `torchvision` instead of PIL/numpy for better inference performance:
+
+- See the detailed guide in [#36978](https://github.com/huggingface/transformers/issues/36978)
+- Fast processors inherit from `BaseImageProcessorFast`
+- Examples: `LlavaOnevisionImageProcessorFast`, `Idefics2ImageProcessorFast`
+
+☐ **3. Create a weight conversion script**
+
+Add a `convert_<model_name>_to_hf.py` script that converts the original model weights to the HuggingFace format:
+
+- Script should handle checkpoint loading, key mapping, and saving in HF format
+- Include usage examples and documentation in the script
+- Examples: [`convert_llava_onevision_weights_to_hf.py`](https://github.com/huggingface/transformers/blob/main/src/transformers/models/llava_onevision/convert_llava_onevision_weights_to_hf.py), [`convert_idefics2_weights_to_hf.py`](https://github.com/huggingface/transformers/blob/main/src/transformers/models/idefics2/convert_idefics2_weights_to_hf.py)
+
+☐ **4. Add integration tests with exact output matching**
+
+At minimum, add an `IntegrationTest` class that tests end-to-end generation (processing and modelling) with **exact** output matching:
+
+- For generative models: test that generated text matches expected output exactly
+- For non-generative models: test that output logits match expected values
+- Tests should use real checkpoints (load in 4-bit or half precision if the checkpoint is too big to fit in our CI runners) and real inputs
+- Example pattern:
+
+```python
+class MyModelIntegrationTest(unittest.TestCase):
+    @slow
+    def test_model_integration(self):
+        model = MyModelForConditionalGeneration.from_pretrained("org/model-name")
+        processor = AutoProcessor.from_pretrained("org/model-name")
+
+        inputs = processor(images=image, text=prompt, return_tensors="pt")
+        output = model.generate(**inputs, max_new_tokens=20)
+
+        EXPECTED_TEXT = "exact expected output"
+        self.assertEqual(processor.decode(output[0]), EXPECTED_TEXT)
+```
+
+See `tests/models/llava_onevision/test_modeling_llava_onevision.py` for complete examples.
+
+☐ **5. Update documentation**
+
+Add or update model documentation:
+
+- Create if the cli hasn't `docs/source/en/model_doc/<model_name>.md` with usage examples
+- Include model description, paper link, and basic usage with `Pipeline` and `AutoModel`
+- Add the model to the appropriate TOC files
+
+☐ **6. Look for reusable patterns**
+
+The library has 400+ models with many established patterns:
+
+- Search for similar models (e.g., other vision-language models)
+- Reuse attention mechanisms, layer implementations, and processing patterns
+- Check models like LLaVA, Idefics2, Fuyu for vision-language patterns
+- Use provided decorators like (`auto_docstring`, `can_return_tuple`, `check_model_inputs` and `_can_record_outputs`) where relevant.
+- Don't reinvent the wheel
+
+☐ **7. Run quality checks and read the output**
+
+Before submitting your PR, install quality dependencies and run the full check suite:
+
+```bash
+pip install -e ".[quality]"
+make style
+```
+
+**Important**: Take time to read the output of `make style`. It will:
+
+- Lint and format your code automatically
+- Run consistency checks (imports, docstrings, etc.)
+- Show any remaining issues that need manual fixes
+
+All checks must pass before your PR can be merged.
+
+**If this checklist is complete, your PR has a very high likelihood of being merged!** Following these steps makes the maintainers' work much easier and will reduce the number of review iterations, getting your important work out there faster.
+
+#### Copy-pastable checklist for maintainers
+
+Here's a condensed version maintainers can copy into PRs:
+
+```markdown
+## Multimodal Model Addition Checklist
+
+Please ensure your PR completes all following items. See the [full checklist](https://github.com/huggingface/transformers/blob/main/CONTRIBUTING.md#vision-language-model-contribution-checklist) for details.
+
+- [ ] **Modular file**: `modular_<model_name>.py` implemented and verified with `python utils/modular_model_converter.py <model_name>`
+- [ ] **Fast image processor**: Implemented using `BaseImageProcessorFast` (see [#36978](https://github.com/huggingface/transformers/issues/36978))
+- [ ] **Conversion script**: `convert_<model_name>_to_hf.py` added with usage examples
+- [ ] **Integration tests**: End-to-end tests with exact output matching (text or logits)
+- [ ] **Documentation**: Model docs added/updated in `docs/source/en/model_doc/`
+- [ ] **Pattern reuse**: Verified against similar models (LLaVA, Idefics2, etc.)
+- [ ] **Quality checks**: `make style` passes with no errors
+
+```
 
 ## Do you want to add documentation?
 
@@ -130,7 +251,7 @@ You will need basic `git` proficiency to contribute to
 manual. Type `git --help` in a shell and enjoy! If you prefer books, [Pro
 Git](https://git-scm.com/book/en/v2) is a very good reference.
 
-You'll need **[Python 3.8]((https://github.com/huggingface/transformers/blob/main/setup.py#L426))** or above to contribute to 🤗 Transformers. Follow the steps below to start contributing:
+You'll need **[Python 3.9](https://github.com/huggingface/transformers/blob/main/setup.py#L449)** or above to contribute to 🤗 Transformers. Follow the steps below to start contributing:
 
 1. Fork the [repository](https://github.com/huggingface/transformers) by
    clicking on the **[Fork](https://github.com/huggingface/transformers/fork)** button on the repository's page. This creates a copy of the code
@@ -161,10 +282,9 @@ You'll need **[Python 3.8]((https://github.com/huggingface/transformers/blob/mai
    If 🤗 Transformers was already installed in the virtual environment, remove
    it with `pip uninstall transformers` before reinstalling it in editable
    mode with the `-e` flag.
-   
+
    Depending on your OS, and since the number of optional dependencies of Transformers is growing, you might get a
-   failure with this command. If that's the case make sure to install the Deep Learning framework you are working with
-   (PyTorch, TensorFlow and/or Flax) then do:
+   failure with this command. If that's the case make sure to install Pytorch then do:
 
    ```bash
    pip install -e ".[quality]"
@@ -189,15 +309,6 @@ You'll need **[Python 3.8]((https://github.com/huggingface/transformers/blob/mai
    that can't be automated in one go with:
 
    ```bash
-   make fixup
-   ```
-
-   This target is also optimized to only work with files modified by the PR you're working on.
-
-   If you prefer to run the checks one after the other, the following command applies the
-   style corrections:
-
-   ```bash
    make style
    ```
 
@@ -205,24 +316,17 @@ You'll need **[Python 3.8]((https://github.com/huggingface/transformers/blob/mai
    controls are run by the CI, but you can run the same checks with:
 
    ```bash
-   make quality
-   ```
-
-   Finally, we have a lot of scripts to make sure we don't forget to update
-   some files when adding a new model. You can run these scripts with:
-
-   ```bash
-   make repo-consistency
+   make check-repo
    ```
 
    To learn more about those checks and how to fix any issues with them, check out the
    [Checks on a Pull Request](https://huggingface.co/docs/transformers/pr_checks) guide.
 
    If you're modifying documents under the `docs/source` directory, make sure the documentation can still be built. This check will also run in the CI when you open a pull request. To run a local check
-   make sure you install the documentation builder:
-   
+   make sure you install the [documentation builder](https://github.com/huggingface/doc-builder).
+
    ```bash
-   pip install ".[docs]"
+   pip install hf-doc-builder
    ```
 
    Run the following command from the root of the repository:
@@ -261,7 +365,7 @@ You'll need **[Python 3.8]((https://github.com/huggingface/transformers/blob/mai
 
    If you've already opened a pull request, you'll need to force push with the `--force` flag. Otherwise, if the pull request hasn't been opened yet, you can just push your changes normally.
 
-6. Now you can go to your fork of the repository on GitHub and click on **Pull Request** to open a pull request. Make sure you tick off all the boxes on our [checklist](https://github.com/huggingface/transformers/blob/main/CONTRIBUTING.md/#pull-request-checklist) below. When you're ready, you can send your changes to the project maintainers for review.
+6. Now you can go to your fork of the repository on GitHub and click on **Pull Request** to open a pull request. Make sure you tick off all the boxes on our [checklist](#pull-request-checklist) below. When you're ready, you can send your changes to the project maintainers for review.
 
 7. It's ok if maintainers request changes, it happens to our core contributors
    too! So everyone can see the changes in the pull request, work in your local
@@ -278,13 +382,14 @@ are working on it).<br>
 useful to avoid duplicated work, and to differentiate it from PRs ready to be merged.<br>
 ☐ Make sure existing tests pass.<br>
 ☐ If adding a new feature, also add tests for it.<br>
-   - If you are adding a new model, make sure you use
+
+- If you are adding a new model, make sure you use
      `ModelTester.all_model_classes = (MyModel, MyModelWithLMHead,...)` to trigger the common tests.
-   - If you are adding new `@slow` tests, make sure they pass using
+- If you are adding new `@slow` tests, make sure they pass using
      `RUN_SLOW=1 python -m pytest tests/models/my_new_model/test_my_new_model.py`.
-   - If you are adding a new tokenizer, write tests and make sure
+- If you are adding a new tokenizer, write tests and make sure
      `RUN_SLOW=1 python -m pytest tests/models/{your_model_name}/test_tokenization_{your_model_name}.py` passes.
-   - CircleCI does not run the slow tests, but GitHub Actions does every night!<br>
+- CircleCI does not run the slow tests, but GitHub Actions does every night!<br>
 
 ☐ All public methods must have informative docstrings (see
 [`modeling_bert.py`](https://github.com/huggingface/transformers/blob/main/src/transformers/models/bert/modeling_bert.py)
@@ -295,7 +400,7 @@ repository such as [`hf-internal-testing`](https://huggingface.co/hf-internal-te
 to host these files and reference them by URL. We recommend placing documentation
 related images in the following repository:
 [huggingface/documentation-images](https://huggingface.co/datasets/huggingface/documentation-images).
-You can open a PR on this dataset repostitory and ask a Hugging Face member to merge it.
+You can open a PR on this dataset repository and ask a Hugging Face member to merge it.
 
 For more information about the checks run on a pull request, take a look at our [Checks on a Pull Request](https://huggingface.co/docs/transformers/pr_checks) guide.
 
@@ -306,7 +411,7 @@ the [tests](https://github.com/huggingface/transformers/tree/main/tests) folder 
 [examples](https://github.com/huggingface/transformers/tree/main/examples) folder.
 
 We like `pytest` and `pytest-xdist` because it's faster. From the root of the
-repository, specify a *path to a subfolder or a test file* to run the test.
+repository, specify a *path to a subfolder or a test file* to run the test:
 
 ```bash
 python -m pytest -n auto --dist=loadfile -s -v ./tests/models/my_new_model
@@ -339,12 +444,11 @@ RUN_SLOW=yes python -m pytest -n auto --dist=loadfile -s -v ./tests/models/my_ne
 RUN_SLOW=yes python -m pytest -n auto --dist=loadfile -s -v ./examples/pytorch/text-classification
 ```
 
-Like the slow tests, there are other environment variables available which not enabled by default during testing:
-- `RUN_CUSTOM_TOKENIZERS`: Enables tests for custom tokenizers.
-- `RUN_PT_FLAX_CROSS_TESTS`: Enables tests for PyTorch + Flax integration.
-- `RUN_PT_TF_CROSS_TESTS`: Enables tests for TensorFlow + PyTorch integration.
+Like the slow tests, there are other environment variables available which are not enabled by default during testing:
 
-More environment variables and additional information can be found in the [testing_utils.py](src/transformers/testing_utils.py).
+- `RUN_CUSTOM_TOKENIZERS`: Enables tests for custom tokenizers.
+
+More environment variables and additional information can be found in the [testing_utils.py](https://github.com/huggingface/transformers/blob/main/src/transformers/testing_utils.py).
 
 🤗 Transformers uses `pytest` as a test runner only. It doesn't use any
 `pytest`-specific features in the test suite itself.
@@ -378,7 +482,7 @@ One way to run the `make` command on Windows is with MSYS2:
 3. Run in the shell: `pacman -Syu` and install `make` with `pacman -S make`.
 4. Add `C:\msys64\usr\bin` to your PATH environment variable.
 
-You can now use `make` from any terminal (Powershell, cmd.exe, etc.)! 🎉
+You can now use `make` from any terminal (PowerShell, cmd.exe, etc.)! 🎉
 
 ### Sync a forked repository with upstream main (the Hugging Face repository)
 
@@ -387,9 +491,9 @@ When updating the main branch of a forked repository, please follow these steps 
 1. When possible, avoid syncing with the upstream using a branch and PR on the forked repository. Instead, merge directly into the forked main.
 2. If a PR is absolutely necessary, use the following steps after checking out your branch:
 
-```bash
-git checkout -b your-branch-for-syncing
-git pull --squash --no-commit upstream main
-git commit -m '<your message without GitHub references>'
-git push --set-upstream origin your-branch-for-syncing
-```
+   ```bash
+   git checkout -b your-branch-for-syncing
+   git pull --squash --no-commit upstream main
+   git commit -m '<your message without GitHub references>'
+   git push --set-upstream origin your-branch-for-syncing
+   ```

@@ -64,10 +64,10 @@ from transformers import (
 )
 
 model = VisionTextDualEncoderModel.from_vision_text_pretrained(
-    "openai/clip-vit-base-patch32", "roberta-base"
+    "openai/clip-vit-base-patch32", "FacebookAI/roberta-base"
 )
 
-tokenizer = AutoTokenizer.from_pretrained("roberta-base")
+tokenizer = AutoTokenizer.from_pretrained("FacebookAI/roberta-base")
 image_processor = AutoImageProcessor.from_pretrained("openai/clip-vit-base-patch32")
 processor = VisionTextDualEncoderProcessor(image_processor, tokenizer)
 
@@ -84,7 +84,7 @@ loaded using the pre-trained weights.
 Finally, we can run the example script to train the model:
 
 ```bash
-python examples/pytorch/contrastive-image-text/run_clip.py \
+python run_clip.py \
     --output_dir ./clip-roberta-finetuned \
     --model_name_or_path ./clip-roberta \
     --data_dir $PWD/data \
@@ -97,6 +97,5 @@ python examples/pytorch/contrastive-image-text/run_clip.py \
     --per_device_train_batch_size="64" \
     --per_device_eval_batch_size="64" \
     --learning_rate="5e-5" --warmup_steps="0" --weight_decay 0.1 \
-    --overwrite_output_dir \
     --push_to_hub
 ```

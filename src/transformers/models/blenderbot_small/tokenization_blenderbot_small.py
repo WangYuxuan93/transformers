@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2021 The Facebook Inc. and The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,11 +15,10 @@
 
 import json
 import os
-from typing import Dict, List, Optional, Tuple
 
 import regex as re
 
-from ...tokenization_utils import PreTrainedTokenizer
+from ...tokenization_python import PreTrainedTokenizer
 from ...utils import logging
 
 
@@ -32,22 +30,6 @@ VOCAB_FILES_NAMES = {
     "merges_file": "merges.txt",
     "tokenizer_config_file": "tokenizer_config.json",
 }
-
-PRETRAINED_VOCAB_FILES_MAP = {
-    "vocab_file": {
-        "facebook/blenderbot_small-90M": "https://huggingface.co/facebook/blenderbot_small-90M/resolve/main/vocab.json"
-    },
-    "merges_file": {
-        "facebook/blenderbot_small-90M": "https://huggingface.co/facebook/blenderbot_small-90M/resolve/main/merges.txt"
-    },
-    "tokenizer_config_file": {
-        "facebook/blenderbot_small-90M": (
-            "https://huggingface.co/facebook/blenderbot_small-90M/resolve/main/tokenizer_config.json"
-        )
-    },
-}
-
-PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {"facebook/blenderbot_small-90M": 512}
 
 
 def get_pairs(word):
@@ -92,8 +74,6 @@ class BlenderbotSmallTokenizer(PreTrainedTokenizer):
     """
 
     vocab_files_names = VOCAB_FILES_NAMES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
-    max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
     model_input_names = ["input_ids", "attention_mask"]
 
     def __init__(
@@ -114,13 +94,15 @@ class BlenderbotSmallTokenizer(PreTrainedTokenizer):
         merges = [tuple(merge.split()) for merge in merges]
         self.bpe_ranks = dict(zip(merges, range(len(merges))))
         self.cache = {}
+
         super().__init__(unk_token=unk_token, bos_token=bos_token, eos_token=eos_token, pad_token=pad_token, **kwargs)
+        self.special_tokens_pattern = None
 
     @property
     def vocab_size(self) -> int:
         return len(self.encoder)
 
-    def get_vocab(self) -> Dict:
+    def get_vocab(self) -> dict:
         return dict(self.encoder, **self.added_tokens_encoder)
 
     def bpe(self, token: str) -> str:
@@ -183,7 +165,7 @@ class BlenderbotSmallTokenizer(PreTrainedTokenizer):
             words.append(word)
         return " ".join(words)
 
-    def _tokenize(self, text: str) -> List[str]:
+    def _tokenize(self, text: str) -> list[str]:
         """Split a string into tokens using BPE."""
         split_tokens = []
 
@@ -202,12 +184,12 @@ class BlenderbotSmallTokenizer(PreTrainedTokenizer):
         """Converts an index (integer) in a token (str) using the vocab."""
         return self.decoder.get(index, self.unk_token)
 
-    def convert_tokens_to_string(self, tokens: List[str]) -> str:
+    def convert_tokens_to_string(self, tokens: list[str]) -> str:
         """Converts a sequence of tokens in a single string."""
         out_string = " ".join(tokens).replace("@@ ", "").strip()
         return out_string
 
-    def save_vocabulary(self, save_directory: str, filename_prefix: Optional[str] = None) -> Tuple[str]:
+    def save_vocabulary(self, save_directory: str, filename_prefix: str | None = None) -> tuple[str]:
         if not os.path.isdir(save_directory):
             logger.error(f"Vocabulary path ({save_directory}) should be a directory")
             return
@@ -236,23 +218,5 @@ class BlenderbotSmallTokenizer(PreTrainedTokenizer):
 
         return vocab_file, merge_file
 
-    @property
-    # Copied from transformers.models.blenderbot.tokenization_blenderbot.BlenderbotTokenizer.default_chat_template
-    def default_chat_template(self):
-        """
-        A very simple chat template that just adds whitespace between messages.
-        """
-        logger.warning_once(
-            "\nNo chat template is defined for this tokenizer - using the default template "
-            f"for the {self.__class__.__name__} class. If the default is not appropriate for "
-            "your model, please set `tokenizer.chat_template` to an appropriate template. "
-            "See https://huggingface.co/docs/transformers/main/chat_templating for more information.\n"
-        )
-        return (
-            "{% for message in messages %}"
-            "{% if message['role'] == 'user' %}{{ ' ' }}{% endif %}"
-            "{{ message['content'] }}"
-            "{% if not loop.last %}{{ '  ' }}{% endif %}"
-            "{% endfor %}"
-            "{{ eos_token }}"
-        )
+
+__all__ = ["BlenderbotSmallTokenizer"]

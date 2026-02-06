@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,14 +11,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch MobileViTV2 model. """
-
+"""Testing suite for the PyTorch MobileViTV2 model."""
 
 import unittest
+from functools import cached_property
 
 from transformers import MobileViTV2Config
-from transformers.testing_utils import require_torch, require_torch_multi_gpu, require_vision, slow, torch_device
-from transformers.utils import cached_property, is_torch_available, is_vision_available
+from transformers.testing_utils import (
+    Expectations,
+    require_torch,
+    require_torch_multi_gpu,
+    require_vision,
+    slow,
+    torch_device,
+)
+from transformers.utils import is_torch_available, is_vision_available
 
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ModelTesterMixin, floats_tensor, ids_tensor
@@ -31,7 +37,6 @@ if is_torch_available():
 
     from transformers import MobileViTV2ForImageClassification, MobileViTV2ForSemanticSegmentation, MobileViTV2Model
     from transformers.models.mobilevitv2.modeling_mobilevitv2 import (
-        MOBILEVITV2_PRETRAINED_MODEL_ARCHIVE_LIST,
         make_divisible,
     )
 
@@ -190,7 +195,7 @@ class MobileViTV2ModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestC
 
     pipeline_model_mapping = (
         {
-            "feature-extraction": MobileViTV2Model,
+            "image-feature-extraction": MobileViTV2Model,
             "image-classification": MobileViTV2ForImageClassification,
             "image-segmentation": MobileViTV2ForSemanticSegmentation,
         }
@@ -198,9 +203,7 @@ class MobileViTV2ModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestC
         else {}
     )
 
-    test_pruning = False
     test_resize_embeddings = False
-    test_head_masking = False
     has_attentions = False
 
     def setUp(self):
@@ -215,7 +218,7 @@ class MobileViTV2ModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestC
         pass
 
     @unittest.skip(reason="MobileViTV2 does not support input and output embeddings")
-    def test_model_common_attributes(self):
+    def test_model_get_set_embeddings(self):
         pass
 
     @unittest.skip(reason="MobileViTV2 does not output attentions")
@@ -279,9 +282,9 @@ class MobileViTV2ModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestC
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in MOBILEVITV2_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = MobileViTV2Model.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "apple/mobilevitv2-1.0-imagenet1k-256"
+        model = MobileViTV2Model.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
 
 # We will verify our results on an image of cute cats
@@ -319,9 +322,15 @@ class MobileViTV2ModelIntegrationTest(unittest.TestCase):
         expected_shape = torch.Size((1, 1000))
         self.assertEqual(outputs.logits.shape, expected_shape)
 
-        expected_slice = torch.tensor([-1.6336e00, -7.3204e-02, -5.1883e-01]).to(torch_device)
+        expectations = Expectations(
+            {
+                (None, None): [-1.6336e00, -7.3204e-02, -5.1883e-01],
+                ("cuda", 8): [-1.6336, -0.0732, -0.5188],
+            }
+        )
+        expected_slice = torch.tensor(expectations.get_expectation()).to(torch_device)
 
-        self.assertTrue(torch.allclose(outputs.logits[0, :3], expected_slice, atol=1e-4))
+        torch.testing.assert_close(outputs.logits[0, :3], expected_slice, rtol=2e-4, atol=2e-4)
 
     @slow
     def test_inference_semantic_segmentation(self):
@@ -342,16 +351,23 @@ class MobileViTV2ModelIntegrationTest(unittest.TestCase):
         expected_shape = torch.Size((1, 21, 32, 32))
         self.assertEqual(logits.shape, expected_shape)
 
-        expected_slice = torch.tensor(
-            [
-                [[7.0863, 7.1525, 6.8201], [6.6931, 6.8770, 6.8933], [6.2978, 7.0366, 6.9636]],
-                [[-3.7134, -3.6712, -3.6675], [-3.5825, -3.3549, -3.4777], [-3.3435, -3.3979, -3.2857]],
-                [[-2.9329, -2.8003, -2.7369], [-3.0564, -2.4780, -2.0207], [-2.6889, -1.9298, -1.7640]],
-            ],
-            device=torch_device,
+        expectations = Expectations(
+            {
+                (None, None): [
+                    [[7.0863, 7.1525, 6.8201], [6.6931, 6.8770, 6.8933], [6.2978, 7.0366, 6.9636]],
+                    [[-3.7134, -3.6712, -3.6675], [-3.5825, -3.3549, -3.4777], [-3.3435, -3.3979, -3.2857]],
+                    [[-2.9329, -2.8003, -2.7369], [-3.0564, -2.4780, -2.0207], [-2.6889, -1.9298, -1.7640]],
+                ],
+                ("cuda", 8): [
+                    [[7.0863, 7.1525, 6.8201], [6.6931, 6.8770, 6.8933], [6.2978, 7.0366, 6.9636]],
+                    [[-3.7134, -3.6712, -3.6675], [-3.5825, -3.3549, -3.4777], [-3.3435, -3.3979, -3.2857]],
+                    [[-2.9329, -2.8003, -2.7369], [-3.0564, -2.4780, -2.0207], [-2.6889, -1.9298, -1.7640]],
+                ],
+            }
         )
+        expected_slice = torch.tensor(expectations.get_expectation()).to(torch_device)
 
-        self.assertTrue(torch.allclose(logits[0, :3, :3, :3], expected_slice, atol=1e-4))
+        torch.testing.assert_close(logits[0, :3, :3, :3], expected_slice, rtol=2e-4, atol=2e-4)
 
     @slow
     def test_post_processing_semantic_segmentation(self):

@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,8 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Converting Meta SeamlessM4T checkpoints from seamless_communication to HF."""
-
+"""Converting Meta SeamlessM4T checkpoints from seamless_communication to HF."""
 
 import argparse
 import os
@@ -207,7 +205,7 @@ def _convert_model(
     hf_model.load_state_dict(state_dict, strict=False)
     n_params = param_count(hf_model)
 
-    logger.info(f"model loaded: {round(n_params/1e6,1)}M params")
+    logger.info(f"model loaded: {round(n_params / 1e6, 1)}M params")
 
     hf_model.eval()
     hf_model.to(device)

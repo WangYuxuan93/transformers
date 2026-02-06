@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,20 +11,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch SwiftFormer model. """
+"""Testing suite for the PyTorch SwiftFormer model."""
 
-
-import copy
 import unittest
+from functools import cached_property
 
-from transformers import PretrainedConfig, SwiftFormerConfig
+from transformers import SwiftFormerConfig
 from transformers.testing_utils import (
     require_torch,
     require_vision,
     slow,
     torch_device,
 )
-from transformers.utils import cached_property, is_torch_available, is_vision_available
+from transformers.utils import is_torch_available, is_vision_available
 
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ModelTesterMixin, floats_tensor, ids_tensor
@@ -37,7 +35,6 @@ if is_torch_available():
     from torch import nn
 
     from transformers import SwiftFormerForImageClassification, SwiftFormerModel
-    from transformers.models.swiftformer.modeling_swiftformer import SWIFTFORMER_PRETRAINED_MODEL_ARCHIVE_LIST
 
 
 if is_vision_available():
@@ -139,15 +136,12 @@ class SwiftFormerModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestC
 
     all_model_classes = (SwiftFormerModel, SwiftFormerForImageClassification) if is_torch_available() else ()
     pipeline_model_mapping = (
-        {"feature-extraction": SwiftFormerModel, "image-classification": SwiftFormerForImageClassification}
+        {"image-feature-extraction": SwiftFormerModel, "image-classification": SwiftFormerForImageClassification}
         if is_torch_available()
         else {}
     )
 
-    fx_compatible = False
-    test_pruning = False
     test_resize_embeddings = False
-    test_head_masking = False
     has_attentions = False
 
     def setUp(self):
@@ -168,7 +162,7 @@ class SwiftFormerModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestC
     def test_inputs_embeds(self):
         pass
 
-    def test_model_common_attributes(self):
+    def test_model_get_set_embeddings(self):
         config, _ = self.model_tester.prepare_config_and_inputs_for_common()
 
         for model_class in self.all_model_classes:
@@ -186,9 +180,9 @@ class SwiftFormerModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestC
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in SWIFTFORMER_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = SwiftFormerModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "MBZUAI/swiftformer-xs"
+        model = SwiftFormerModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
     @unittest.skip(reason="SwiftFormer does not output attentions")
     def test_attention_outputs(self):
@@ -235,30 +229,6 @@ class SwiftFormerModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestC
 
             check_hidden_states_output(inputs_dict, config, model_class)
 
-    def test_initialization(self):
-        def _config_zero_init(config):
-            configs_no_init = copy.deepcopy(config)
-            for key in configs_no_init.__dict__.keys():
-                if "_range" in key or "_std" in key or "initializer_factor" in key or "layer_scale" in key:
-                    setattr(configs_no_init, key, 1e-10)
-                if isinstance(getattr(configs_no_init, key, None), PretrainedConfig):
-                    no_init_subconfig = _config_zero_init(getattr(configs_no_init, key))
-                    setattr(configs_no_init, key, no_init_subconfig)
-            return configs_no_init
-
-        config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
-
-        configs_no_init = _config_zero_init(config)
-        for model_class in self.all_model_classes:
-            model = model_class(config=configs_no_init)
-            for name, param in model.named_parameters():
-                if param.requires_grad:
-                    self.assertIn(
-                        ((param.data.mean() * 1e9) / 1e9).round().item(),
-                        [0.0, 1.0],
-                        msg=f"Parameter {name} of model {model_class} seems not properly initialized",
-                    )
-
 
 # We will verify our results on an image of cute cats
 def prepare_img():
@@ -289,5 +259,5 @@ class SwiftFormerModelIntegrationTest(unittest.TestCase):
         expected_shape = torch.Size((1, 1000))
         self.assertEqual(outputs.logits.shape, expected_shape)
 
-        expected_slice = torch.tensor([[-2.1703e00, 2.1107e00, -2.0811e00]]).to(torch_device)
-        self.assertTrue(torch.allclose(outputs.logits[0, :3], expected_slice, atol=1e-4))
+        expected_slice = torch.tensor([[-2.1726, 2.1093, -2.0801]]).to(torch_device)
+        torch.testing.assert_close(outputs.logits[:, :3], expected_slice, rtol=1e-4, atol=1e-4)

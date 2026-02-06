@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2023 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Image processor class for Nougat."""
-
-from typing import Dict, List, Optional, Union
 
 import numpy as np
 
@@ -35,23 +32,36 @@ from ...image_utils import (
     get_image_size,
     infer_channel_dimension_format,
     is_scaled_image,
-    make_list_of_images,
+    make_flat_list_of_images,
     to_numpy_array,
     valid_images,
+    validate_preprocess_arguments,
 )
-from ...utils import TensorType, logging
-from ...utils.import_utils import is_cv2_available, is_vision_available
+from ...processing_utils import ImagesKwargs
+from ...utils import TensorType, filter_out_non_signature_kwargs, logging
+from ...utils.import_utils import is_vision_available
 
 
 logger = logging.get_logger(__name__)
 
 
-if is_cv2_available():
-    pass
-
-
 if is_vision_available():
     import PIL
+
+
+class NougatImageProcessorKwargs(ImagesKwargs, total=False):
+    r"""
+    do_crop_margin (`bool`, *optional*, defaults to `True`):
+        Whether to crop the image margins.
+    do_thumbnail (`bool`, *optional*, defaults to `True`):
+        Whether to resize the image using thumbnail method.
+    do_align_long_axis (`bool`, *optional*, defaults to `False`):
+        Whether to align the long axis of the image with the long axis of `size` by rotating by 90 degrees.
+    """
+
+    do_crop_margin: bool
+    do_thumbnail: bool
+    do_align_long_axis: bool
 
 
 class NougatImageProcessor(BaseImageProcessor):
@@ -64,7 +74,7 @@ class NougatImageProcessor(BaseImageProcessor):
         do_resize (`bool`, *optional*, defaults to `True`):
             Whether to resize the image's (height, width) dimensions to the specified `size`. Can be overridden by
             `do_resize` in the `preprocess` method.
-        size (`Dict[str, int]` *optional*, defaults to `{"height": 896, "width": 672}`):
+        size (`dict[str, int]` *optional*, defaults to `{"height": 896, "width": 672}`):
             Size of the image after resizing. Can be overridden by `size` in the `preprocess` method.
         resample (`PILImageResampling`, *optional*, defaults to `Resampling.BILINEAR`):
             Resampling filter to use if resizing the image. Can be overridden by `resample` in the `preprocess` method.
@@ -82,29 +92,30 @@ class NougatImageProcessor(BaseImageProcessor):
             `preprocess` method.
         do_normalize (`bool`, *optional*, defaults to `True`):
             Whether to normalize the image. Can be overridden by `do_normalize` in the `preprocess` method.
-        image_mean (`float` or `List[float]`, *optional*, defaults to `IMAGENET_DEFAULT_MEAN`):
+        image_mean (`float` or `list[float]`, *optional*, defaults to `IMAGENET_DEFAULT_MEAN`):
             Mean to use if normalizing the image. This is a float or list of floats the length of the number of
             channels in the image. Can be overridden by the `image_mean` parameter in the `preprocess` method.
-        image_std (`float` or `List[float]`, *optional*, defaults to `IMAGENET_DEFAULT_STD`):
+        image_std (`float` or `list[float]`, *optional*, defaults to `IMAGENET_DEFAULT_STD`):
             Image standard deviation.
     """
 
     model_input_names = ["pixel_values"]
+    valid_kwargs = NougatImageProcessorKwargs
 
     def __init__(
         self,
         do_crop_margin: bool = True,
         do_resize: bool = True,
-        size: Dict[str, int] = None,
+        size: dict[str, int] | None = None,
         resample: PILImageResampling = PILImageResampling.BILINEAR,
         do_thumbnail: bool = True,
         do_align_long_axis: bool = False,
         do_pad: bool = True,
         do_rescale: bool = True,
-        rescale_factor: Union[int, float] = 1 / 255,
+        rescale_factor: int | float = 1 / 255,
         do_normalize: bool = True,
-        image_mean: Optional[Union[float, List[float]]] = None,
-        image_std: Optional[Union[float, List[float]]] = None,
+        image_mean: float | list[float] | None = None,
+        image_std: float | list[float] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -125,7 +136,7 @@ class NougatImageProcessor(BaseImageProcessor):
         self.image_mean = image_mean if image_mean is not None else IMAGENET_DEFAULT_MEAN
         self.image_std = image_std if image_std is not None else IMAGENET_DEFAULT_STD
 
-    def python_find_non_zero(self, image: np.array):
+    def python_find_non_zero(self, image: np.ndarray):
         """This is a reimplementation of a findNonZero function equivalent to cv2."""
         non_zero_indices = np.column_stack(np.nonzero(image))
         idxvec = non_zero_indices[:, [1, 0]]
@@ -143,17 +154,17 @@ class NougatImageProcessor(BaseImageProcessor):
 
     def crop_margin(
         self,
-        image: np.array,
+        image: np.ndarray,
         gray_threshold: int = 200,
-        data_format: Optional[ChannelDimension] = None,
-        input_data_format: Optional[Union[str, ChannelDimension]] = None,
-    ) -> np.array:
+        data_format: ChannelDimension | None = None,
+        input_data_format: str | ChannelDimension | None = None,
+    ) -> np.ndarray:
         """
         Crops the margin of the image. Gray pixels are considered margin (i.e., pixels with a value below the
         threshold).
 
         Args:
-            image (`np.array`):
+            image (`np.ndarray`):
                 The image to be cropped.
             gray_threshold (`int`, *optional*, defaults to `200`)
                 Value below which pixels are considered to be gray.
@@ -172,6 +183,7 @@ class NougatImageProcessor(BaseImageProcessor):
         min_val = data.min()
         if max_val == min_val:
             image = np.array(image)
+            image = to_channel_dimension_format(image, input_data_format, ChannelDimension.LAST)
             image = (
                 to_channel_dimension_format(image, data_format, input_data_format)
                 if data_format is not None
@@ -196,9 +208,9 @@ class NougatImageProcessor(BaseImageProcessor):
     def align_long_axis(
         self,
         image: np.ndarray,
-        size: Dict[str, int],
-        data_format: Optional[Union[str, ChannelDimension]] = None,
-        input_data_format: Optional[Union[str, ChannelDimension]] = None,
+        size: dict[str, int],
+        data_format: str | ChannelDimension | None = None,
+        input_data_format: str | ChannelDimension | None = None,
     ) -> np.ndarray:
         """
         Align the long axis of the image to the longest axis of the specified size.
@@ -206,7 +218,7 @@ class NougatImageProcessor(BaseImageProcessor):
         Args:
             image (`np.ndarray`):
                 The image to be aligned.
-            size (`Dict[str, int]`):
+            size (`dict[str, int]`):
                 The size `{"height": h, "width": w}` to align the long axis to.
             data_format (`str` or `ChannelDimension`, *optional*):
                 The data format of the output image. If unset, the same format as the input image is used.
@@ -219,10 +231,21 @@ class NougatImageProcessor(BaseImageProcessor):
         input_height, input_width = get_image_size(image, channel_dim=input_data_format)
         output_height, output_width = size["height"], size["width"]
 
+        if input_data_format is None:
+            # We assume that all images have the same channel dimension format.
+            input_data_format = infer_channel_dimension_format(image)
+
+        if input_data_format == ChannelDimension.LAST:
+            rot_axes = (0, 1)
+        elif input_data_format == ChannelDimension.FIRST:
+            rot_axes = (1, 2)
+        else:
+            raise ValueError(f"Unsupported data format: {input_data_format}")
+
         if (output_width < output_height and input_width > input_height) or (
             output_width > output_height and input_width < input_height
         ):
-            image = np.rot90(image, 3)
+            image = np.rot90(image, 3, axes=rot_axes)
 
         if data_format is not None:
             image = to_channel_dimension_format(image, data_format, input_channel_dim=input_data_format)
@@ -232,9 +255,9 @@ class NougatImageProcessor(BaseImageProcessor):
     def pad_image(
         self,
         image: np.ndarray,
-        size: Dict[str, int],
-        data_format: Optional[Union[str, ChannelDimension]] = None,
-        input_data_format: Optional[Union[str, ChannelDimension]] = None,
+        size: dict[str, int],
+        data_format: str | ChannelDimension | None = None,
+        input_data_format: str | ChannelDimension | None = None,
     ) -> np.ndarray:
         """
         Pad the image to the specified size at the top, bottom, left and right.
@@ -242,7 +265,7 @@ class NougatImageProcessor(BaseImageProcessor):
         Args:
             image (`np.ndarray`):
                 The image to be padded.
-            size (`Dict[str, int]`):
+            size (`dict[str, int]`):
                 The size `{"height": h, "width": w}` to pad the image to.
             data_format (`str` or `ChannelDimension`, *optional*):
                 The data format of the output image. If unset, the same format as the input image is used.
@@ -268,10 +291,10 @@ class NougatImageProcessor(BaseImageProcessor):
     def thumbnail(
         self,
         image: np.ndarray,
-        size: Dict[str, int],
+        size: dict[str, int],
         resample: PILImageResampling = PILImageResampling.BICUBIC,
-        data_format: Optional[Union[str, ChannelDimension]] = None,
-        input_data_format: Optional[Union[str, ChannelDimension]] = None,
+        data_format: str | ChannelDimension | None = None,
+        input_data_format: str | ChannelDimension | None = None,
         **kwargs,
     ) -> np.ndarray:
         """
@@ -281,7 +304,7 @@ class NougatImageProcessor(BaseImageProcessor):
         Args:
             image (`np.ndarray`):
                 The image to be resized.
-            size (`Dict[str, int]`):
+            size (`dict[str, int]`):
                 The size `{"height": h, "width": w}` to resize the image to.
             resample (`PILImageResampling`, *optional*, defaults to `PILImageResampling.BICUBIC`):
                 The resampling filter to use.
@@ -319,10 +342,10 @@ class NougatImageProcessor(BaseImageProcessor):
     def resize(
         self,
         image: np.ndarray,
-        size: Dict[str, int],
+        size: dict[str, int],
         resample: PILImageResampling = PILImageResampling.BICUBIC,
-        data_format: Optional[Union[str, ChannelDimension]] = None,
-        input_data_format: Optional[Union[str, ChannelDimension]] = None,
+        data_format: str | ChannelDimension | None = None,
+        input_data_format: str | ChannelDimension | None = None,
         **kwargs,
     ) -> np.ndarray:
         """
@@ -331,7 +354,7 @@ class NougatImageProcessor(BaseImageProcessor):
         Args:
             image (`np.ndarray`):
                 Image to resize.
-            size (`Dict[str, int]`):
+            size (`dict[str, int]`):
                 Size of the output image.
             resample (`PILImageResampling`, *optional*, defaults to `PILImageResampling.BICUBIC`):
                 Resampling filter to use when resiizing the image.
@@ -355,25 +378,25 @@ class NougatImageProcessor(BaseImageProcessor):
         )
         return resized_image
 
+    @filter_out_non_signature_kwargs()
     def preprocess(
         self,
         images: ImageInput,
-        do_crop_margin: bool = None,
-        do_resize: bool = None,
-        size: Dict[str, int] = None,
-        resample: PILImageResampling = None,
-        do_thumbnail: bool = None,
-        do_align_long_axis: bool = None,
-        do_pad: bool = None,
-        do_rescale: bool = None,
-        rescale_factor: Union[int, float] = None,
-        do_normalize: bool = None,
-        image_mean: Optional[Union[float, List[float]]] = None,
-        image_std: Optional[Union[float, List[float]]] = None,
-        return_tensors: Optional[Union[str, TensorType]] = None,
-        data_format: Optional[ChannelDimension] = ChannelDimension.FIRST,
-        input_data_format: Optional[Union[str, ChannelDimension]] = None,
-        **kwargs,
+        do_crop_margin: bool | None = None,
+        do_resize: bool | None = None,
+        size: dict[str, int] | None = None,
+        resample: PILImageResampling | None = None,
+        do_thumbnail: bool | None = None,
+        do_align_long_axis: bool | None = None,
+        do_pad: bool | None = None,
+        do_rescale: bool | None = None,
+        rescale_factor: int | float | None = None,
+        do_normalize: bool | None = None,
+        image_mean: float | list[float] | None = None,
+        image_std: float | list[float] | None = None,
+        return_tensors: str | TensorType | None = None,
+        data_format: ChannelDimension | None = ChannelDimension.FIRST,
+        input_data_format: str | ChannelDimension | None = None,
     ) -> PIL.Image.Image:
         """
         Preprocess an image or batch of images.
@@ -385,7 +408,7 @@ class NougatImageProcessor(BaseImageProcessor):
                 Whether to crop the image margins.
             do_resize (`bool`, *optional*, defaults to `self.do_resize`):
                 Whether to resize the image.
-            size (`Dict[str, int]`, *optional*, defaults to `self.size`):
+            size (`dict[str, int]`, *optional*, defaults to `self.size`):
                 Size of the image after resizing. Shortest edge of the image is resized to min(size["height"],
                 size["width"]) with the longest edge resized to keep the input aspect ratio.
             resample (`int`, *optional*, defaults to `self.resample`):
@@ -403,17 +426,15 @@ class NougatImageProcessor(BaseImageProcessor):
                 Scale factor to use if rescaling the image.
             do_normalize (`bool`, *optional*, defaults to `self.do_normalize`):
                 Whether to normalize the image.
-            image_mean (`float` or `List[float]`, *optional*, defaults to `self.image_mean`):
+            image_mean (`float` or `list[float]`, *optional*, defaults to `self.image_mean`):
                 Image mean to use for normalization.
-            image_std (`float` or `List[float]`, *optional*, defaults to `self.image_std`):
+            image_std (`float` or `list[float]`, *optional*, defaults to `self.image_std`):
                 Image standard deviation to use for normalization.
             return_tensors (`str` or `TensorType`, *optional*):
                 The type of tensors to return. Can be one of:
                 - Unset: Return a list of `np.ndarray`.
-                - `TensorType.TENSORFLOW` or `'tf'`: Return a batch of type `tf.Tensor`.
                 - `TensorType.PYTORCH` or `'pt'`: Return a batch of type `torch.Tensor`.
                 - `TensorType.NUMPY` or `'np'`: Return a batch of type `np.ndarray`.
-                - `TensorType.JAX` or `'jax'`: Return a batch of type `jax.numpy.ndarray`.
             data_format (`ChannelDimension` or `str`, *optional*, defaults to `ChannelDimension.FIRST`):
                 The channel dimension format for the output image. Can be one of:
                 - `ChannelDimension.FIRST`: image in (num_channels, height, width) format.
@@ -439,30 +460,25 @@ class NougatImageProcessor(BaseImageProcessor):
         image_mean = image_mean if image_mean is not None else self.image_mean
         image_std = image_std if image_std is not None else self.image_std
 
-        images = make_list_of_images(images)
+        images = make_flat_list_of_images(images)
 
         if not valid_images(images):
-            raise ValueError(
-                "Invalid image type. Must be of type PIL.Image.Image, numpy.ndarray, "
-                "torch.Tensor, tf.Tensor or jax.ndarray."
-            )
-
-        if do_resize and size is None:
-            raise ValueError("Size must be specified if do_resize is True.")
-
-        if do_pad and size is None:
-            raise ValueError("Size must be specified if do_pad is True.")
-
-        if do_rescale and rescale_factor is None:
-            raise ValueError("Rescale factor must be specified if do_rescale is True.")
-
-        if do_normalize and (image_mean is None or image_std is None):
-            raise ValueError("Image mean and std must be specified if do_normalize is True.")
+            raise ValueError("Invalid image type. Must be of type PIL.Image.Image, numpy.ndarray, or torch.Tensor")
+        validate_preprocess_arguments(
+            do_rescale=do_rescale,
+            rescale_factor=rescale_factor,
+            do_normalize=do_normalize,
+            image_mean=image_mean,
+            image_std=image_std,
+            do_resize=do_resize,
+            size=size,
+            resample=resample,
+        )
 
         # All transformations expect numpy arrays.
         images = [to_numpy_array(image) for image in images]
 
-        if is_scaled_image(images[0]) and do_rescale:
+        if do_rescale and is_scaled_image(images[0]):
             logger.warning_once(
                 "It looks like you are trying to rescale already rescaled images. If the input"
                 " images have pixel values between 0 and 1, set `do_rescale=False` to avoid rescaling them again."
@@ -508,3 +524,6 @@ class NougatImageProcessor(BaseImageProcessor):
 
         data = {"pixel_values": images}
         return BatchFeature(data=data, tensor_type=return_tensors)
+
+
+__all__ = ["NougatImageProcessor"]

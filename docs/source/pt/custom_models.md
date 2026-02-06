@@ -37,17 +37,17 @@ configurações nos dará os diferentes tipos de ResNets que são possíveis. Em
 após verificar a validade de alguns deles.
 
 ```python
-from transformers import PretrainedConfig
+from transformers import PreTrainedConfig
 from typing import List
 
 
-class ResnetConfig(PretrainedConfig):
+class ResnetConfig(PreTrainedConfig):
     model_type = "resnet"
 
     def __init__(
         self,
         block_type="bottleneck",
-        layers: List[int] = [3, 4, 6, 3],
+        layers: list[int] = [3, 4, 6, 3],
         num_classes: int = 1000,
         input_channels: int = 3,
         cardinality: int = 1,
@@ -75,12 +75,12 @@ class ResnetConfig(PretrainedConfig):
 ```
 
 As três coisas importantes a serem lembradas ao escrever sua própria configuração são:
-- você tem que herdar de `PretrainedConfig`,
-- o `__init__` do seu `PretrainedConfig` deve aceitar quaisquer kwargs,
+- você tem que herdar de `PreTrainedConfig`,
+- o `__init__` do seu `PreTrainedConfig` deve aceitar quaisquer kwargs,
 - esses `kwargs` precisam ser passados para a superclasse `__init__`.
 
 A herança é para garantir que você obtenha todas as funcionalidades da biblioteca 🤗 Transformers, enquanto as outras duas
-restrições vêm do fato de um `PretrainedConfig` ter mais campos do que os que você está configurando. Ao recarregar um
+restrições vêm do fato de um `PreTrainedConfig` ter mais campos do que os que você está configurando. Ao recarregar um
 config com o método `from_pretrained`, esses campos precisam ser aceitos pelo seu config e então enviados para a
 superclasse.
 
@@ -102,7 +102,7 @@ método `from_pretrained`:
 resnet50d_config = ResnetConfig.from_pretrained("custom-resnet")
 ```
 
-Você também pode usar qualquer outro método da classe [`PretrainedConfig`], como [`~PretrainedConfig.push_to_hub`] para
+Você também pode usar qualquer outro método da classe [`PreTrainedConfig`], como [`~PreTrainedConfig.push_to_hub`] para
 carregar diretamente sua configuração para o Hub.
 
 ## Escrevendo um modelo customizado
@@ -173,7 +173,7 @@ class ResnetModelForImageClassification(PreTrainedModel):
     def forward(self, tensor, labels=None):
         logits = self.model(tensor)
         if labels is not None:
-            loss = torch.nn.cross_entropy(logits, labels)
+            loss = torch.nn.functional.cross_entropy(logits, labels)
             return {"loss": loss, "logits": logits}
         return {"logits": logits}
 ```
@@ -284,7 +284,7 @@ resnet50d.model.load_state_dict(pretrained_model.state_dict())
 Agora para enviar o modelo para o Hub, certifique-se de estar logado. Ou execute no seu terminal:
 
 ```bash
-huggingface-cli login
+hf auth login
 ```
 
 ou a partir do notebook:

@@ -42,7 +42,7 @@ rendered properly in your Markdown viewer.
 ```py
 from transformers import AutoModel
 
-model = AutoModel.from_pretrained("bert-base-cased")
+model = AutoModel.from_pretrained("google-bert/bert-base-cased")
 ```
 
 如果您使用 [`PreTrainedModel.save_pretrained`](模型预训练保存) 进行保存，您将得到一个新的文件夹，其中包含两个文件：模型的配置和权重：
@@ -66,7 +66,7 @@ model = AutoModel.from_pretrained("bert-base-cased")
 ['config.json', 'pytorch_model-00001-of-00003.bin', 'pytorch_model-00002-of-00003.bin', 'pytorch_model-00003-of-00003.bin', 'pytorch_model.bin.index.json']
 ```
 
-在模型配置文件最上方，我们可以看到三个不同的权重文件，以及一个`index.json`索引文件。这样的`checkpoint`可以使用`[~PreTrainedModel.from_pretrained]`方法完全重新加载：
+在模型配置文件最上方，我们可以看到三个不同的权重文件，以及一个`index.json`索引文件。这样的`checkpoint`可以使用[`~PreTrainedModel.from_pretrained`]方法完全重新加载：
 
 ```py
 >>> with tempfile.TemporaryDirectory() as tmp_dir:
@@ -105,11 +105,11 @@ dict_keys(['metadata', 'weight_map'])
  ...
 ```
 
-如果您想直接在模型内部加载这样的分片`checkpoint`，而不使用 [`PreTrainedModel.from_pretrained`](就像您会为完整`checkpoint`执行 `model.load_state_dict()` 一样)，您应该使用 [`modeling_utils.load_sharded_checkpoint`]：
+如果您想直接在模型内部加载这样的分片`checkpoint`，而不使用 [`PreTrainedModel.from_pretrained`](就像您会为完整`checkpoint`执行 `model.load_state_dict()` 一样)，您应该使用 [`trainer_utils.load_sharded_checkpoint`]：
 
 
 ```py
->>> from transformers.modeling_utils import load_sharded_checkpoint
+>>> from transformers.trainer_utils import load_sharded_checkpoint
 
 >>> with tempfile.TemporaryDirectory() as tmp_dir:
 ...     model.save_pretrained(tmp_dir, max_shard_size="200MB")

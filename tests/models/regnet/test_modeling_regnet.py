@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2022 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,14 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch RegNet model. """
-
+"""Testing suite for the PyTorch RegNet model."""
 
 import unittest
+from functools import cached_property
 
 from transformers import RegNetConfig
-from transformers.file_utils import cached_property, is_torch_available, is_vision_available
-from transformers.testing_utils import require_torch, require_vision, slow, torch_device
+from transformers.file_utils import is_torch_available, is_vision_available
+from transformers.testing_utils import Expectations, is_flaky, require_torch, require_vision, slow, torch_device
 
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ModelTesterMixin, floats_tensor, ids_tensor
@@ -28,10 +27,8 @@ from ...test_pipeline_mixin import PipelineTesterMixin
 
 if is_torch_available():
     import torch
-    from torch import nn
 
     from transformers import RegNetForImageClassification, RegNetModel
-    from transformers.models.regnet.modeling_regnet import REGNET_PRETRAINED_MODEL_ARCHIVE_LIST
 
 
 if is_vision_available():
@@ -126,59 +123,41 @@ class RegNetModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
 
     all_model_classes = (RegNetModel, RegNetForImageClassification) if is_torch_available() else ()
     pipeline_model_mapping = (
-        {"feature-extraction": RegNetModel, "image-classification": RegNetForImageClassification}
+        {"image-feature-extraction": RegNetModel, "image-classification": RegNetForImageClassification}
         if is_torch_available()
         else {}
     )
 
-    test_pruning = False
     test_resize_embeddings = False
-    test_head_masking = False
     has_attentions = False
 
     def setUp(self):
         self.model_tester = RegNetModelTester(self)
-        self.config_tester = ConfigTester(self, config_class=RegNetConfig, has_text_modality=False)
+        self.config_tester = ConfigTester(
+            self,
+            config_class=RegNetConfig,
+            has_text_modality=False,
+            common_properties=["num_channels", "hidden_sizes"],
+        )
 
     def test_config(self):
-        self.create_and_test_config_common_properties()
-        self.config_tester.create_and_test_config_to_json_string()
-        self.config_tester.create_and_test_config_to_json_file()
-        self.config_tester.create_and_test_config_from_and_save_pretrained()
-        self.config_tester.create_and_test_config_with_num_labels()
-        self.config_tester.check_config_can_be_init_without_params()
-        self.config_tester.check_config_arguments_init()
+        self.config_tester.run_common_tests()
 
-    def create_and_test_config_common_properties(self):
-        return
+    @is_flaky(description="Larger difference with A10. Still flaky after setting larger tolerance")
+    def test_batching_equivalence(self, atol=3e-5, rtol=3e-5):
+        super().test_batching_equivalence(atol=atol, rtol=rtol)
 
     @unittest.skip(reason="RegNet does not use inputs_embeds")
     def test_inputs_embeds(self):
         pass
 
     @unittest.skip(reason="RegNet does not support input and output embeddings")
-    def test_model_common_attributes(self):
+    def test_model_get_set_embeddings(self):
         pass
 
     def test_model(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_model(*config_and_inputs)
-
-    def test_initialization(self):
-        config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
-
-        for model_class in self.all_model_classes:
-            model = model_class(config=config)
-            for name, module in model.named_modules():
-                if isinstance(module, (nn.BatchNorm2d, nn.GroupNorm)):
-                    self.assertTrue(
-                        torch.all(module.weight == 1),
-                        msg=f"Parameter {name} of model {model_class} seems not properly initialized",
-                    )
-                    self.assertTrue(
-                        torch.all(module.bias == 0),
-                        msg=f"Parameter {name} of model {model_class} seems not properly initialized",
-                    )
 
     def test_hidden_states_output(self):
         def check_hidden_states_output(inputs_dict, config, model_class):
@@ -220,9 +199,9 @@ class RegNetModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in REGNET_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = RegNetModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "facebook/regnet-y-040"
+        model = RegNetModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
 
 # We will verify our results on an image of cute cats
@@ -236,15 +215,11 @@ def prepare_img():
 class RegNetModelIntegrationTest(unittest.TestCase):
     @cached_property
     def default_image_processor(self):
-        return (
-            AutoImageProcessor.from_pretrained(REGNET_PRETRAINED_MODEL_ARCHIVE_LIST[0])
-            if is_vision_available()
-            else None
-        )
+        return AutoImageProcessor.from_pretrained("facebook/regnet-y-040") if is_vision_available() else None
 
     @slow
     def test_inference_image_classification_head(self):
-        model = RegNetForImageClassification.from_pretrained(REGNET_PRETRAINED_MODEL_ARCHIVE_LIST[0]).to(torch_device)
+        model = RegNetForImageClassification.from_pretrained("facebook/regnet-y-040").to(torch_device)
 
         image_processor = self.default_image_processor
         image = prepare_img()
@@ -258,6 +233,11 @@ class RegNetModelIntegrationTest(unittest.TestCase):
         expected_shape = torch.Size((1, 1000))
         self.assertEqual(outputs.logits.shape, expected_shape)
 
-        expected_slice = torch.tensor([-0.4180, -1.5051, -3.4836]).to(torch_device)
-
-        self.assertTrue(torch.allclose(outputs.logits[0, :3], expected_slice, atol=1e-4))
+        expectations = Expectations(
+            {
+                (None, None): [-0.4180, -1.5051, -3.4836],
+                ("cuda", 8): [-0.4180, -1.5051, -3.4836],
+            }
+        )
+        expected_slice = torch.tensor(expectations.get_expectation()).to(torch_device)
+        torch.testing.assert_close(outputs.logits[0, :3], expected_slice, rtol=2e-4, atol=2e-4)

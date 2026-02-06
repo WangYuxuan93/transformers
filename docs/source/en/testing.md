@@ -16,7 +16,6 @@ rendered properly in your Markdown viewer.
 
 # Testing
 
-
 Let's take a look at how 🤗 Transformers models are tested and how you can write new tests and improve the existing ones.
 
 There are 2 test suites in the repository:
@@ -51,11 +50,7 @@ RUN_SLOW=1 pytest examples/
 
    The results can be observed [here](https://github.com/huggingface/transformers/actions).
 
-
-
 ## Running tests
-
-
 
 ### Choosing which tests to run
 
@@ -88,8 +83,6 @@ which tells pytest to:
 - ensure that all tests from the same file will be run by the same test process
 - do not capture output
 - run in verbose mode
-
-
 
 ### Getting the list of all tests
 
@@ -168,7 +161,7 @@ pytest -k "ada and not adam" tests/test_optimization.py
 For example to run both `test_adafactor` and `test_adam_w` you can use:
 
 ```bash
-pytest -k "test_adam_w or test_adam_w" tests/test_optimization.py
+pytest -k "test_adafactor or test_adam_w" tests/test_optimization.py
 ```
 
 Note that we use `or` here, since we want either of the keywords to match to include both.
@@ -184,16 +177,15 @@ pytest -k "test and ada" tests/test_optimization.py
 Sometimes you need to run `accelerate` tests on your models. For that you can just add `-m accelerate_tests` to your command, if let's say you want to run these tests on `OPT` run:
 
 ```bash
-RUN_SLOW=1 pytest -m accelerate_tests tests/models/opt/test_modeling_opt.py 
+RUN_SLOW=1 pytest -m accelerate_tests tests/models/opt/test_modeling_opt.py
 ```
 
+### Run documentation tests
 
-### Run documentation tests 
+In order to test whether the documentation examples are correct, you should check that the `doctests` are passing.
+As an example, let's use [`WhisperModel.forward`'s docstring](https://github.com/huggingface/transformers/blob/1124d95dbb1a3512d3e80791d73d0f541d1d7e9f/src/transformers/models/whisper/modeling_whisper.py#L1591-L1609)
 
-In order to test whether the documentation examples are correct, you should check that the `doctests` are passing. 
-As an example, let's use [`WhisperModel.forward`'s docstring](https://github.com/huggingface/transformers/blob/main/src/transformers/models/whisper/modeling_whisper.py#L1017-L1035): 
-
-```python 
+```python
 r"""
 Returns:
 
@@ -216,11 +208,13 @@ Example:
 
 ```
 
-Just run the following line to automatically test every docstring example in the desired file: 
-```bash 
+Just run the following line to automatically test every docstring example in the desired file:
+
+```bash
 pytest --doctest-modules <path_to_file_or_dir>
 ```
-If the file has a markdown extention, you should add the `--doctest-glob="*.md"` argument.
+
+If the file has a markdown extension, you should add the `--doctest-glob="*.md"` argument.
 
 ### Run only modified tests
 
@@ -266,11 +260,9 @@ or `pytest.ini`/``tox.ini`` files:
 looponfailroots = transformers tests
 ```
 
-This would lead to only looking for file changes in the respective directories, specified relatively to the ini-file’s
-directory.
+This would lead to only looking for file changes in the respective directories, specified relatively to the ini-file's directory.
 
 [pytest-watch](https://github.com/joeyespo/pytest-watch) is an alternative implementation of this functionality.
-
 
 ### Skip a test module
 
@@ -307,7 +299,6 @@ It's good to repeat the tests several times, in sequence, randomly, or in sets, 
 inter-dependency and state-related bugs (tear down). And the straightforward multiple repetition is just good to detect
 some problems that get uncovered by randomness of DL.
 
-
 #### Repeat tests
 
 - [pytest-flakefinder](https://github.com/dropbox/pytest-flakefinder):
@@ -336,14 +327,13 @@ There is another plugin `pytest-repeat`, but it doesn't work with `unittest`.
 
 #### Run tests in a random order
 
+The transformers project uses [`pytest-random-order`](https://github.com/jbasko/pytest-random-order) to randomize test execution order. This is included in the dev dependencies:
+
 ```bash
 pip install pytest-random-order
 ```
 
-Important: the presence of `pytest-random-order` will automatically randomize tests, no configuration change or
-command line options is required.
-
-As explained earlier this allows detection of coupled tests - where one test's state affects the state of another. When
+Test randomization allows detection of coupled tests - where one test's state affects the state of another. When
 `pytest-random-order` is installed it will print the random seed it used for that session, e.g:
 
 ```bash
@@ -353,36 +343,41 @@ Using --random-order-bucket=module
 Using --random-order-seed=573663
 ```
 
-So that if the given particular sequence fails, you can reproduce it by adding that exact seed, e.g.:
+**Bucket Modes:** pytest-random-order supports different bucket modes that control the granularity of randomization:
+- `module` (default in this project): Randomizes tests within each file, but keeps files in consistent order. Works well with `--dist=loadfile` for parallel execution.
+- `class`: Randomizes within each test class
+- `package`: Randomizes within each package
+- `global`: Randomizes all tests globally
+
+**In CircleCI:** Tests automatically use a deterministic seed based on the build number (`CIRCLE_BUILD_NUM`), ensuring:
+- Different test order for each build/PR (catches order dependencies over time)
+- Same order across all parallel containers in the same build (reproducible failures)
+- Ability to reproduce failures locally
+- bucket=module mode ensures predictable load balancing with pytest-xdist
+
+**Locally with `make test`:** Tests use `--random-order-bucket=module` with a random seed each run.
+
+**Reproducing a specific test order:** If a particular sequence fails in CI, you can reproduce it locally using the build number:
 
 ```bash
-pytest --random-order-seed=573663
-[...]
-Using --random-order-bucket=module
-Using --random-order-seed=573663
+pytest --random-order-bucket=module --random-order-seed=12345
 ```
 
-It will only reproduce the exact order if you use the exact same list of tests (or no list at all). Once you start to
-manually narrowing down the list you can no longer rely on the seed, but have to list them manually in the exact order
-they failed and tell pytest to not randomize them instead using `--random-order-bucket=none`, e.g.:
+The seed can be found in the CircleCI build environment variables or test output.
 
-```bash
-pytest --random-order-bucket=none tests/test_a.py tests/test_c.py tests/test_b.py
-```
-
-To disable the shuffling for all tests:
+**To disable randomization** for a single run:
 
 ```bash
 pytest --random-order-bucket=none
 ```
 
-By default `--random-order-bucket=module` is implied, which will shuffle the files on the module levels. It can also
-shuffle on `class`, `package`, `global` and `none` levels. For the complete details please see its
-[documentation](https://github.com/jbasko/pytest-random-order).
+Or set a fixed seed:
 
-Another randomization alternative is: [`pytest-randomly`](https://github.com/pytest-dev/pytest-randomly). This
-module has a very similar functionality/interface, but it doesn't have the bucket modes available in
-`pytest-random-order`. It has the same problem of imposing itself once installed.
+```bash
+pytest --random-order-seed=0
+```
+
+**Alternative:** [`pytest-randomly`](https://github.com/pytest-dev/pytest-randomly) is another option that also sets random seeds in test code (random.seed, numpy.random.seed), but lacks bucket modes for controlling randomization granularity.
 
 ### Look and feel variations
 
@@ -402,8 +397,6 @@ pytest -p no:sugar
 ```
 
 or uninstall it.
-
-
 
 #### Report each sub-test name and its progress
 
@@ -428,7 +421,7 @@ pytest --instafail
 
 ### To GPU or not to GPU
 
-On a GPU-enabled setup, to test in CPU-only mode add `CUDA_VISIBLE_DEVICES=""`:
+On a GPU-enabled setup, to test in CPU-only mode add `CUDA_VISIBLE_DEVICES=""` for CUDA GPUs:
 
 ```bash
 CUDA_VISIBLE_DEVICES="" pytest tests/utils/test_logging.py
@@ -441,42 +434,35 @@ second gpu if you have gpus `0` and `1`, you can run:
 CUDA_VISIBLE_DEVICES="1" pytest tests/utils/test_logging.py
 ```
 
+For Intel GPUs, use `ZE_AFFINITY_MASK` instead of `CUDA_VISIBLE_DEVICES` in the above example.
+
 This is handy when you want to run different tasks on different GPUs.
 
 Some tests must be run on CPU-only, others on either CPU or GPU or TPU, yet others on multiple-GPUs. The following skip
-decorators are used to set the requirements of tests CPU/GPU/TPU-wise:
+decorators are used to set the requirements of tests CPU/GPU/XPU/TPU-wise:
 
 - `require_torch` - this test will run only under torch
 - `require_torch_gpu` - as `require_torch` plus requires at least 1 GPU
 - `require_torch_multi_gpu` - as `require_torch` plus requires at least 2 GPUs
 - `require_torch_non_multi_gpu` - as `require_torch` plus requires 0 or 1 GPUs
 - `require_torch_up_to_2_gpus` - as `require_torch` plus requires 0 or 1 or 2 GPUs
-- `require_torch_tpu` - as `require_torch` plus requires at least 1 TPU
+- `require_torch_xla` - as `require_torch` plus requires at least 1 TPU
 
 Let's depict the GPU requirements in the following table:
 
-
 | n gpus | decorator                      |
-|--------+--------------------------------|
+|--------|--------------------------------|
 | `>= 0` | `@require_torch`               |
 | `>= 1` | `@require_torch_gpu`           |
 | `>= 2` | `@require_torch_multi_gpu`     |
 | `< 2`  | `@require_torch_non_multi_gpu` |
 | `< 3`  | `@require_torch_up_to_2_gpus`  |
 
-
 For example, here is a test that must be run only when there are 2 or more GPUs available and pytorch is installed:
 
 ```python no-style
 @require_torch_multi_gpu
 def test_example_with_multi_gpu():
-```
-
-If a test requires `tensorflow` use the `require_tf` decorator. For example:
-
-```python no-style
-@require_tf
-def test_tf_thing_with_tensorflow():
 ```
 
 These decorators can be stacked. For example, if a test is slow and requires at least one GPU under pytorch, here is
@@ -507,7 +493,7 @@ Inside tests:
 ```python
 from transformers.testing_utils import get_gpu_count
 
-n_gpu = get_gpu_count()  # works with torch and tf
+n_gpu = get_gpu_count()
 ```
 
 ### Testing with a specific PyTorch backend or device
@@ -518,21 +504,22 @@ To run the test suite on a specific torch device add `TRANSFORMERS_TEST_DEVICE="
 TRANSFORMERS_TEST_DEVICE="cpu" pytest tests/utils/test_logging.py
 ```
 
-This variable is useful for testing custom or less common PyTorch backends such as `mps`. It can also be used to achieve the same effect as `CUDA_VISIBLE_DEVICES` by targeting specific GPUs or testing in CPU-only mode.
+This variable is useful for testing custom or less common PyTorch backends such as `mps`, `xpu` or `npu`. It can also be used to achieve the same effect as `CUDA_VISIBLE_DEVICES` by targeting specific GPUs or testing in CPU-only mode.
 
 Certain devices will require an additional import after importing `torch` for the first time. This can be specified using the environment variable `TRANSFORMERS_TEST_BACKEND`:
 
 ```bash
 TRANSFORMERS_TEST_BACKEND="torch_npu" pytest tests/utils/test_logging.py
 ```
-Alternative backends may also require the replacement of device-specific functions. For example `torch.cuda.manual_seed` may need to be replaced with a device-specific seed setter like `torch.npu.manual_seed` to correctly set a random seed on the device. To specify a new backend with backend-specific device functions when running the test suite, create a Python device specification file in the format:
 
-```
+Alternative backends may also require the replacement of device-specific functions. For example `torch.cuda.manual_seed` may need to be replaced with a device-specific seed setter like `torch.npu.manual_seed` or `torch.xpu.manual_seed` to correctly set a random seed on the device. To specify a new backend with backend-specific device functions when running the test suite, create a Python device specification file `spec.py` in the format:
+
+```python
 import torch
 import torch_npu
 # !! Further additional imports can be added here !!
 
-# Specify the device name (eg. 'cuda', 'cpu', 'npu')
+# Specify the device name (eg. 'cuda', 'cpu', 'npu', 'xpu', 'mps')
 DEVICE_NAME = 'npu'
 
 # Specify device-specific backends to dispatch to.
@@ -541,10 +528,10 @@ MANUAL_SEED_FN = torch.npu.manual_seed
 EMPTY_CACHE_FN = torch.npu.empty_cache
 DEVICE_COUNT_FN = torch.npu.device_count
 ```
-This format also allows for specification of any additional imports required. To use this file to replace equivalent methods in the test suite, set the environment variable `TRANSFORMERS_TEST_DEVICE_SPEC` to the path of the spec file.
+
+This format also allows for specification of any additional imports required. To use this file to replace equivalent methods in the test suite, set the environment variable `TRANSFORMERS_TEST_DEVICE_SPEC` to the path of the spec file, e.g. `TRANSFORMERS_TEST_DEVICE_SPEC=spec.py`.
 
 Currently, only `MANUAL_SEED_FN`, `EMPTY_CACHE_FN` and `DEVICE_COUNT_FN` are supported for device-specific dispatch.
-
 
 ### Distributed training
 
@@ -579,7 +566,7 @@ pytest -s tests/utils/test_logging.py
 To send test results to JUnit format output:
 
 ```bash
-py.test tests --junitxml=result.xml
+pytest tests --junitxml=result.xml
 ```
 
 ### Color control
@@ -615,7 +602,6 @@ can be used.
 You can read [here](https://docs.pytest.org/en/stable/unittest.html) which features are supported, but the important
 thing to remember is that most `pytest` fixtures don't work. Neither parametrization, but we use the module
 `parameterized` that works in a similar way.
-
 
 ### Parametrization
 
@@ -724,8 +710,6 @@ pytest test_this2.py::test_floor[negative--1.5--2.0] test_this2.py::test_floor[i
 ```
 
 as in the previous example.
-
-
 
 ### Files and directories
 
@@ -849,7 +833,6 @@ otherwise.
 If you need to temporary override `sys.path` to import from another test for example, you can use the
 `ExtendSysPath` context manager. Example:
 
-
 ```python
 import os
 from transformers.testing_utils import ExtendSysPath
@@ -866,13 +849,13 @@ commit it to the main repository we need make sure it's skipped during `make tes
 
 Methods:
 
--  A **skip** means that you expect your test to pass only if some conditions are met, otherwise pytest should skip
+- A **skip** means that you expect your test to pass only if some conditions are met, otherwise pytest should skip
   running the test altogether. Common examples are skipping windows-only tests on non-windows platforms, or skipping
   tests that depend on an external resource which is not available at the moment (for example a database).
 
--  A **xfail** means that you expect a test to fail for some reason. A common example is a test for a feature not yet
+- A **xfail** means that you expect a test to fail for some reason. A common example is a test for a feature not yet
   implemented, or a bug not yet fixed. When a test passes despite being expected to fail (marked with
-  pytest.mark.xfail), it’s an xpass and will be reported in the test summary.
+  pytest.mark.xfail), it's an xpass and will be reported in the test summary.
 
 One of the important differences between the two is that `skip` doesn't run the test, and `xfail` does. So if the
 code that's buggy causes some bad state that will affect other tests, do not use `xfail`.
@@ -882,7 +865,7 @@ code that's buggy causes some bad state that will affect other tests, do not use
 - Here is how to skip whole test unconditionally:
 
 ```python no-style
-@unittest.skip("this bug needs to be fixed")
+@unittest.skip(reason="this bug needs to be fixed")
 def test_feature_x():
 ```
 
@@ -898,7 +881,6 @@ or the `xfail` way:
 @pytest.mark.xfail
 def test_feature_x():
 ```
-
 
 Here's how to skip a test based on internal checks within the test:
 
@@ -930,7 +912,7 @@ def test_feature_x():
 docutils = pytest.importorskip("docutils", minversion="0.3")
 ```
 
--  Skip a test based on a condition:
+- Skip a test based on a condition:
 
 ```python no-style
 @pytest.mark.skipif(sys.version_info < (3,6), reason="requires python3.6 or higher")
@@ -976,7 +958,7 @@ Some decorators like `@parameterized` rewrite test names, therefore `@slow` and 
 `@require_*` have to be listed last for them to work correctly. Here is an example of the correct usage:
 
 ```python no-style
-@parameteriz ed.expand(...)
+@parameterized.expand(...)
 @slow
 def test_integration_foo():
 ```
@@ -1012,7 +994,7 @@ slow models to do qualitative testing. To see the use of these simply look for *
 grep tiny tests examples
 ```
 
-Here is a an example of a [script](https://github.com/huggingface/transformers/tree/main/scripts/fsmt/fsmt-make-tiny-model.py) that created the tiny model
+Here is an example of a [script](https://github.com/huggingface/transformers/tree/main/scripts/fsmt/fsmt-make-tiny-model.py) that created the tiny model
 [stas/tiny-wmt19-en-de](https://huggingface.co/stas/tiny-wmt19-en-de). You can easily adjust it to your specific
 model's architecture.
 
@@ -1023,7 +1005,6 @@ execution speed report in CI logs instead (the output of `pytest --durations=0 t
 That report is also useful to find slow outliers that aren't marked as such, or which need to be re-written to be fast.
 If you notice that the test suite starts getting slow on CI, the top listing of this report will show the slowest
 tests.
-
 
 ### Testing the stdout/stderr output
 
@@ -1147,7 +1128,6 @@ print(cs.err, cs.out)
 Also, to aid debugging test issues, by default these context managers automatically replay the captured streams on exit
 from the context.
 
-
 ### Capturing logger stream
 
 If you need to validate the output of a logger, you can use `CaptureLogger`:
@@ -1199,7 +1179,6 @@ called if anything.
 
 This helper method creates a copy of the `os.environ` object, so the original remains intact.
 
-
 ### Getting reproducible results
 
 In some situations you may want to remove randomness for your tests. To get identical reproducible results set, you
@@ -1225,9 +1204,6 @@ if torch.cuda.is_available():
 import numpy as np
 
 np.random.seed(seed)
-
-# tf RNG
-tf.random.set_seed(seed)
 ```
 
 ### Debugging tests
@@ -1249,9 +1225,6 @@ To trigger a self-push workflow CI job, you must:
 3. Create a PR from this branch.
 4. Then you can see the job appear [here](https://github.com/huggingface/transformers/actions/workflows/self-push.yml). It may not run right away if there
    is a backlog.
-
-
-
 
 ## Testing Experimental CI Features
 
@@ -1312,3 +1285,19 @@ You can vote for this feature and see where it is at these CI-specific threads:
 
 - [Github Actions:](https://github.com/actions/toolkit/issues/399)
 - [CircleCI:](https://ideas.circleci.com/ideas/CCI-I-344)
+
+## DeepSpeed integration
+
+For a PR that involves the DeepSpeed integration, keep in mind our CircleCI PR CI setup doesn't have GPUs. Tests requiring GPUs are run on a different CI nightly. This means if you get a passing CI report in your PR, it doesn't mean the DeepSpeed tests pass.
+
+To run DeepSpeed tests:
+
+```bash
+RUN_SLOW=1 pytest tests/deepspeed/test_deepspeed.py
+```
+
+Any changes to the modeling or PyTorch examples code requires running the model zoo tests as well.
+
+```bash
+RUN_SLOW=1 pytest tests/deepspeed
+```
