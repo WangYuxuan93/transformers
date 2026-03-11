@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from datasets import load_dataset
 from torchvision.transforms import Compose, Lambda, Normalize, RandomHorizontalFlip, RandomResizedCrop, ToTensor
 
@@ -38,6 +40,7 @@ from transformers import (
     MODEL_FOR_MASKED_IMAGE_MODELING_MAPPING,
     AutoConfig,
     AutoImageProcessor,
+    AutoModel,
     AutoModelForMaskedImageModeling,
     HfArgumentParser,
     Trainer,
@@ -198,6 +201,14 @@ class ModelArguments:
         default=None,
         metadata={"help": "Stride to use for the encoder."},
     )
+    teacher_model_name_or_path: str | None = field(
+        default=None,
+        metadata={"help": "Path or hub name of a frozen teacher model (ViTModel) for feature distillation. If None, distillation is disabled."},
+    )
+    lambda_distill: float = field(
+        default=0.01,
+        metadata={"help": "Weight of the feature distillation loss (lambda * distill_loss added to recon_loss)."},
+    )
 
 
 class MaskGenerator:
@@ -240,6 +251,62 @@ def collate_fn(examples):
     pixel_values = torch.stack([example["pixel_values"] for example in examples])
     mask = torch.stack([example["mask"] for example in examples])
     return {"pixel_values": pixel_values, "bool_masked_pos": mask}
+
+
+class MIMWithDistill(nn.Module):
+    """
+    Wraps a MaskedImageModeling student with an optional frozen teacher for
+    feature distillation.  When teacher_model is None the module behaves
+    exactly like the plain student.
+
+    Total loss = recon_loss + lambda_distill * distill_loss
+
+    distill_loss = mean cosine-distance between the student CLS token (last
+    encoder layer, index 0) and the teacher CLS token computed on the same
+    full (unmasked) image.
+    """
+
+    def __init__(self, student_model, teacher_model=None, lambda_distill=0.01):
+        super().__init__()
+        self.student = student_model
+        self.teacher = teacher_model          # None  →  distillation disabled
+        self.lambda_distill = lambda_distill
+
+    def train(self, mode=True):
+        """Keep teacher permanently in eval mode regardless of Trainer calls."""
+        super().train(mode)
+        if self.teacher is not None:
+            self.teacher.eval()
+        return self
+
+    def forward(self, pixel_values, bool_masked_pos=None, **kwargs):
+        # ── student forward ──────────────────────────────────────────────────
+        # output_hidden_states=True so we can retrieve the last-layer CLS token
+        student_out = self.student(
+            pixel_values,
+            bool_masked_pos=bool_masked_pos,
+            output_hidden_states=True,
+            **kwargs,
+        )
+
+        if self.teacher is None or bool_masked_pos is None:
+            return student_out
+
+        # ── teacher forward (no grad, full unmasked image) ───────────────────
+        with torch.no_grad():
+            teacher_out = self.teacher(pixel_values)
+
+        # student: last hidden-state CLS token  [B, hidden_size]
+        student_cls = student_out.hidden_states[-1][:, 0, :]
+        # teacher: CLS token from last_hidden_state  [B, hidden_size]
+        teacher_cls = teacher_out.last_hidden_state[:, 0, :]
+
+        # cosine-distance loss: 0 = identical, 1 = orthogonal
+        distill_loss = (1.0 - F.cosine_similarity(student_cls, teacher_cls, dim=-1)).mean()
+
+        # combine losses; student_out.loss is the reconstruction L1 loss
+        student_out.loss = student_out.loss + self.lambda_distill * distill_loss
+        return student_out
 
 
 def main():
@@ -362,6 +429,22 @@ def main():
     else:
         logger.info("Training new model from scratch")
         model = AutoModelForMaskedImageModeling.from_config(config, trust_remote_code=model_args.trust_remote_code)
+
+    # load frozen teacher for feature distillation (optional)
+    teacher_model = None
+    if model_args.teacher_model_name_or_path is not None:
+        teacher_model = AutoModel.from_pretrained(
+            model_args.teacher_model_name_or_path,
+            cache_dir=model_args.cache_dir,
+            token=model_args.token,
+            trust_remote_code=model_args.trust_remote_code,
+        )
+        teacher_model.eval()
+        teacher_model.requires_grad_(False)
+        logger.info(f"Loaded frozen teacher model from {model_args.teacher_model_name_or_path}")
+
+    # wrap student (+ optional teacher) into the distillation module
+    model = MIMWithDistill(model, teacher_model=teacher_model, lambda_distill=model_args.lambda_distill)
 
     if training_args.do_train:
         column_names = ds["train"].column_names
