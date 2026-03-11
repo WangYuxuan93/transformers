@@ -44,6 +44,11 @@ on:
       pr_number:
         required: false
         type: string
+    outputs:
+      is_infrastructure_ok:
+        description: "Whether the CI infrastructure (slack reporting and failure checking) succeeded"
+        value: ${{ jobs.send_results.outputs.is_slack_reporting_job_ok == 'true' && jobs.check_new_failures.outputs.is_check_failures_ok == 'true' }}
+
 
 env:
   HF_HOME: /mnt/cache
@@ -444,7 +449,7 @@ jobs:
         working-directory: /transformers
         env:
           commit_sha: ${{ inputs.commit_sha || github.sha }}
-        run: git fetch && git checkout "$commit_sha"
+        run: git fetch origin "$commit_sha" && git checkout "$commit_sha"
 
       - name: Reinstall transformers in edit mode (remove the one installed during docker image build)
         working-directory: /transformers
