@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from datasets import load_dataset
@@ -209,6 +210,14 @@ class ModelArguments:
         default=0.01,
         metadata={"help": "Weight of the feature distillation loss (lambda * distill_loss added to recon_loss)."},
     )
+    freeze_encoder_layers: str | None = field(
+        default=None,
+        metadata={"help": "Comma-separated layer indices or ranges to freeze, e.g. '0,1,2' or '0-5'."},
+    )
+    freeze_patch_embed: bool = field(
+        default=False,
+        metadata={"help": "Whether to freeze the patch embedding projection weights."},
+    )
 
 
 class MaskGenerator:
@@ -261,9 +270,9 @@ class MIMWithDistill(nn.Module):
 
     Total loss = recon_loss + lambda_distill * distill_loss
 
-    distill_loss = mean cosine-distance between the student CLS token (last
-    encoder layer, index 0) and the teacher CLS token computed on the same
-    full (unmasked) image.
+    distill_loss = MSE between the projected student CLS token (last encoder
+    layer, index 0, passed through distill_proj) and the teacher CLS token
+    computed on the same full (unmasked) image (CLAY-style).
     """
 
     def __init__(self, student_model, teacher_model=None, lambda_distill=0.01):
@@ -271,6 +280,18 @@ class MIMWithDistill(nn.Module):
         self.student = student_model
         self.teacher = teacher_model          # None  →  distillation disabled
         self.lambda_distill = lambda_distill
+
+        # CLAY-style projector: map student CLS dim → teacher CLS dim before MSE
+        if teacher_model is not None:
+            student_dim = student_model.config.hidden_size
+            teacher_dim = teacher_model.config.hidden_size
+            self.distill_proj = nn.Linear(student_dim, teacher_dim, bias=False)
+        else:
+            self.distill_proj = None
+
+        # Per-step loss values written by forward(), read by MIMTrainer
+        self._last_recon_loss: torch.Tensor | None = None
+        self._last_distill_loss: torch.Tensor | None = None
 
     def train(self, mode=True):
         """Keep teacher permanently in eval mode regardless of Trainer calls."""
@@ -280,33 +301,108 @@ class MIMWithDistill(nn.Module):
         return self
 
     def forward(self, pixel_values, bool_masked_pos=None, **kwargs):
-        # ── student forward ──────────────────────────────────────────────────
-        # output_hidden_states=True so we can retrieve the last-layer CLS token
+        # ── student forward (masked) for reconstruction loss ─────────────────
         student_out = self.student(
             pixel_values,
             bool_masked_pos=bool_masked_pos,
-            output_hidden_states=True,
             **kwargs,
         )
 
         if self.teacher is None or bool_masked_pos is None:
+            self._last_recon_loss = student_out.loss.detach() if student_out.loss is not None else None
+            self._last_distill_loss = None
             return student_out
+
+        # ── student forward (unmasked) for distillation ───────────────────────
+        # Separate pass on the full image so the student CLS is computed under
+        # the same conditions as the teacher (no mask tokens in the input).
+        student_full_out = self.student(
+            pixel_values,
+            bool_masked_pos=None,
+            output_hidden_states=True,
+        )
+        # project student CLS to teacher's feature space (CLAY-style)
+        student_cls = self.distill_proj(student_full_out.hidden_states[-1][:, 0, :])
 
         # ── teacher forward (no grad, full unmasked image) ───────────────────
         with torch.no_grad():
             teacher_out = self.teacher(pixel_values)
-
-        # student: last hidden-state CLS token  [B, hidden_size]
-        student_cls = student_out.hidden_states[-1][:, 0, :]
-        # teacher: CLS token from last_hidden_state  [B, hidden_size]
         teacher_cls = teacher_out.last_hidden_state[:, 0, :]
 
-        # cosine-distance loss: 0 = identical, 1 = orthogonal
-        distill_loss = (1.0 - F.cosine_similarity(student_cls, teacher_cls, dim=-1)).mean()
+        # MSE loss in teacher's feature space (CLAY-style)
+        distill_loss = F.mse_loss(student_cls, teacher_cls)
+
+        # record individual losses for MIMTrainer logging
+        self._last_recon_loss = student_out.loss.detach()
+        self._last_distill_loss = distill_loss.detach()
 
         # combine losses; student_out.loss is the reconstruction L1 loss
         student_out.loss = student_out.loss + self.lambda_distill * distill_loss
         return student_out
+
+
+def apply_freeze(student_model, freeze_encoder_layers: str | None, freeze_patch_embed: bool):
+    """Freeze selected encoder layers and/or the patch embedding projection."""
+    if freeze_patch_embed:
+        for p in student_model.vit.embeddings.patch_embeddings.parameters():
+            p.requires_grad_(False)
+        logger.info("Frozen: patch embedding projection")
+
+    if freeze_encoder_layers:
+        indices: set[int] = set()
+        for part in freeze_encoder_layers.split(","):
+            part = part.strip()
+            if "-" in part:
+                start, end = part.split("-")
+                indices.update(range(int(start), int(end) + 1))
+            else:
+                indices.add(int(part))
+        for i in indices:
+            for p in student_model.vit.encoder.layer[i].parameters():
+                p.requires_grad_(False)
+        logger.info(f"Frozen encoder layers: {sorted(indices)}")
+
+
+class MIMTrainer(Trainer):
+    """Trainer that additionally logs recon_loss and distill_loss separately."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._recon_loss_sum = 0.0
+        self._distill_loss_sum = 0.0
+        self._loss_step_count = 0
+
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        outputs = model(**inputs)
+        loss = outputs.loss
+
+        # accumulate individual losses (unwrap DDP if needed)
+        unwrapped = model.module if hasattr(model, "module") else model
+        if unwrapped.training and getattr(unwrapped, "_last_recon_loss", None) is not None:
+            recon = unwrapped._last_recon_loss.float()
+            distill = unwrapped._last_distill_loss.float() if unwrapped._last_distill_loss is not None else recon.new_zeros(())
+            # gather across DDP ranks so logged values match the gathered total loss
+            if dist.is_available() and dist.is_initialized():
+                dist.all_reduce(recon, op=dist.ReduceOp.AVG)
+                dist.all_reduce(distill, op=dist.ReduceOp.AVG)
+            self._recon_loss_sum += recon.item()
+            self._distill_loss_sum += distill.item()
+            self._loss_step_count += 1
+
+        return (loss, outputs) if return_outputs else loss
+
+    def log(self, logs, start_time=None):
+        # inject per-component losses whenever the trainer logs the total loss
+        if "loss" in logs and self._loss_step_count > 0:
+            logs["recon_loss"] = round(self._recon_loss_sum / self._loss_step_count, 4)
+            logs["distill_loss"] = round(self._distill_loss_sum / self._loss_step_count, 4)
+            self._recon_loss_sum = 0.0
+            self._distill_loss_sum = 0.0
+            self._loss_step_count = 0
+        if start_time is not None:
+            super().log(logs, start_time)
+        else:
+            super().log(logs)
 
 
 def main():
@@ -443,6 +539,9 @@ def main():
         teacher_model.requires_grad_(False)
         logger.info(f"Loaded frozen teacher model from {model_args.teacher_model_name_or_path}")
 
+    # freeze selected student layers before wrapping
+    apply_freeze(model, model_args.freeze_encoder_layers, model_args.freeze_patch_embed)
+
     # wrap student (+ optional teacher) into the distillation module
     model = MIMWithDistill(model, teacher_model=teacher_model, lambda_distill=model_args.lambda_distill)
 
@@ -508,7 +607,7 @@ def main():
         ds["validation"].set_transform(preprocess_images)
 
     # Initialize our trainer
-    trainer = Trainer(
+    trainer = MIMTrainer(
         model=model,
         args=training_args,
         train_dataset=ds["train"] if training_args.do_train else None,
