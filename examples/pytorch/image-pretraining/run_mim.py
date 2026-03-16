@@ -321,15 +321,18 @@ class MIMWithDistill(nn.Module):
             bool_masked_pos=None,
             output_hidden_states=True,
         )
-        # project student CLS to teacher's feature space (CLAY-style)
-        student_cls = self.distill_proj(student_full_out.hidden_states[-1][:, 0, :])
+        # project student CLS to teacher's feature space, then L2-normalise
+        student_cls = F.normalize(
+            self.distill_proj(student_full_out.hidden_states[-1][:, 0, :]), dim=-1
+        )
 
         # ── teacher forward (no grad, full unmasked image) ───────────────────
         with torch.no_grad():
             teacher_out = self.teacher(pixel_values)
-        teacher_cls = teacher_out.last_hidden_state[:, 0, :]
+        # L2-normalise teacher CLS so MSE is scale-invariant
+        teacher_cls = F.normalize(teacher_out.last_hidden_state[:, 0, :], dim=-1)
 
-        # MSE loss in teacher's feature space (CLAY-style)
+        # MSE on unit-norm vectors: range [0, 4], equivalent to 2*(1 - cosine_sim)
         distill_loss = F.mse_loss(student_cls, teacher_cls)
 
         # record individual losses for MIMTrainer logging
