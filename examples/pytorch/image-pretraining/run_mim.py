@@ -262,6 +262,31 @@ def collate_fn(examples):
     return {"pixel_values": pixel_values, "bool_masked_pos": mask}
 
 
+def _encoder_output_dim(model) -> int:
+    """Return the actual channel dimension of the backbone's last hidden state.
+
+    ViT:  constant across all layers → config.hidden_size.
+    Swin: doubles at each patch-merging stage, so the final dim is
+          hidden_size * 2^(num_stages - 1).
+    """
+    cfg = model.config
+    if cfg.model_type in ("swin", "swin_v2"):
+        return cfg.hidden_size * (2 ** (len(cfg.depths) - 1))
+    return cfg.hidden_size
+
+
+def _pool_features(hidden_last: torch.Tensor, model_type: str) -> torch.Tensor:
+    """Extract a global feature vector from the last encoder hidden state.
+
+    ViT:  hidden_last is [B, num_patches+1, C]; token 0 is CLS.
+    Swin: hidden_last is [B, H*W, C] with no CLS token; use mean pooling.
+    """
+    if model_type in ("vit",):
+        return hidden_last[:, 0, :]   # CLS token
+    else:
+        return hidden_last.mean(dim=1)  # mean pool (Swin, etc.)
+
+
 class MIMWithDistill(nn.Module):
     """
     Wraps a MaskedImageModeling student with an optional frozen teacher for
@@ -270,9 +295,9 @@ class MIMWithDistill(nn.Module):
 
     Total loss = recon_loss + lambda_distill * distill_loss
 
-    distill_loss = MSE between the projected student CLS token (last encoder
-    layer, index 0, passed through distill_proj) and the teacher CLS token
-    computed on the same full (unmasked) image (CLAY-style).
+    distill_loss = MSE between the projected student global feature (CLS token
+    for ViT; mean-pooled last hidden state for Swin) and the corresponding
+    teacher feature computed on the same full (unmasked) image (CLAY-style).
     """
 
     def __init__(self, student_model, teacher_model=None, lambda_distill=0.01):
@@ -280,11 +305,15 @@ class MIMWithDistill(nn.Module):
         self.student = student_model
         self.teacher = teacher_model          # None  →  distillation disabled
         self.lambda_distill = lambda_distill
+        # cache model types so forward() and apply_freeze() know how to pool
+        self._student_model_type = student_model.config.model_type  # e.g. "vit", "swin"
+        self._teacher_model_type = teacher_model.config.model_type if teacher_model is not None else None
 
         # CLAY-style projector: map student CLS dim → teacher CLS dim before MSE
+        # Use _encoder_output_dim to handle Swin's stage-wise channel doubling.
         if teacher_model is not None:
-            student_dim = student_model.config.hidden_size
-            teacher_dim = teacher_model.config.hidden_size
+            student_dim = _encoder_output_dim(student_model)
+            teacher_dim = _encoder_output_dim(teacher_model)
             self.distill_proj = nn.Linear(student_dim, teacher_dim, bias=False)
         else:
             self.distill_proj = None
@@ -321,16 +350,20 @@ class MIMWithDistill(nn.Module):
             bool_masked_pos=None,
             output_hidden_states=True,
         )
-        # project student CLS to teacher's feature space, then L2-normalise
+        # project student global feature to teacher's feature space, then L2-normalise
+        # _pool_features handles CLS (ViT) vs mean-pool (Swin) automatically
         student_cls = F.normalize(
-            self.distill_proj(student_full_out.hidden_states[-1][:, 0, :]), dim=-1
+            self.distill_proj(_pool_features(student_full_out.hidden_states[-1], self._student_model_type)),
+            dim=-1,
         )
 
         # ── teacher forward (no grad, full unmasked image) ───────────────────
         with torch.no_grad():
             teacher_out = self.teacher(pixel_values)
-        # L2-normalise teacher CLS so MSE is scale-invariant
-        teacher_cls = F.normalize(teacher_out.last_hidden_state[:, 0, :], dim=-1)
+        # L2-normalise teacher global feature so MSE is scale-invariant
+        teacher_cls = F.normalize(
+            _pool_features(teacher_out.last_hidden_state, self._teacher_model_type), dim=-1
+        )
 
         # MSE on unit-norm vectors: range [0, 4], equivalent to 2*(1 - cosine_sim)
         distill_loss = F.mse_loss(student_cls, teacher_cls)
@@ -345,9 +378,25 @@ class MIMWithDistill(nn.Module):
 
 
 def apply_freeze(student_model, freeze_encoder_layers: str | None, freeze_patch_embed: bool):
-    """Freeze selected encoder layers and/or the patch embedding projection."""
+    """Freeze selected encoder layers and/or the patch embedding projection.
+
+    Supports ViT (backbone attr: ``vit``, layers: ``encoder.layer``) and
+    Swin (backbone attr: ``swin``, layers: ``encoder.layers`` = stages).
+    """
+    model_type = student_model.config.model_type
+
+    if model_type == "vit":
+        backbone = student_model.vit
+        encoder_layers = backbone.encoder.layer      # list of ViTLayer
+    elif model_type in ("swin", "swin_v2"):
+        backbone = student_model.swin
+        encoder_layers = backbone.encoder.layers     # list of SwinStage
+    else:
+        logger.warning(f"apply_freeze: unsupported model_type '{model_type}', skipping freeze.")
+        return
+
     if freeze_patch_embed:
-        for p in student_model.vit.embeddings.patch_embeddings.parameters():
+        for p in backbone.embeddings.patch_embeddings.parameters():
             p.requires_grad_(False)
         logger.info("Frozen: patch embedding projection")
 
@@ -361,9 +410,9 @@ def apply_freeze(student_model, freeze_encoder_layers: str | None, freeze_patch_
             else:
                 indices.add(int(part))
         for i in indices:
-            for p in student_model.vit.encoder.layer[i].parameters():
+            for p in encoder_layers[i].parameters():
                 p.requires_grad_(False)
-        logger.info(f"Frozen encoder layers: {sorted(indices)}")
+        logger.info(f"Frozen encoder layers/stages: {sorted(indices)}")
 
 
 class MIMTrainer(Trainer):
