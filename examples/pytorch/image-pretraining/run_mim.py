@@ -265,14 +265,11 @@ def collate_fn(examples):
 def _encoder_output_dim(model) -> int:
     """Return the actual channel dimension of the backbone's last hidden state.
 
-    ViT:  constant across all layers → config.hidden_size.
-    Swin: doubles at each patch-merging stage, so the final dim is
-          hidden_size * 2^(num_stages - 1).
+    For both ViT and Swin, HuggingFace stores the *final* hidden dimension in
+    config.hidden_size (Swin's hidden_size = embed_dim * 2^(num_stages-1) is
+    already pre-computed in the config), so we can simply return it directly.
     """
-    cfg = model.config
-    if cfg.model_type in ("swin", "swin_v2"):
-        return cfg.hidden_size * (2 ** (len(cfg.depths) - 1))
-    return cfg.hidden_size
+    return model.config.hidden_size
 
 
 def _pool_features(hidden_last: torch.Tensor, model_type: str) -> torch.Tensor:
