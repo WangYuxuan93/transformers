@@ -35,16 +35,18 @@ def extract(mask2former_name_or_path: str, out_dir: str, encoder_stride: int):
     )
     m2f.eval()
 
-    # 2. Locate the Swin backbone inside Mask2Former
-    #    path: model.pixel_level_module.encoder.model  (a SwinModel)
-    try:
-        swin_model = m2f.model.pixel_level_module.encoder.model
-    except AttributeError as e:
-        raise RuntimeError(
-            "Could not find the Swin backbone at "
-            "model.pixel_level_module.encoder.model – "
-            "is this really a Swin-based Mask2Former checkpoint?"
-        ) from e
+    # 2. Locate the Swin backbone inside Mask2Former.
+    #    Older transformers versions wrap it in a SwinModel at encoder.model;
+    #    newer versions use SwinBackbone directly at encoder (no .model child).
+    encoder = m2f.model.pixel_level_module.encoder
+    if hasattr(encoder, "model"):
+        # Old API: encoder is a wrapper, actual SwinModel at encoder.model
+        swin_model = encoder.model
+        logger.info("Detected old-style Mask2Former (encoder.model = SwinModel)")
+    else:
+        # New API: encoder IS the SwinBackbone
+        swin_model = encoder
+        logger.info("Detected new-style Mask2Former (encoder = SwinBackbone)")
 
     logger.info(
         f"Found Swin backbone: hidden_size={swin_model.config.hidden_size}, "
@@ -55,14 +57,23 @@ def extract(mask2former_name_or_path: str, out_dir: str, encoder_stride: int):
     # 3. Build a SwinForMaskedImageModeling with the same config.
     #    Only the MIM decoder head (a small pixel-shuffle conv) is randomly
     #    initialised; the encoder weights come from the Mask2Former backbone.
-    swin_config = swin_model.config
+    from transformers import SwinConfig
+    # SwinBackbone uses a different config class; convert to plain SwinConfig
+    swin_cfg_dict = swin_model.config.to_dict()
+    swin_cfg_dict.pop("model_type", None)
+    swin_config = SwinConfig(**{k: v for k, v in swin_cfg_dict.items()
+                                if k in SwinConfig().to_dict()})
     swin_config.encoder_stride = encoder_stride   # required by SwinForMaskedImageModeling
 
     mim_model = SwinForMaskedImageModeling(swin_config)
 
-    # 4. Copy backbone weights
+    # 4. Copy backbone weights.
+    #    SwinBackbone and SwinModel share the same sub-modules
+    #    (embeddings / encoder / layernorm), so their state-dict keys match.
+    backbone_sd = swin_model.state_dict()
+    # Filter out pooler if present (SwinModel has it, SwinBackbone may not)
     missing, unexpected = mim_model.swin.load_state_dict(
-        swin_model.state_dict(), strict=False
+        backbone_sd, strict=False
     )
     if missing:
         logger.warning(f"Missing keys when loading backbone: {missing[:10]}")
